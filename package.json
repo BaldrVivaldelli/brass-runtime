@@ -1,0 +1,19 @@
+{
+  "name": "brass-runetime",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "dev": "ts-node-dev src/examples/demo.ts",
+    "build": "tsc",
+    "start": "tsc && node dist/examples/fiberFinalizer.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "type": "commonjs",
+  "devDependencies": {
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.9.3"
+  }
+}
