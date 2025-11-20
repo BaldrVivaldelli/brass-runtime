@@ -1,6 +1,6 @@
-# 🛠️ brass-runtime — Mini runtime funcional al estilo ZIO en TypeScript
+# 🛠️ brass-ts — Mini runtime funcional al estilo ZIO en TypeScript
 
-**brass-runtime** es un runtime funcional, escrito en **TypeScript vanilla** y **sin usar Promises ni async/await** como primitiva principal de modelado.
+**brass-ts** es un runtime funcional inspirado en **ZIO 2**, escrito en **TypeScript vanilla** y **sin usar Promises ni async/await** como primitiva principal de modelado.
 
 El objetivo del proyecto es explorar cómo construir, desde cero, un sistema de:
 
@@ -21,7 +21,7 @@ Todo con un diseño **determinístico**, **pure FP**, y sin depender de `Promise
 
 ### 1. `Effect` sincrónico (núcleo funcional)
 
-En `brass-runtime`, un efecto puro se modela como:
+En `brass-ts`, un efecto puro se modela como:
 
 ```ts
 type Exit<E, A> =
@@ -48,7 +48,7 @@ Este núcleo no usa `Promise` ni `async/await`. Es **100% sincrónico y determin
 
 ### 2. `Async` — efectos asincrónicos sin Promises
 
-Para modelar operaciones asincrónicas, `brass-runtime` define un tipo de datos algebraico:
+Para modelar operaciones asincrónicas, `brass-ts` define un tipo de datos algebraico:
 
 ```ts
 type Async<R, E, A> =
@@ -136,9 +136,9 @@ Un scope:
 - rastrea sub-scopes,
 - mantiene una pila de finalizers (LIFO),
 - al cerrarse:
-  - interrumpe fibras hijas,
-  - cierra sub-scopes,
-  - ejecuta finalizers registrados.
+    - interrumpe fibras hijas,
+    - cierra sub-scopes,
+    - ejecuta finalizers registrados.
 
 Esto da **concurrencia estructurada** al estilo ZIO:
 si algo vive en un `Scope`, se limpia cuando el scope termina.
@@ -147,7 +147,7 @@ si algo vive en un `Scope`, se limpia cuando el scope termina.
 
 ### 6. Acquire / Release — Resource Safety
 
-Al estilo `ZIO.acquireRelease`, `brass-runtime` implementa:
+Al estilo `ZIO.acquireRelease`, `brass-ts` implementa:
 
 ```ts
 acquireRelease(
@@ -162,9 +162,9 @@ Semántica:
 - `acquire` corre dentro del scope,
 - si tiene éxito, registra un finalizer que hace `release(res, exitFinalDelScope)`,
 - el finalizer se ejecuta:
-  - si el scope cierra con éxito,
-  - si hay error,
-  - si hay interrupción/cancelación.
+    - si el scope cierra con éxito,
+    - si hay error,
+    - si hay interrupción/cancelación.
 
 **Garantiza cleanup de recursos** (archivos, sockets, conexiones, etc.) de forma estructurada.
 
@@ -199,7 +199,7 @@ Esto replica la semántica de **ZIO 2 structured concurrency**.
 
 ### 8. ZStream-like — Streams estructurados con backpressure
 
-`brass-runtime` incluye una base de **streams estructurados** inspirados en `ZStream`:
+`brass-ts` incluye una base de **streams estructurados** inspirados en `ZStream`:
 
 ```ts
 type Pull<R, E, A> = Async<R, Option<E>, A>;
@@ -241,32 +241,20 @@ y el scope del stream garantiza que todos los recursos/finalizers se limpien al 
 
 ## 📁 Estructura sugerida del proyecto
 
-Una posible organización de archivos para tu repo de **brass-runtime**:
+Una posible organización de archivos para tu repo de **brass-ts**:
 
 ```bash
 src/
-  option.ts            # Option, Some, None
-  effect.ts            # Effect síncrono
-  asyncEffect.ts       # Async ADT y combinadores
-  scheduler.ts         # Scheduler cooperativo
-  fiber.ts             # Runtime de fibras
-  scope.ts             # Scope estructurado
-  acquireRelease.ts    # acquireRelease sobre Async + Scope
-  concurrency.ts       # race, zipPar, collectAllPar
-  std.ts               # helpers como sleep, etc.
-
-  zstream/
-    stream.ts          # definición de ZStream y constructores
-    transforms.ts      # map, filter, fromResource, etc.
-    run.ts             # runCollect y runners
+  fibers/    
+  scheduler/    
+  stream/
+  types/
+    
 
 examples/
-  exampleEffect.ts
-  exampleFiber.ts
-  exampleScope.ts
-  exampleAcquireRelease.ts
-  exampleConcurrency.ts
-  exampleZStream.ts
+  demo.ts
+  fiberFinalizer.ts
+  resourceExample.ts
 ```
 
 ---
@@ -313,11 +301,11 @@ main();
 
 - Explorar el diseño de runtimes funcionales modernos (tipo ZIO) en TypeScript.
 - Entender y practicar:
-  - Efectos tipados (`R`, `E`, `A`),
-  - Concurrencia estructurada,
-  - Fibras,
-  - Scopes y finalizers,
-  - Streams con recursos seguros y backpressure.
+    - Efectos tipados (`R`, `E`, `A`),
+    - Concurrencia estructurada,
+    - Fibras,
+    - Scopes y finalizers,
+    - Streams con recursos seguros y backpressure.
 - Servir como base educativa y potencialmente como **runtime experimental**
   para proyectos de ejemplo, demos y pruebas de conceptos FP en TS.
 
@@ -369,5 +357,5 @@ Algunas direcciones interesantes para futuro:
 
 Hecho con ❤️ en TypeScript, para aprender y jugar con runtimes funcionales.
 
-**Nombre del proyecto:** `brass-runtime`  
-**Objetivo:** construir un mini runtime en el ecosistema JS/TS, pero manteniendo el control total sobre la semántica de los efectos desde el código de usuario.
+**Nombre del proyecto:** `brass-ts`  
+**Objetivo:** construir un mini ZIO-like runtime en el ecosistema JS/TS, pero manteniendo el control total sobre la semántica de los efectos desde el código de usuario.
