@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.0.1...v1.1.0) (2025-12-30)
+
+
+### Features
+
+* first prototype ([429f16d](https://github.com/BaldrVivaldelli/brass-runtime/commit/429f16d7bea5dc485464f2be3c922c60d1decc4b))
+
 ## [1.0.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.0.0...v1.0.1) (2025-12-30)
 
 
