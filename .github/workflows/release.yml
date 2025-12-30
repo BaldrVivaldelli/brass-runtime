@@ -1,9 +1,9 @@
 name: Release
 
 on:
-  pull_request:
+  push:
     branches: [ main ]
-    types: [ closed ]
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   release:
-    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,7 +29,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - run: npm ci
-      - run: npm run build
+      - run: npm run build --if-present
 
       - name: Semantic Release
         env:
