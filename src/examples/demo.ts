@@ -1,7 +1,8 @@
+import {fork, Interrupted} from "../fibers/fiber";
 import {Exit, foreach, succeed, zip} from "../types/effect";
 import {collectStream, fromArray, mapStream} from "../stream/stream";
-import {Async, async, asyncFlatMap, asyncSucceed} from "../types/asyncEffect";
-import {fork, Interrupted} from "../fibers/fiber";
+import {withScope} from "../scheduler/scope";
+import {async, Async, asyncFlatMap, asyncSucceed} from "../types/asyncEffect";
 
 function main() {
 

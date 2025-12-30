@@ -1,9 +1,8 @@
 // src/resourceExample.ts
 
-import {acquireRelease} from "../scheduler/acquireRelease";
-import {async, Async, asyncFlatMap, asyncSucceed, asyncTotal} from "../types/asyncEffect";
+import {withScope} from "../scheduler/scope";
+import {acquireRelease, async, Async, asyncFlatMap, asyncSucceed, asyncTotal} from "../types/asyncEffect";
 import {Exit} from "../types/effect";
-import {withScope} from "../scheduler/withScope";
 
 type FileHandle = {
     name: string;
@@ -26,7 +25,6 @@ function openFile(name: string): FileHandle {
 function main() {
     withScope(scope => {
         const env = {};
-
         const program =
             acquireRelease(
                 asyncTotal(() => openFile("data.txt")),

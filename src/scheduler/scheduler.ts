@@ -1,28 +1,51 @@
 export type Task = () => void;
 
-export class Scheduler {
-    private queue: Task[] = [];
-    private flushing = false;
+type TaggedTask = {
+    tag: string;
+    task: Task;
+};
 
-    schedule(task: Task): void {
-        this.queue.push(task);
-        if (!this.flushing) {
-            this.flush();
-        }
+export class Scheduler {
+    private queue: TaggedTask[] = [];
+    private flushing = false;
+    private requested = false;
+
+    // ✅ tag opcional
+    schedule(task: Task, tag: string = "anonymous"): void {
+        this.queue.push({ tag, task });
+        this.requestFlush();
+
+        // log: tamaño + próximos tags (head)
+        console.log("SCHEDULER", {
+            flushing: this.flushing,
+            q: this.queue.length,
+            next: this.queue[0]?.tag,
+            head: this.queue.slice(0, 5).map(t => t.tag),
+        });
+    }
+
+    private requestFlush(): void {
+        if (this.requested) return;
+        this.requested = true;
+
+        queueMicrotask(() => this.flush());
     }
 
     private flush(): void {
+        if (this.flushing) return;
         this.flushing = true;
+        this.requested = false;
 
-        // Versión simple: drena todo de una
-        while (this.queue.length > 0) {
-            const t = this.queue.shift()!;
-            t();
+        try {
+            while (this.queue.length > 0) {
+                const { task } = this.queue.shift()!;
+                try { task(); } catch {}
+            }
+        } finally {
+            this.flushing = false;
+            if (this.queue.length > 0) this.requestFlush();
         }
-
-        this.flushing = false;
     }
 }
 
-// Un scheduler global para todo el runtime
 export const globalScheduler = new Scheduler();

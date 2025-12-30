@@ -19,8 +19,8 @@ export type Async<R, E, A> =
     andThen: (a: any) => Async<R, E, A>;
 };
 
-export function unit(): Async<unknown, never, void> {
-    return Async.sync(() => undefined);
+export function unit(): Async<unknown, unknown, undefined> {
+    return asyncSync(() => undefined);
 }
 
 export const asyncSucceed = <A>(value: A): Async<unknown, never, A> => ({
@@ -142,10 +142,13 @@ export function acquireRelease<R, E, A>(
 function registerInterruptible<R, E, A>(
     register: (env: R, cb: (exit: Exit<E, A>) => void) => void | Canceler
 ): Async<R, E, A> {
-    return Async.async<R, E, A>((env, cb) => {
+    return async<R, E, A>((env, cb) => {
         const canceler = register(env, cb);
+
         return typeof canceler === "function"
-            ? Async.sync(() => canceler()) // <- cleanup como Async
-            : Async.unit();
+            ? asyncSync((_env) => {
+                try { canceler(); } catch {}
+            })
+            : unit();
     });
 }

@@ -16,7 +16,7 @@ export class Scope<R> {
     private readonly subScopes = new Set<Scope<R>>();
     private readonly finalizers: Array<(exit: Exit<any, any>) => Async<R, any, any>> = [];
 
-    constructor() {
+    constructor(private readonly env: R) {
         this.id = nextScopeId++;
     }
 
@@ -31,7 +31,7 @@ export class Scope<R> {
     /** crea un sub scope */
     subScope(): Scope<R> {
         if (this.closed) throw new Error("Scope closed");
-        const s = new Scope<R>();
+        const s = new Scope<R>(this.env);
         this.subScopes.add(s);
         return s;
     }
@@ -68,7 +68,8 @@ export class Scope<R> {
         // 3) ejecutar finalizers en orden LIFO
         while (this.finalizers.length > 0) {
             const fin = this.finalizers.pop()!;
-            fin(exit); // se ejecuta como Async, pero no esperamos
+            const eff = fin(exit);
+            fork(eff, this.env); // <-- esto hace que se ejecute el Async
         }
 
         this.children.clear();
@@ -87,11 +88,10 @@ export class Scope<R> {
 export function withScope<R, A>(
     body: (scope: Scope<R>) => A
 ): A {
-    const scope = new Scope<R>();
+    const scope = new Scope<R>({} as R);
     try {
-        const result = body(scope);
-        return result;
+        return body(scope);
     } finally {
-        scope.close(); // cleanup garantizado
+        scope.close();
     }
 }
