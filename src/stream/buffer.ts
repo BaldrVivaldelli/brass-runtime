@@ -1,3 +1,6 @@
+/*
+import {ZStream} from "./stream";
+
 type Signal<E, A> =
     | { _tag: "Elem"; value: A }
     | { _tag: "End" }
@@ -43,3 +46,4 @@ function buffer<R, E, A>(
         })
     )
 }
+*/
