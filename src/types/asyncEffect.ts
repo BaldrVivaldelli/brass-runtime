@@ -1,6 +1,6 @@
 // src/asyncEffect.ts
 import type { Exit } from "./effect";
-import {Canceler} from "./Cancel";
+import {Canceler} from "./cancel";
 import {BrassError} from "../fibers/fiber";
 
 

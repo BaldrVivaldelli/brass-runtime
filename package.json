@@ -1,19 +1,32 @@
 {
-  "name": "brass-runetime",
-  "version": "1.0.0",
-  "main": "index.js",
+  "name": "brass-runtime",
+  "version": "0.0.0",
+  "description": "Effect runtime utilities for TypeScript",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+
+  "files": ["dist", "README.md", "LICENSE"],
+
   "scripts": {
     "dev": "ts-node-dev src/examples/demo.ts",
     "build": "tsc",
-    "start": "tsc && node dist/examples/fiberFinalizer.js"
+    "test": "node -e \"console.log('no tests yet')\"",
+    "prepublishOnly": "npm run build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
-  "type": "commonjs",
+
   "devDependencies": {
+    "typescript": "^5.9.3",
     "ts-node-dev": "^2.0.0",
-    "typescript": "^5.9.3"
+    "semantic-release": "^24.0.0",
+    "@semantic-release/commit-analyzer": "^13.0.0",
+    "@semantic-release/release-notes-generator": "^14.0.0",
+    "@semantic-release/npm": "^12.0.0",
+    "@semantic-release/github": "^11.0.0",
+    "@semantic-release/changelog": "^6.0.0",
+    "@semantic-release/git": "^10.0.0"
   }
 }

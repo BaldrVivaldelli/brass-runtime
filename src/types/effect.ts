@@ -12,7 +12,7 @@ export type Effect<R, E, A> = (env: R) => Exit<E, A>;
 
 // Alias estilo ZIO
 export type ZIO<R, E, A> = Effect<R, E, A>;
-export type Scope = {}; // placeholder por ahora
+export type EffectScope = {}; // placeholder por ahora
 
 // ---------- Constructores básicos ----------
 

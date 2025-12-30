@@ -1,7 +1,5 @@
 // src/scope.ts
-
-
-import {Fiber, fork, Interrupted} from "../fibers/fiber";
+import {Fiber, Interrupted,fork} from "../fibers/fiber";
 import {Exit} from "../types/effect";
 import {Async} from "../types/asyncEffect";
 
