@@ -1,3 +1,11 @@
+## [1.0.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.0.0...v1.0.1) (2025-12-30)
+
+
+### Bug Fixes
+
+* add dependency ([d3d3427](https://github.com/BaldrVivaldelli/brass-runtime/commit/d3d34275621faae9b5f337bb9b3d0d6d6aaa94cb))
+* update readme ([c7bb373](https://github.com/BaldrVivaldelli/brass-runtime/commit/c7bb37352fd77233c6322314ba3ed2cc9fe8816a))
+
 # 1.0.0 (2025-12-30)
 
 
