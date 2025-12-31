@@ -176,18 +176,41 @@ const isAbortError = (e: unknown): boolean =>
     "name" in e &&
     (e as any).name === "AbortError";
 
-export function tryPromiseAbortable<R = unknown, A = unknown>(
+export function tryPromiseAbortable<A>(
+    thunk: (signal: AbortSignal) => Promise<A>
+): Async<unknown, BrassError, A>;
+
+export function tryPromiseAbortable<R, A>(
     thunk: (env: R, signal: AbortSignal) => Promise<A>
+): Async<R, BrassError, A>;
+
+export function tryPromiseAbortable<R, A>(
+    thunk: ((signal: AbortSignal) => Promise<A>) | ((env: R, signal: AbortSignal) => Promise<A>)
 ): Async<R, BrassError, A> {
-    return fromPromiseAbortable(thunk, (e): BrassError =>
-        isAbortError(e)
-            ? { _tag: "Abort" }
-            : { _tag: "PromiseRejected", reason: e }
+    const lifted = (env: R, signal: AbortSignal) =>
+        thunk.length === 1
+            ? (thunk as (signal: AbortSignal) => Promise<A>)(signal)
+            : (thunk as (env: R, signal: AbortSignal) => Promise<A>)(env, signal);
+
+    return fromPromiseAbortable(lifted, (e): BrassError =>
+        isAbortError(e) ? { _tag: "Abort" } : { _tag: "PromiseRejected", reason: e }
     );
 }
+// 1) Overload: thunk usa SOLO signal (env = unknown)
+export function fromPromiseAbortable<E, A>(
+    thunk: (signal: AbortSignal) => Promise<A>,
+    onError: (e: unknown) => E
+): Async<unknown, E, A>;
 
+// 2) Overload: thunk usa env + signal (tu firma actual)
 export function fromPromiseAbortable<R, E, A>(
     thunk: (env: R, signal: AbortSignal) => Promise<A>,
+    onError: (e: unknown) => E
+): Async<R, E, A>;
+
+// 3) Implementación (usa `any` internamente para unificar)
+export function fromPromiseAbortable<R, E, A>(
+    thunk: ((signal: AbortSignal) => Promise<A>) | ((env: R, signal: AbortSignal) => Promise<A>),
     onError: (e: unknown) => E
 ): Async<R, E, A> {
     return async((env: R, cb: (exit: Exit<E, A>) => void): void | Canceler => {
@@ -201,7 +224,12 @@ export function fromPromiseAbortable<R, E, A>(
         };
 
         try {
-            const p = thunk(env, ac.signal);
+            // Si thunk declara 1 parámetro, asumimos (signal) => Promise<A>
+            const p =
+                thunk.length === 1
+                    ? (thunk as (signal: AbortSignal) => Promise<A>)(ac.signal)
+                    : (thunk as (env: R, signal: AbortSignal) => Promise<A>)(env, ac.signal);
+
             p.then((value) => safeCb({ _tag: "Success", value }))
                 .catch((err) => safeCb({ _tag: "Failure", error: onError(err) }));
         } catch (e) {

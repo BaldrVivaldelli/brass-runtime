@@ -25,7 +25,7 @@ export function slowRangeFromPromise(
                 ? asyncFail(none)
                 : asyncFlatMap(
                     fromPromiseAbortable(
-                        async (_env, signal) => {
+                        async (signal: AbortSignal) => {
                             await sleepAbortable(msPerElem, signal);
                             return i;
                         },
