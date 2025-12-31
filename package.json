@@ -9,6 +9,21 @@
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "sideEffects": false,
+  "keywords": [
+    "functional",
+    "effect-system",
+    "algebraic-effects",
+    "async",
+    "effects",
+    "fiber",
+    "fibers",
+    "concurrency",
+    "abortcontroller",
+    "cancellation",
+    "structured-concurrency",
+    "typescript",
+    "runtime"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
