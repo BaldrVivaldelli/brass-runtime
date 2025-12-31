@@ -83,12 +83,19 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
 
     schedule(tag: string = "step"): void {
+        console.log("[fiber.schedule]", {
+            fiber: this.id,
+            tag,
+            schedulerCtor: this.scheduler?.constructor?.name,
+            schedulerScheduleType: typeof (this.scheduler as any)?.schedule
+        });
         if (this.result != null) return;
         if (this.scheduled) return;
 
         this.scheduled = true;
 
         this.scheduler.schedule(() => {
+            console.log("[fiber.task] running", this.id);
             this.scheduled = false;
             this.step();
         }, `fiber#${this.id}.${tag}`);
@@ -147,11 +154,29 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     }
 
     step(): void {
-        if (this.result != null) return;
+        console.log("[fiber.step] enter", {
+            fiber: this.id,
+            current: this.current?._tag,
+            result: this.result != null,
+            blockedOnAsync: this.blockedOnAsync,
+            interrupted: this.interrupted,
+            closing: this.closing != null,
+            finishing: this.finishing,
+            stack: this.stack.length,
+        });
 
-        if (this.blockedOnAsync) return;
+        if (this.result != null) {
+            console.log("[fiber.step] early-exit: already has result", { fiber: this.id });
+            return;
+        }
+
+        if (this.blockedOnAsync) {
+            console.log("[fiber.step] early-exit: blockedOnAsync", { fiber: this.id });
+            return;
+        }
 
         if (this.interrupted && this.closing == null) {
+            console.log("[fiber.step] interrupted: failing now", { fiber: this.id });
             this.notify({ _tag: "Failure", error: { _tag: "Interrupted" } as any } as any);
             return;
         }
@@ -159,85 +184,100 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         const current = this.current;
 
         switch (current._tag) {
-            case "Succeed":
+            case "Succeed": {
+                console.log("[fiber.step] Succeed", { fiber: this.id });
                 this.onSuccess(current.value);
                 return;
+            }
 
-            case "Fail":
+            case "Fail": {
+                console.log("[fiber.step] Fail", { fiber: this.id });
                 this.onFailure(current.error);
                 return;
+            }
 
-            case "Sync":
+            case "Sync": {
+                console.log("[fiber.step] Sync", { fiber: this.id });
                 try {
                     const v = current.thunk(this.env);
+                    console.log("[fiber.step] Sync success", { fiber: this.id });
                     this.onSuccess(v);
                 } catch (e) {
+                    console.log("[fiber.step] Sync threw", { fiber: this.id, e });
                     this.onFailure(e);
                 }
                 return;
+            }
 
-            case "FlatMap":
+            case "FlatMap": {
+                console.log("[fiber.step] FlatMap push cont", { fiber: this.id });
                 this.stack.push({ _tag: "SuccessCont", k: current.andThen });
                 this.current = current.first;
                 return;
+            }
 
-            case "Fold":
-                this.stack.push({ _tag: "FoldCont", onFailure: current.onFailure, onSuccess: current.onSuccess });
+            case "Fold": {
+                console.log("[fiber.step] Fold push cont", { fiber: this.id });
+                this.stack.push({
+                    _tag: "FoldCont",
+                    onFailure: current.onFailure,
+                    onSuccess: current.onSuccess,
+                });
                 this.current = current.first;
                 return;
-
+            }
 
             case "Async": {
                 if (this.finishing) return;
 
                 this.blockedOnAsync = true;
+                let done = false;
 
-                let pending: Exit<any, any> | null = null;
-                let completedSync = false;
-
-                const resume = () => {
-                    if (!pending) return;
-                    const exit = pending;
-                    pending = null;
-
+                const resume = (exit: Exit<any, any>) => {
+                    // corre siempre dentro del scheduler
                     this.blockedOnAsync = false;
 
+                    // Si ya terminó o está cerrando, ignorar
                     if (this.result != null || this.closing != null) return;
 
+                    // Si fue interrumpido, gana interrupción
                     if (this.interrupted) {
                         this.onFailure({ _tag: "Interrupted" } as Interrupted);
                         return;
                     }
 
-                    if (exit._tag === "Success") this.onSuccess(exit.value);
-                    else this.onFailure(exit.error);
+                    exit._tag === "Success" ? this.onSuccess(exit.value) : this.onFailure(exit.error);
 
+                    // seguir el loop
                     this.schedule("async-resume");
                 };
 
-                const canceler = current.register(this.env, (exit) => {
-                    // guardamos el resultado, pero NO ejecutamos todavía
-                    pending = exit;
-                    completedSync = true;
-                    // no llamamos resume acá
-                });
+                const cb = (exit: Exit<any, any>) => {
+                    if (done) return;
+                    done = true;
+
+                    // siempre reanudar vía scheduler (async boundary)
+                    this.scheduler.schedule(
+                        () => resume(exit),
+                        `fiber#${this.id}.async-resume`
+                    );
+                };
+
+                const canceler = current.register(this.env, cb);
 
                 if (typeof canceler === "function") {
-                    this.addFinalizer((_exit) => {
+                    this.addFinalizer(() => {
+                        // importante: si cancelás, evitás que un callback tardío haga resume
+                        done = true;
                         try { canceler(); } catch {}
                     });
                 }
 
-                if (completedSync) {
-                    this.scheduler.schedule(resume, `fiber#${this.id}.async-sync-resume`);
-                }
-
                 return;
             }
-
-
         }
     }
+
 }
 
 

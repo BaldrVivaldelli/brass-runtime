@@ -4,3 +4,4 @@ import "./resourceExample";
 import "./canceler";
 import "./toPromise"
 import "./fromPromise"
+import "./httpExamples"

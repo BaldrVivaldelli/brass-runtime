@@ -43,6 +43,7 @@
     "runtime"
   ],
   "scripts": {
+    "dev": "tsx src/examples/index.ts",
     "clean": "rimraf dist",
     "build": "tsup",
     "build:legacy": "npm run clean && npm run build:types && npm run build:esm && npm run build:cjs",
