@@ -1,6 +1,6 @@
 {
   "name": "brass-runtime",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "description": "Effect runtime utilities for TypeScript",
   "license": "ISC",
   "author": "",
@@ -19,8 +19,7 @@
       "require": "./dist/http/index.cjs"
     },
     "./package.json": "./package.json"
-  }
-,
+  },
   "files": [
     "dist",
     "README.md",
