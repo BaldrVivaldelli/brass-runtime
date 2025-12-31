@@ -10,6 +10,7 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "keywords": [
+    "runtime",
     "functional",
     "effect-system",
     "algebraic-effects",

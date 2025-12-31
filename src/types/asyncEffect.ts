@@ -5,6 +5,7 @@ import {BrassError, fork} from "../fibers/fiber";
 import {Scope} from "../scheduler/scope";
 
 
+type NodeCallback<A> = (err: Error | null, result: A) => void;
 export type Async<R, E, A> =
     | { _tag: "Succeed"; value: A }
     | { _tag: "Fail"; error: E }
@@ -51,7 +52,28 @@ export function asyncMapError<R, E, E2, A>(
     ) as any;
 }
 
+export function from<A>(f: (cb: NodeCallback<A>) => void): Async<{}, Error, A>;
+export function from<A>(thunk: () => Promise<A>): Async<{}, Error, A>;
+export function from<A>(x: any): Async<{}, Error, A> {
+    return async((env, cb) => {
+        let done = false;
+        const once = (r: any) => { if (!done) { done = true; cb(r); } };
+        const fail = (e: unknown) =>
+            once({ _tag: "Failure", error: e instanceof Error ? e : new Error(String(e)) });
+        const ok = (v: A) => once({ _tag: "Success", value: v });
 
+        try {
+            // Si la función espera callback (arity >= 1), asumimos callback-style
+            if (typeof x === "function" && x.length >= 1) {
+                (x as (cb: NodeCallback<A>) => void)((err, result) => err ? fail(err) : ok(result));
+            } else {
+                (x as () => Promise<A>)().then(ok, fail);
+            }
+        } catch (e) {
+            fail(e);
+        }
+    });
+}
 export function unit(): Async<unknown, unknown, undefined> {
     return asyncSync(() => undefined);
 }
@@ -120,6 +142,30 @@ export function fromPromise <R, E, A>(
         thunk(env)
             .then((value) => cb({_tag: "Success", value}))
             .catch((err) => cb({_tag: "Failure", error: onError(err)}));
+    });
+}
+
+
+
+export function fromCallback<A>(
+    f: (cb: NodeCallback<A>) => void
+): Async<{}, Error, A> {
+    return async((env, cb) => {
+        let done = false;
+        const once = (x: { _tag: "Failure"; error: Error } | { _tag: "Success"; value: A }) => {
+            if (done) return;
+            done = true;
+            cb(x);
+        };
+
+        try {
+            f((err, result) => {
+                if (err) once({ _tag: "Failure", error: err });
+                else once({ _tag: "Success", value: result });
+            });
+        } catch (e) {
+            once({ _tag: "Failure", error: e instanceof Error ? e : new Error(String(e)) });
+        }
     });
 }
 
