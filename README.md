@@ -17,6 +17,14 @@ Goals: explore typed effects, structured concurrency, fibers, cooperative schedu
 - Structured concurrency combinators: `race`, `zipPar`, `collectAllPar`.
 - ZStream-style streams with backpressure, `Pull` semantics and resource safety.
 
+
+
+---
+
+## Getting Started
+
+👉 [Read the Getting Started guide](./docs/getting-started.md)
+
 ---
 
 ## What's new (recent changes)
