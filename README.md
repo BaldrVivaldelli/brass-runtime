@@ -44,8 +44,8 @@ A ZIO-style HTTP client built on top of fibers and `Async`.
 - Middleware-friendly (logging, retry, timeout, etc.)
 - Integrated with fiber interruption via `AbortController`
 
-👉 **Read the HTTP module docs:**  
-➡️ [`src/http/README.md`](./src/http/README.md)
+
+👉 [**Read the HTTP module docs:** ](./docs/http.md)
 
 Example:
 ```ts
