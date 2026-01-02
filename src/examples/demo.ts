@@ -1,11 +1,12 @@
-import { fork, Interrupted } from "../fibers/fiber";
+import { Interrupted } from "../runtime/fiber";
 import type { Exit } from "../types/effect";
 
 import { collectStream, fromArray, mapStream } from "../stream/stream";
-import { withScope } from "../scheduler/scope";
+import { withScope } from "../runtime/scope";
 
 import { async, type Async, asyncFlatMap, asyncSucceed } from "../types/asyncEffect";
-import { succeed } from "../types/effect"; // succeed ahora devuelve Async
+import { succeed } from "../types/effect";
+import {fork} from "../runtime/runtime"; // succeed ahora devuelve Async
 
 type Env = {};
 

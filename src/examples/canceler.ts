@@ -1,5 +1,5 @@
-import {unsafeRunAsync} from "../fibers/fiber";
 import {async} from "../types/asyncEffect";
+import {unsafeRunAsync} from "../runtime/runtime";
 
 let ticks = 0;
 

@@ -1,6 +1,6 @@
 // src/resourceExample.ts
 
-import {withScope} from "../scheduler/scope";
+import {withScope} from "../runtime/scope";
 import {acquireRelease, async, Async, asyncFlatMap, asyncSucceed, asyncTotal} from "../types/asyncEffect";
 import {Exit} from "../types/effect";
 

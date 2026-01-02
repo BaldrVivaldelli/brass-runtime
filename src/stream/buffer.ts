@@ -5,7 +5,7 @@ import {Async, asyncFold} from "../types/asyncEffect";
 import { asyncFlatMap, asyncSucceed, asyncSync } from "../types/asyncEffect";
 
 import {none, Option, some} from "../types/option";
-import { fork } from "../fibers/fiber";
+import { fork } from "../runtime/fiber";
 import { bounded } from "./queue";
 
 type Signal<E, A> =

@@ -1,7 +1,8 @@
 // src/scope.ts
-import {Fiber, Interrupted,fork} from "../fibers/fiber";
+import {Fiber, Interrupted} from "./fiber";
 import {Exit} from "../types/effect";
 import {Async} from "../types/asyncEffect";
+import {fork} from "./runtime";
 
 export type ScopeId = number;
 
@@ -50,22 +51,12 @@ export class Scope<R> {
         return f;
     }
 
-    /** Cierre estructurado */
     close(exit: Exit<any, any> = { _tag: "Success", value: undefined }): void {
         if (this.closed) return;
         this.closed = true;
+        this.children.forEach(f => f.interrupt());
+        this.subScopes.forEach(s => s.close(exit));
 
-        // 1) cancelar hijos
-        for (const f of this.children) {
-            f.interrupt();
-        }
-
-        // 2) cerrar sub scopes
-        for (const s of this.subScopes) {
-            s.close(exit);
-        }
-
-        // 3) ejecutar finalizers en orden LIFO
         while (this.finalizers.length > 0) {
             const fin = this.finalizers.pop()!;
             const eff = fin(exit);

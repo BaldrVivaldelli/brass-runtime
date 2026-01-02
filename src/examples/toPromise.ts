@@ -1,6 +1,6 @@
 import {buffer} from "../stream/buffer";
 import {collectStream, rangeStream} from "../stream/stream";
-import {toPromise} from "../types/asyncEffect";
+import {toPromise} from "../runtime/runtime";
 
 
 async function testBuffer() {

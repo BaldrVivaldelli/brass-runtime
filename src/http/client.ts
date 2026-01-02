@@ -1,6 +1,7 @@
 // src/runtime/client.ts
 
-import {Async, fromPromiseAbortable} from "../types/asyncEffect";
+import {Async} from "../types/asyncEffect";
+import {fromPromiseAbortable} from "../runtime/runtime";
 
 export type HttpError =
     | { _tag: "Abort" }

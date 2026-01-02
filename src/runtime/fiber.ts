@@ -1,12 +1,29 @@
 // src/fiber.ts
-import {Exit} from "../types/effect";
-import {Async, asyncSync} from "../types/asyncEffect";
-import {globalScheduler, Scheduler} from "../scheduler/scheduler";
-import { asyncSucceed, asyncFlatMap } from "../types/asyncEffect";
+import { Exit } from "../types/effect";
+import { Async } from "../types/asyncEffect";
+import { globalScheduler, Scheduler } from "./scheduler";
 
 export type FiberId = number;
-export type FiberStatus = "Running" | "Done" | "Interrupted";
 export type Interrupted = { readonly _tag: "Interrupted" };
+
+export type FiberStatus = "Running" | "Done" | "Interrupted";
+
+type StepDecision = "Continue" | "Suspend" | "Done";
+
+type RunState = "Queued" | "Running" | "Suspended" | "Done";
+
+const STEP = {
+    CONTINUE: "Continue",
+    SUSPEND: "Suspend",
+    DONE: "Done",
+} as const satisfies Record<string, StepDecision>;
+
+const RUN = {
+    QUEUED: "Queued",
+    RUNNING: "Running",
+    SUSPENDED: "Suspended",
+    DONE: "Done",
+} as const satisfies Record<string, RunState>;
 
 export type Fiber<E, A> = {
     readonly id: FiberId;
@@ -16,24 +33,21 @@ export type Fiber<E, A> = {
     readonly addFinalizer: (f: (exit: Exit<E | Interrupted, A>) => void) => void;
 };
 
-
-
 let nextId: FiberId = 1;
 
-export type BrassError =
-    | { _tag: "Abort" }
-    | { _tag: "PromiseRejected"; reason: unknown };
 
 
-class RuntimeFiber<R, E, A> implements Fiber<E, A> {
+export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     readonly id: FiberId;
 
     private closing: Exit<E | Interrupted, A> | null = null;
     private finishing = false;
-    private statusValue: FiberStatus = "Running";
-    private interrupted = false;
 
+    private runState: RunState = RUN.RUNNING;
+
+    private interrupted = false;
     private result: Exit<E | Interrupted, A> | null = null;
+
     private readonly joiners: Array<(exit: Exit<E | Interrupted, A>) => void> = [];
 
     // estado de evaluación
@@ -41,16 +55,15 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     private readonly env: R;
     private readonly stack: (
         | { _tag: "SuccessCont"; k: (a: any) => Async<R, E, any> }
-        | { _tag: "FoldCont"; onFailure: (e: any) => Async<R, E, any>; onSuccess: (a: any) => Async<R, E, any> }
+        | {
+        _tag: "FoldCont";
+        onFailure: (e: any) => Async<R, E, any>;
+        onSuccess: (a: any) => Async<R, E, any>;
+    }
         )[] = [];
 
     private readonly fiberFinalizers: Array<(exit: Exit<E | Interrupted, A>) => void> = [];
-
-
-    private scheduled = false;
     private finalizersDrained = false;
-
-    private blockedOnAsync = false;
 
     constructor(effect: Async<R, E, A>, env: R, private readonly scheduler: Scheduler) {
         this.id = nextId++;
@@ -62,10 +75,9 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.fiberFinalizers.push(f);
     }
 
-
-
     status(): FiberStatus {
-        return this.statusValue;
+        if (this.result == null) return "Running";
+        return this.interrupted ? "Interrupted" : "Done";
     }
 
     join(cb: (exit: Exit<E | Interrupted, A>) => void): void {
@@ -77,27 +89,47 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         if (this.result != null) return;
         if (this.interrupted) return;
         this.interrupted = true;
-        this.blockedOnAsync = false;
         this.schedule("interrupt-step");
     }
-
 
     schedule(tag: string = "step"): void {
         console.log("[fiber.schedule]", {
             fiber: this.id,
             tag,
+            runState: this.runState,
             schedulerCtor: this.scheduler?.constructor?.name,
-            schedulerScheduleType: typeof (this.scheduler as any)?.schedule
+            schedulerScheduleType: typeof (this.scheduler as any)?.schedule,
         });
-        if (this.result != null) return;
-        if (this.scheduled) return;
 
-        this.scheduled = true;
+        // ya terminó o ya está en cola: no hacer nada
+        if (this.runState === RUN.DONE || this.runState === RUN.QUEUED) return;
+
+        // encolamos
+        this.runState = RUN.QUEUED;
 
         this.scheduler.schedule(() => {
             console.log("[fiber.task] running", this.id);
-            this.scheduled = false;
-            this.step();
+
+            if (this.runState === RUN.DONE) return;
+            this.runState = RUN.RUNNING;
+
+            const decision = this.step();
+
+            switch (decision) {
+                case STEP.CONTINUE:
+                    // seguir cooperativamente
+                    this.schedule("continue");
+                    return;
+
+                case STEP.SUSPEND:
+                    // queda esperando async; el callback re-encola con schedule("async-resume")
+                    this.runState = RUN.SUSPENDED;
+                    return;
+
+                case STEP.DONE:
+                    this.runState = RUN.DONE;
+                    return;
+            }
         }, `fiber#${this.id}.${tag}`);
     }
 
@@ -107,10 +139,11 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
         while (this.fiberFinalizers.length > 0) {
             const fin = this.fiberFinalizers.pop()!;
-            try { fin(exit); } catch {}
+            try {
+                fin(exit);
+            } catch {}
         }
     }
-
 
     private notify(exit: Exit<E | Interrupted, A>): void {
         if (this.result != null) return;
@@ -119,19 +152,14 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.finishing = true;
         this.closing = exit;
 
-        // ✅ ejecutar finalizers YA (garantiza clearInterval)
+        // ejecutar finalizers YA
         this.runFinalizersOnce(exit);
 
-        // completar
-        this.statusValue = this.interrupted ? "Interrupted" : "Done";
         this.result = exit;
 
         for (const j of this.joiners) j(exit);
         this.joiners.length = 0;
     }
-
-
-
 
     private onSuccess(value: any): void {
         const frame = this.stack.pop();
@@ -153,32 +181,31 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.notify({ _tag: "Failure", error } as any);
     }
 
-    step(): void {
+    step(): StepDecision {
         console.log("[fiber.step] enter", {
             fiber: this.id,
             current: this.current?._tag,
             result: this.result != null,
-            blockedOnAsync: this.blockedOnAsync,
             interrupted: this.interrupted,
             closing: this.closing != null,
             finishing: this.finishing,
             stack: this.stack.length,
         });
 
+        let decision: StepDecision = STEP.CONTINUE;
+
+        // ya terminó
         if (this.result != null) {
-            console.log("[fiber.step] early-exit: already has result", { fiber: this.id });
-            return;
+            decision = STEP.DONE;
+            return decision;
         }
 
-        if (this.blockedOnAsync) {
-            console.log("[fiber.step] early-exit: blockedOnAsync", { fiber: this.id });
-            return;
-        }
-
+        // interrupción gana si no estamos cerrando
         if (this.interrupted && this.closing == null) {
             console.log("[fiber.step] interrupted: failing now", { fiber: this.id });
             this.notify({ _tag: "Failure", error: { _tag: "Interrupted" } as any } as any);
-            return;
+            decision = STEP.DONE;
+            return decision;
         }
 
         const current = this.current;
@@ -187,13 +214,13 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             case "Succeed": {
                 console.log("[fiber.step] Succeed", { fiber: this.id });
                 this.onSuccess(current.value);
-                return;
+                break;
             }
 
             case "Fail": {
                 console.log("[fiber.step] Fail", { fiber: this.id });
                 this.onFailure(current.error);
-                return;
+                break;
             }
 
             case "Sync": {
@@ -206,14 +233,14 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     console.log("[fiber.step] Sync threw", { fiber: this.id, e });
                     this.onFailure(e);
                 }
-                return;
+                break;
             }
 
             case "FlatMap": {
                 console.log("[fiber.step] FlatMap push cont", { fiber: this.id });
                 this.stack.push({ _tag: "SuccessCont", k: current.andThen });
                 this.current = current.first;
-                return;
+                break;
             }
 
             case "Fold": {
@@ -224,19 +251,18 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     onSuccess: current.onSuccess,
                 });
                 this.current = current.first;
-                return;
+                break;
             }
 
             case "Async": {
-                if (this.finishing) return;
+                // si estás “finishing”, no queremos realmente suspender (tu lógica original)
+                if (this.finishing) {
+                    break;
+                }
 
-                this.blockedOnAsync = true;
                 let done = false;
 
                 const resume = (exit: Exit<any, any>) => {
-                    // corre siempre dentro del scheduler
-                    this.blockedOnAsync = false;
-
                     // Si ya terminó o está cerrando, ignorar
                     if (this.result != null || this.closing != null) return;
 
@@ -257,48 +283,29 @@ class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     done = true;
 
                     // siempre reanudar vía scheduler (async boundary)
-                    this.scheduler.schedule(
-                        () => resume(exit),
-                        `fiber#${this.id}.async-resume`
-                    );
+                    this.scheduler.schedule(() => resume(exit), `fiber#${this.id}.async-resume`);
                 };
 
                 const canceler = current.register(this.env, cb);
 
                 if (typeof canceler === "function") {
                     this.addFinalizer(() => {
-                        // importante: si cancelás, evitás que un callback tardío haga resume
                         done = true;
-                        try { canceler(); } catch {}
+                        try {
+                            canceler();
+                        } catch {}
                     });
                 }
 
-                return;
+                decision = STEP.SUSPEND;
+                break;
             }
         }
+
+        // post-check final
+        if (this.result != null) decision = STEP.DONE;
+
+        return decision;
     }
-
 }
 
-
-
-export function fork<R, E, A>(
-    effect: Async<R, E, A>,
-    env: R,
-    scheduler: Scheduler = globalScheduler
-): Fiber<E, A> {
-    const fiber = new RuntimeFiber(effect, env, scheduler);
-    fiber.schedule("initial-step");
-    return fiber;
-}
-
-
-// “correr” un Async como antes, pero apoyado en fibras + scheduler
-export function unsafeRunAsync<R, E, A>(
-    effect: Async<R, E, A>,
-    env: R,
-    cb: (exit: Exit<E | Interrupted, A>) => void
-): void {
-    const fiber = fork(effect, env);
-    fiber.join(cb);
-}

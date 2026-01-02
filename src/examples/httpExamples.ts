@@ -1,6 +1,6 @@
-import { toPromise } from "../types/asyncEffect";
 import { makeHttp } from "../http";
-import { globalScheduler } from "../scheduler/scheduler";
+import { globalScheduler } from "../runtime/scheduler";
+import {toPromise} from "../runtime/runtime";
 
 type Post = {
     userId: number;

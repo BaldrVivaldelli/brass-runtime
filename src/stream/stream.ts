@@ -1,7 +1,7 @@
 // ----- ADT de Stream -----
 
 import {
-    catchAll,
+    catchAll, Exit,
     fail,
     flatMap,
     map,
@@ -11,7 +11,10 @@ import {
     ZIO,
 } from "../types/effect.js";
 import { none, Option, some } from "../types/option.js";
-import {Async, asyncFail, asyncFlatMap, asyncFold, asyncMapError, asyncSucceed} from "../types/asyncEffect";
+import {async, Async, asyncFail, asyncFlatMap, asyncFold, asyncMapError, asyncSucceed} from "../types/asyncEffect";
+import {Scope} from "../runtime/scope";
+import {raceWith} from "./structuredConcurrency";
+import {Fiber, Interrupted} from "../runtime/fiber";
 
 
 export type Empty<R, E, A> = { readonly _tag: "Empty" };
@@ -37,12 +40,20 @@ export type FromPull<R, E, A> = {
     readonly pull: ZIO<R, Option<E>, [A, ZStream<R, E, A>]>;
 };
 
+export type Merge<R, E, A> = {
+    readonly _tag: "Merge";
+    readonly left: ZStream<R, E, A>;
+    readonly right: ZStream<R, E, A>;
+    readonly flip: boolean;
+};
+
 export type ZStream<R, E, A> =
     | Empty<R, E, A>
     | Emit<R, E, A>
     | Concat<R, E, A>
     | FromPull<R, E, A>
-    | Flatten<R, E, A>;
+    | Flatten<R, E, A>
+    | Merge<R, E, A>;
 
 const widenOpt = <E1, E2>(opt: Option<E1>): Option<E1 | E2> =>
     opt._tag === "None" ? none : some(opt.value as E1 | E2);
@@ -52,6 +63,18 @@ export const fromPull = <R, E, A>(
 ): ZStream<R, E, A> => ({
     _tag: "FromPull",
     pull,
+});
+
+
+export const mergeStream = <R, E, A>(
+    left: ZStream<R, E, A>,
+    right: ZStream<R, E, A>,
+    flip = true
+): ZStream<R, E, A> => ({
+    _tag: "Merge",
+    left,
+    right,
+    flip,
 });
 
 export const emptyStream = <R, E, A>(): ZStream<R, E, A> => ({
@@ -79,7 +102,110 @@ export const flattenStream = <R, E, A>(
     stream,
 });
 
-// ----- uncons: ZIO[R, Option[E], (A, ZStream)] -----
+
+function streamToRaceWithHandler<R, E, A>(
+    winnerSide: "L" | "R",
+    leftStream: ZStream<R, E, A>,
+    rightStream: ZStream<R, E, A>,
+    flip: boolean,
+    id: number
+): (
+    exit: Exit<Option<E> | Interrupted, [A, ZStream<R, E, A>]>,
+    otherFiber: Fiber<Option<E> | Interrupted, [A, ZStream<R, E, A>]>,
+    scope: Scope<R>
+) => Async<R, Option<E> | Interrupted, [A, ZStream<R, E, A>]> {
+    return (exit, otherFiber, scope) => {
+        console.log(
+            `[mergePull#${id}] winner=${winnerSide} exit=${exit._tag}`
+        );
+
+        if (exit._tag === "Failure") {
+            console.log(`[mergePull#${id}] failure error=`, exit.error);
+        }
+
+        if (exit._tag === "Success") {
+            console.log(`[mergePull#${id}] success -> interrupt other`);
+        }
+        if (exit._tag === "Success") {
+            const [a, tailWin] = exit.value;
+
+            // ganador dio valor => cancelamos perdedor
+            otherFiber.interrupt();
+
+            // reconstruimos el merge actualizando el lado ganador
+            const next =
+                winnerSide === "L"
+                    ? fromPull(makeMergePull(tailWin, rightStream, !flip,id))
+                    : fromPull(makeMergePull(leftStream, tailWin, !flip,id));
+
+            return asyncSucceed([a, next]);
+        }
+
+        // failure: Option<E> o Interrupted
+        const err = exit.error as unknown;
+
+        // Interrupted -> propagamos
+        if (typeof err === "object" && err !== null && (err as any)._tag === "Interrupted") {
+            return asyncFail(err as any);
+        }
+
+        const opt = err as Option<E>;
+
+        // End(None): NO cancelamos el otro. Seguimos con el stream del otro lado.
+        if (opt._tag === "None") {
+            return winnerSide === "L" ? uncons(rightStream) : uncons(leftStream);
+        }
+
+        // Error real Some(e)
+        return asyncFail(opt);
+    };
+}
+
+function makeMergePull<R, E, A>(
+    onLeft: ZStream<R, E, A>,
+    onRight: ZStream<R, E, A>,
+    flip: boolean,
+    mergePullId: number
+): Async<R, Option<E>, [A, ZStream<R, E, A>]> {
+    return async((env, cb) => {
+        const id = ++mergePullId;
+        console.log(`[mergePull#${id}] start flip=${flip}`);
+        const scope = new Scope(env);
+
+        console.log(`[mergePull#${id}] built pulls`);
+        const leftPull  = uncons(onLeft);
+        const rightPull = uncons(onRight);
+
+        console.log(`[mergePull#${id}] built pulls`);
+        const onLeftHandler  = streamToRaceWithHandler("L", onLeft, onRight, flip,id);
+        const onRightHandler = streamToRaceWithHandler("R", onLeft, onRight, flip,id);
+        console.log(`[mergePull#${id}] calling raceWith`);
+        const handler = raceWith(
+            leftPull,
+            rightPull,
+            scope,
+            onLeftHandler,
+            onRightHandler
+        );
+        console.log(`[mergePull#${id}] forking handler`);
+        scope.fork(handler, env).join((ex) => {
+            console.log(`[mergePull#${id}] handler joined exit=${ex._tag}`);
+            scope.close(ex as any);
+            console.log(`[mergePull#${id}] scope closed, calling cb`);
+            cb(ex as any);
+        });
+    });
+
+}
+
+
+export function merge<R, E, A>(
+    left: ZStream<R, E, A>,
+    right: ZStream<R, E, A>
+): ZStream<R, E, A> {
+    return fromPull(makeMergePull(left, right, true,0));
+}
+
 
 export function uncons<R, E, A>(
     self: ZStream<R, E, A>
@@ -95,6 +221,7 @@ export function uncons<R, E, A>(
             );
 
         case "FromPull":
+            console.log("[uncons] FromPull");
             return self.pull;
 
         case "Concat":
@@ -118,7 +245,10 @@ export function uncons<R, E, A>(
                     ),
                     () => uncons(flattenStream<R, E, A>(tail))
                 )
-            );
+            )
+        case "Merge":
+            console.log("[makeMergePull] defined");
+            return makeMergePull(self.left, self.right, self.flip,0);
     }
 }
 
@@ -266,3 +396,6 @@ export function collectStream<R, E, A>(stream: ZStream<R, E, A>): ZIO<R, E, A[]>
         throw new Error("unreachable: stream end handled as success");
     });
 }
+
+
+

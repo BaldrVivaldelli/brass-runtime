@@ -1,7 +1,8 @@
-import {asyncFail, asyncSucceed, asyncFlatMap, fromPromiseAbortable, toPromise} from "../types/asyncEffect";
+import {asyncFail, asyncSucceed, asyncFlatMap} from "../types/asyncEffect";
 import { none } from "../types/option";
 import {collectStream, fromPull, ZStream} from "../stream/stream";
 import {buffer} from "../stream/buffer";
+import {fromPromiseAbortable, toPromise} from "../runtime/runtime";
 
 // delay abortable en Promise
 function sleepAbortable(ms: number, signal: AbortSignal): Promise<void> {
