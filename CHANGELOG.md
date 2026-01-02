@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.4.6...v1.5.0) (2026-01-02)
+
+
+### Features
+
+* **http:** introduce composable HTTP module with middleware-style DX ([8417494](https://github.com/BaldrVivaldelli/brass-runtime/commit/84174944014c418222109708ae0f2522ecc916fa))
+
 ## [1.4.6](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.4.5...v1.4.6) (2026-01-02)
 
 ## [1.4.5](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.4.4...v1.4.5) (2026-01-02)
