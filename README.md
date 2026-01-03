@@ -107,7 +107,7 @@ Examples:
 - [x] ZStream-like core
 - [x] Bounded buffers & backpressure
 - [x] Stream merge / zip
-- [ ] Hubs / Broadcast
+- [x] Hubs / Broadcast
 - [ ] Pipelines (`ZPipeline`-style)
 
 ### Libraries

@@ -4,9 +4,13 @@ import {
     asyncSucceed,
     asyncFlatMap,
     asyncTotal,
-    asyncSync
+    asyncSync, acquireRelease, asyncMapError
 } from "../types/asyncEffect";
-import { bounded, Queue, Strategy } from "./queue";
+import {bounded, Queue, QueueClosed, Strategy} from "./queue";
+import {foreachStream, fromPull, managedStream, unwrapScoped, ZStream} from "./stream";
+import {Scope} from "../runtime/scope";
+import {Exit} from "../types/effect";
+import {none, Option} from "../types/option";
 
 export type HubStrategy = "BackPressure" | "Dropping" | "Sliding";
 
@@ -20,7 +24,7 @@ export type Hub<A> = {
     publish: (a: A) => Async<unknown, never, boolean>;
     publishAll: (as: Iterable<A>) => Async<unknown, never, boolean>;
     subscribe: () => Async<unknown, HubClosed, Subscription<A>>;
-    shutdown: () => Async<unknown, any, void>;
+    shutdown: () => Async<unknown, any, any>;
 };
 
 const toQueueStrategy = (s: HubStrategy): Strategy =>
@@ -54,7 +58,7 @@ export function makeHub<A>(
 
 
     const publishAll = (as: Iterable<A>): Async<unknown, never, boolean> => {
-        let eff = asyncSucceed(true);
+        let eff: Async<unknown, never, boolean> = asyncSucceed(true);
 
         const it = as[Symbol.iterator]();
         while (true) {
@@ -69,7 +73,6 @@ export function makeHub<A>(
 
         return eff;
     };
-
 
 
     const subscribe = (): Async<unknown, any, any> => {
@@ -102,10 +105,11 @@ export function makeHub<A>(
         asyncSync(() => {
             if (closed) return;
             closed = true;
+
             Array.from(queues).forEach((q) => q.shutdown());
+
             queues.clear();
         });
-
 
     return {
         publish,
@@ -114,3 +118,41 @@ export function makeHub<A>(
         shutdown,
     };
 }
+
+/* =======================
+     * ======================= */
+
+// Alias semántico: broadcast = hub
+export const broadcast = makeHub;
+
+/* =======================
+ * Stream integration
+ * ======================= */
+
+export function broadcastToHub<R, E, A>(
+    stream: ZStream<R, E, A>,
+    hub: Hub<A>
+): Async<R, E, void> {
+    return foreachStream(stream, (a) =>
+        asyncFlatMap(hub.publish(a), () => asyncSucceed(undefined))
+    );
+}
+
+export function fromHub<A>(hub: Hub<A>): ZStream<unknown, HubClosed, A> {
+    return managedStream(
+        asyncFlatMap(hub.subscribe(), (sub) => {
+            // stream definido UNA vez, reusando la misma sub
+            const loop: ZStream<unknown, HubClosed, A> = fromPull(
+                asyncFlatMap(
+                    asyncMapError(sub.take(), (_queueClosed) => none as Option<HubClosed>),
+                    (a) => asyncSucceed([a, loop] as const)
+                )
+            );
+            return asyncSucceed({
+                stream: loop,
+                release: (_exit) => asyncSync(() => sub.unsubscribe()),
+            });
+        })
+    );
+}
+

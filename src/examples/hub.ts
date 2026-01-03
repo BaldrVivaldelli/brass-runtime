@@ -1,7 +1,9 @@
-import {Async, asyncCatchAll, asyncFlatMap, asyncSync} from "../core/types/asyncEffect";
+import {async, Async, asyncCatchAll, asyncFlatMap, asyncSync} from "../core/types/asyncEffect";
 import {makeHub} from "../core/stream/hub";
 import {fork, unsafeRunAsync} from "../core/runtime/runtime";
 import {QueueClosed} from "../core/stream/queue";
+import {Fiber} from "../core/runtime/fiber";
+import {Exit} from "../core/types/effect";
 
 const log = (msg: string): Async<unknown, any, void> =>
     asyncSync(() => console.log(msg));
@@ -30,30 +32,38 @@ const consumer = <A>(
 
 const hub = makeHub<number>(8, "Dropping"); // para broadcast suele ir mejor Dropping/Sliding
 
+//TODO: Pensar si lo subo a fiber, porque seguramente se use mucho
+const awaitFiber = <E, A>(f: Fiber<E, A>): Async<unknown, E, A> =>
+    async((_env, cb: (exit: Exit<E, A>) => void) => {
+        f.join(cb);
+    });
+
 const program =
     asyncFlatMap(hub.subscribe(), (sub1) =>
         asyncFlatMap(hub.subscribe(), (sub2) =>
-            asyncSync(() => {
-                const f1 = fork(consumer("sub-1", sub1), {});
-                const f2 = fork(consumer("sub-2", sub2), {});
-
-                // Publicar algunos eventos
-                unsafeRunAsync(
+            asyncFlatMap(
+                // fork dentro del Async
+                asyncSync(() => {
+                    const f1 = fork(consumer("sub-1", sub1), {});
+                    const f2 = fork(consumer("sub-2", sub2), {});
+                    return { f1, f2 };
+                }),
+                ({ f1, f2 }) =>
                     asyncFlatMap(log("[main] publish 1..5"), () =>
-                        hub.publishAll([1, 2, 3, 4, 5])
-                    ),
-                    {},
-                    () => {
-                        // Cerramos el hub => ambas colas se apagan => ambos consumers terminan
-                        unsafeRunAsync(hub.shutdown(), {}, () => {
-                            f1.join(() => console.log("[main] joined sub-1"));
-                            f2.join(() => console.log("[main] joined sub-2"));
-                        });
-                    }
-                );
-            })
+                        asyncFlatMap(hub.publishAll([1, 2, 3, 4, 5]), () =>
+                            asyncFlatMap(hub.shutdown(), () =>
+                                asyncFlatMap(awaitFiber(f1), () =>
+                                    asyncFlatMap(awaitFiber(f2), () =>
+                                        log("[main] joined both")
+                                    )
+                                )
+                            )
+                        )
+                    )
+            )
         )
     );
+
 
 unsafeRunAsync(program, {}, (exit) => {
     console.log("[main] done:", exit);

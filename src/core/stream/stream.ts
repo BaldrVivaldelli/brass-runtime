@@ -47,13 +47,20 @@ export type Merge<R, E, A> = {
     readonly flip: boolean;
 };
 
+export type Scoped<R, E, A> = {
+    readonly _tag: "Scoped";
+    readonly acquire: ZIO<R, E, ZStream<R, E, A>>;
+    readonly release: (exit: Exit<any, any>) => Async<R, any, void>;
+};
+
 export type ZStream<R, E, A> =
     | Empty<R, E, A>
     | Emit<R, E, A>
     | Concat<R, E, A>
     | FromPull<R, E, A>
     | Flatten<R, E, A>
-    | Merge<R, E, A>;
+    | Merge<R, E, A>
+    | Scoped<R, E, A>;
 
 const widenOpt = <E1, E2>(opt: Option<E1>): Option<E1 | E2> =>
     opt._tag === "None" ? none : some(opt.value as E1 | E2);
@@ -63,6 +70,24 @@ export const fromPull = <R, E, A>(
 ): ZStream<R, E, A> => ({
     _tag: "FromPull",
     pull,
+});
+
+export const unwrapScoped = <R, E, A>(
+    acquire: ZIO<R, E, ZStream<R, E, A>>,
+    release: (exit: Exit<any, any>) => Async<R, any, void>
+): ZStream<R, E, A> => ({
+    _tag: "Scoped",
+    acquire,
+    release,
+});
+
+export const managedStream = <R, E, A>(
+    acquire: Async<R, E, { stream: ZStream<R, E, A>; release: (exit: Exit<any, any>) => Async<R, any, void> }>
+): ZStream<R, E, A> => ({
+    _tag: "Scoped",
+    acquire: asyncFlatMap(acquire, (x) => asyncSucceed(x.stream)) as any,
+    release: (exit) =>
+        asyncFlatMap(acquire, (x) => x.release(exit)) as any
 });
 
 
@@ -249,6 +274,34 @@ export function uncons<R, E, A>(
         case "Merge":
             console.log("[makeMergePull] defined");
             return makeMergePull(self.left, self.right, self.flip,0);
+        case "Scoped":
+            return async((env, cb) => {
+                const scope = new Scope(env);
+
+                scope.addFinalizer((ex) => self.release(ex));
+
+                scope.fork(self.acquire as any, env).join((ex) => {
+                    if (ex._tag === "Failure") {
+                        scope.close(ex as any);
+                        // acquire falla con E -> lo adaptamos a Option<E> = Some(E)
+                        cb({ _tag: "Failure", error: some(ex.error as any) } as any);
+                        return;
+                    }
+
+                    const inner = ex.value as ZStream<R, E, A>;
+
+                    // IMPORTANTE: transformamos el stream en uno que, cuando termine,
+                    // cierre el scope para disparar finalizers.
+                    const pulled = uncons(inner);
+
+                    // Si inner termina o falla, cerramos scope y propagamos
+                    (pulled as any)(env, (ex2: any) => {
+                        scope.close(ex2);
+                        cb(ex2);
+                    });
+                });
+            });
+
     }
 }
 
