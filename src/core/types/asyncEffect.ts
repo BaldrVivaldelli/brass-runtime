@@ -52,9 +52,9 @@ export function asyncMapError<R, E, E2, A>(
 }
 
 
-export function unit(): Async<unknown, unknown, undefined> {
-    return asyncSync(() => undefined);
-}
+export const unit = <R>(): Async<R, never, void> =>
+    asyncSucceed<void>(undefined) as any;
+
 
 export const asyncSucceed = <A>(value: A): Async<unknown, never, A> => ({
     _tag: "Succeed",
