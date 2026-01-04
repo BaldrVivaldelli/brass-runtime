@@ -32,7 +32,7 @@ const consumer = <A>(
 
 const hub = makeHub<number>(8, "Dropping"); // para broadcast suele ir mejor Dropping/Sliding
 
-//TODO: Pensar si lo subo a fiber, porque seguramente se use mucho
+//TODO: Pensar si lo subo a fiber, porque seguramente se use mucho y hay que ver la forma de meterlo en el ciclo de vida
 const awaitFiber = <E, A>(f: Fiber<E, A>): Async<unknown, E, A> =>
     async((_env, cb: (exit: Exit<E, A>) => void) => {
         f.join(cb);
