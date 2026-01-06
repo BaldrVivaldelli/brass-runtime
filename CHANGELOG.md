@@ -1,3 +1,15 @@
+# [1.7.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.6.2...v1.7.0) (2026-01-06)
+
+
+### Bug Fixes
+
+* fix readme and imports ([41e7c2b](https://github.com/BaldrVivaldelli/brass-runtime/commit/41e7c2b02d8783655bc3e34b8f83f66400f3ecc5))
+
+
+### Features
+
+* add zpipeline ([01e8aba](https://github.com/BaldrVivaldelli/brass-runtime/commit/01e8ababec8e3f7331e1a8c1e0c2f88862b10783))
+
 ## [1.6.2](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.6.1...v1.6.2) (2026-01-05)
 
 ## [1.6.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.6.0...v1.6.1) (2026-01-04)
