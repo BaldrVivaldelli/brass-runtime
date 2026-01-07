@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.7.0...v1.7.1) (2026-01-07)
+
+
+### Bug Fixes
+
+* fix withScope ([922aa1c](https://github.com/BaldrVivaldelli/brass-runtime/commit/922aa1ca037d8ce23d4b102a28de068b1273ded5))
+
 # [1.7.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.6.2...v1.7.0) (2026-01-06)
 
 
