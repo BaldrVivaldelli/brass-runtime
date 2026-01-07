@@ -1,6 +1,6 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
-import { httpClient } from "../http/httpClient";
+import {httpClient} from "../http";
 
 type Post = {
     userId: number;
@@ -30,8 +30,7 @@ async function main() {
 
     // ---------- POST JSON ----------
     console.log("\n== POST /posts (json) ==");
-    const p2: any = toPromise(
-        http.postJson(
+    const postData =http.postJson(
             "/posts",
             {
                 userId: 1,
@@ -39,7 +38,9 @@ async function main() {
                 body: "Probando POST desde Brass HTTP client",
             },
             { headers: { accept: "application/json" } }
-        ),
+        )
+    const p2: any = toPromise( postData
+        ,
         {}
     );
     console.log("returned isPromise:", p2 && typeof p2.then === "function");

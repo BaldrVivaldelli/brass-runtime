@@ -1,6 +1,6 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
-import { httpClientWithMeta } from "../http/httpClient"; // ajustá el path según tu barrel/export
+import {httpClientWithMeta} from "../http";
 
 type Post = {
     userId: number;

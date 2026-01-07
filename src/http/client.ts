@@ -19,14 +19,14 @@ export type HttpMethod =
     | "DELETE"
     | "HEAD"
     | "OPTIONS";
-
+export type HttpInit = Omit<RequestInit, "method" | "body" | "headers">;
 export type HttpRequest = {
     method: HttpMethod;
     url: string; // relative o absolute
     headers?: Record<string, string>;
     body?: string;
     // (si querés) params extra: redirect, cache, credentials, etc
-    init?: Omit<RequestInit, "method" | "headers" | "body">;
+    init?: HttpInit
 };
 
 export type HttpWireResponse = {

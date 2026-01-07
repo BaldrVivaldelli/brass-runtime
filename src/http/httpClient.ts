@@ -8,7 +8,7 @@ import {
     HttpWireResponseStream,
     MakeHttpConfig,
     makeHttp,
-    makeHttpStream, HttpError, mapAsync, mapTryAsync,
+    makeHttpStream, HttpError, mapAsync, mapTryAsync, HttpInit,
 } from "./client";
 
 import { Async } from "../core/types/asyncEffect";
@@ -66,9 +66,40 @@ const toResponseWithMeta = <A>(w: HttpWireResponse, body: A): HttpResponseWithMe
     },
 });
 
+
+
 export function httpClient(cfg: MakeHttpConfig = {}) {
     const wire: HttpClient = makeHttp(cfg);
 
+    const post = (
+        url: string,
+        body?: string,
+        init?: Omit<RequestInit, "method" | "body">
+    ) =>
+        request({
+            method: "POST",
+            url,
+            body: body && body.length > 0 ? body : undefined,
+            init,
+        });
+    const postJson = <A>(
+        url: string,
+        bodyObj: A,
+        init?: HttpInit & { headers?: Record<string, string> }
+    ) => {
+        const { headers, ...rest } = init ?? {};
+
+        return request({
+            method: "POST",
+            url,
+            body: JSON.stringify(bodyObj),
+            headers: {
+                "content-type": "application/json",
+                ...(headers ?? {}),
+            },
+            init: rest,
+        });
+    };
     const request = (req: HttpRequest) => wire(req);
 
     const getText = (url: string, init?: Omit<RequestInit, "method">) =>
@@ -87,6 +118,8 @@ export function httpClient(cfg: MakeHttpConfig = {}) {
         request,
         getText,
         getJson,
+        post,
+        postJson
     };
 }
 
@@ -94,6 +127,45 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
     const wire: HttpClient = makeHttp(cfg);
 
     const request = (req: HttpRequest) => wire(req);
+
+    const post = (
+        url: string,
+        body?: string,
+        init?: HttpInit & { headers?: Record<string, string> }
+    ) => {
+        const { headers, ...rest } = init ?? {};
+        return mapTryAsync(
+            request({
+                method: "POST",
+                url,
+                body: body && body.length > 0 ? body : undefined,
+                headers,
+                init: rest,
+            }),
+            (w) => toResponseWithMeta(w, w.bodyText)
+        );
+    };
+
+    const postJson = <A>(
+        url: string,
+        bodyObj: A,
+        init?: HttpInit & { headers?: Record<string, string> }
+    ) => {
+        const { headers, ...rest } = init ?? {};
+        return mapTryAsync(
+            request({
+                method: "POST",
+                url,
+                body: JSON.stringify(bodyObj),
+                headers: {
+                    "content-type": "application/json",
+                    ...(headers ?? {}),
+                },
+                init: rest,
+            }),
+            (w) => toResponseWithMeta(w, w.bodyText)
+        );
+    };
 
     const getText = (url: string, init?: Omit<RequestInit, "method">) =>
         mapTryAsync(
@@ -111,6 +183,8 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
         request,
         getText,
         getJson,
+        post,
+        postJson,
     };
 }
 

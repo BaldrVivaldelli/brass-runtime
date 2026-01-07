@@ -30,8 +30,8 @@ function awaitAll<E, A>(fibers: Fiber<E, A>[]): Async<any, never, void> {
 function ignoreErrors<R>(eff: Async<R, any, any>): Async<R, never, void> {
     return asyncFold(
         eff as any,
-        () => unit as any,
-        () => unit as any
+        () => unit<R>() as any,
+        () => unit<R>() as any
     ) as any;
 }
 
@@ -79,7 +79,6 @@ export class Scope<R> {
     }
 
     close(exit: Exit<any, any> = { _tag: "Success", value: undefined }): void {
-        // compat: fire-and-forget
         fork(this.closeAsync(exit), this.env);
     }
 
