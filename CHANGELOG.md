@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.7.1...v1.7.2) (2026-01-07)
+
+
+### Bug Fixes
+
+* add agent.md ([7db130b](https://github.com/BaldrVivaldelli/brass-runtime/commit/7db130b084bb0f78b2b920bb0c75c45b34537478))
+
 ## [1.7.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.7.0...v1.7.1) (2026-01-07)
 
 
