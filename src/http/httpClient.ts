@@ -4,36 +4,54 @@ import {
     HttpWireResponse,
     MakeHttpConfig,
     makeHttp,
-    HttpInit, HttpMethod,
+    HttpInit, HttpMethod, normalizeHeadersInit, makeHttpStream, withRetryStream, HttpClientStream,
 } from "./client";
 
 import { toPromise as runToPromise } from "../core/runtime/runtime";
 import { Async, AsyncWithPromise, mapTryAsync, withAsyncPromise } from "../core/types/asyncEffect";
 
 import { mergeHeaders, setHeaderIfMissing } from "./optics/request";
+import {RetryPolicy, withRetry} from "./retry/retry";
 
 type InitNoMethodBody = Omit<RequestInit, "method" | "body">;
 
-const normalizeHeaders = (h: any): Record<string, string> | undefined => {
-    if (!h) return undefined;
 
-    // Headers
-    if (typeof Headers !== "undefined" && h instanceof Headers) {
-        const out: Record<string, string> = {};
-        h.forEach((v: string, k: string) => (out[k] = v));
-        return out;
-    }
+// -------------------------------------------------------------------------------------------------
+// Tipos meta
+// -------------------------------------------------------------------------------------------------
 
-    // [ [k,v], ... ]
-    if (Array.isArray(h)) return Object.fromEntries(h);
-
-    // Record<string,string>
-    return { ...(h as Record<string, string>) };
+export type HttpMeta = {
+    request: HttpRequest;
+    urlFinal: string;
+    startedAt: number; // Date.now() cuando inicia el request
+    durationMs: number; // w.ms (del wire)
 };
 
-// -------------------------------------------------------------------------------------------------
-// Core compartido (evita duplicar splitInit/applyInitHeaders/withPromise/requestRaw/buildReq/toResponse)
-// -------------------------------------------------------------------------------------------------
+export type HttpResponse<A> = {
+    status: number;
+    statusText: string;
+    headers: Record<string, string>;
+    body: A;
+};
+
+export type HttpWireWithMeta = {
+    wire: HttpWireResponse;
+    meta: HttpMeta;
+};
+
+export type HttpResponseWithMeta<A> = {
+    wire: HttpWireResponse;
+    response: HttpResponse<A>;
+    meta: HttpMeta;
+};
+
+const resolveFinalUrl = (baseUrl: string | undefined, url: string): string => {
+    try {
+        return new URL(url, baseUrl ?? "").toString();
+    } catch {
+        return (baseUrl ?? "") + url;
+    }
+};
 
 type AnyInitWithHeaders = { headers?: any } & Record<string, any>;
 
@@ -48,7 +66,7 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
     const splitInit = (init?: AnyInitWithHeaders) => {
         const { headers, ...rest } = (init ?? {}) as any;
         return {
-            headers: normalizeHeaders(headers),
+            headers: normalizeHeadersInit(headers),
             init: rest as HttpInit,
         };
     };
@@ -95,96 +113,73 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
 export function httpClient(cfg: MakeHttpConfig = {}) {
     const core = createHttpCore(cfg);
 
-    // raw (sin dx)
-    const requestRaw = (req: HttpRequest) => core.requestRaw(req);
-
-    // dx (con .toPromise)
-    const request = (req: HttpRequest) => core.withPromise(requestRaw(req));
-
-    const get = (url: string, init?: InitNoMethodBody) => {
-        const req = core.buildReq("GET", url, init as any);
-        return request(req);
+    type Dx = {
+        request: (req: HttpRequest) => any; // tu AsyncWithPromise
+        get: (url: string, init?: any) => any;      // raw wire (tiene bodyText)
+        post: (url: string, body?: string, init?: any) => any; // raw wire
+        getText: (url: string, init?: any) => any;  // body: string
+        getJson: <A>(url: string, init?: any) => any; // body: A
+        postJson: (url: string, body?: any, init?: any) => any; // raw wire (hoy)
+        // 👇 extras DX
+        with: (mw: (next: HttpClient) => HttpClient) => Dx;
+        withRetry: (p: RetryPolicy) => Dx;
+        wire: HttpClient; // opcional, útil para power users
     };
 
-    const post = (url: string, body?: string, init?: InitNoMethodBody) => {
-        const req = core.buildReq("POST", url, init as any, body);
-        return request(req);
+    const make = (wire: HttpClient): Dx => {
+        const requestRaw = (req: HttpRequest) => wire(req);
+        const request = (req: HttpRequest) => core.withPromise(requestRaw(req));
+
+        const get = (url: string, init?: any) => {
+            const req = core.buildReq("GET", url, init);
+            return request(req); // <- wire response: status/headers/bodyText/ms
+        };
+
+        const post = (url: string, body?: string, init?: any) => {
+            const req = core.buildReq("POST", url, init, body);
+            return request(req);
+        };
+
+        const getText = (url: string, init?: InitNoMethodBody) => {
+            const req = core.buildReq("GET", url, init as any);
+
+            return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, w.bodyText)));
+        };
+
+        const getJson = <A>(url: string, init?: InitNoMethodBody) => {
+            const base = core.buildReq("GET", url, init as any);
+
+            // optics: default accept sin pisar
+            const req = setHeaderIfMissing("accept", "application/json")(base);
+
+            return core.withPromise(
+                mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A))
+            );
+        };
+
+
+        const postJson = (url: string, body?: any, init?: any) => {
+            const req = core.buildReq("POST", url, init, JSON.stringify(body ?? {}));
+            return request(req); // raw wire (tiene bodyText)
+        };
+
+        return {
+            request,
+            get,
+            post,
+            getText,
+            getJson,
+            postJson,
+            with: (mw) => make(mw(wire)),
+            withRetry: (p) => make(withRetry(p)(wire)),
+            wire,
+        };
     };
 
-    const postJson = <A extends object>(url: string, bodyObj: A, init?: InitNoMethodBody) => {
-        const base = core.buildReq("POST", url, init as any, JSON.stringify(bodyObj));
-
-        // optics: defaults sin pisar si ya vinieron
-        const req = setHeaderIfMissing("content-type", "application/json")(
-            setHeaderIfMissing("accept", "application/json")(base)
-        );
-
-        return request(req);
-    };
-
-    const getText = (url: string, init?: InitNoMethodBody) => {
-        const req = core.buildReq("GET", url, init as any);
-
-        return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, w.bodyText)));
-    };
-
-    const getJson = <A>(url: string, init?: InitNoMethodBody) => {
-        const base = core.buildReq("GET", url, init as any);
-
-        // optics: default accept sin pisar
-        const req = setHeaderIfMissing("accept", "application/json")(base);
-
-        return core.withPromise(
-            mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A))
-        );
-    };
-
-    return {
-        request,
-        get,
-        getText,
-        getJson,
-        post,
-        postJson,
-    };
+    return make(core.wire);
 }
 
-// -------------------------------------------------------------------------------------------------
-// Tipos meta
-// -------------------------------------------------------------------------------------------------
 
-export type HttpMeta = {
-    request: HttpRequest;
-    urlFinal: string;
-    startedAt: number; // Date.now() cuando inicia el request
-    durationMs: number; // w.ms (del wire)
-};
-
-export type HttpResponse<A> = {
-    status: number;
-    statusText: string;
-    headers: Record<string, string>;
-    body: A;
-};
-
-export type HttpWireWithMeta = {
-    wire: HttpWireResponse;
-    meta: HttpMeta;
-};
-
-export type HttpResponseWithMeta<A> = {
-    wire: HttpWireResponse;
-    response: HttpResponse<A>;
-    meta: HttpMeta;
-};
-
-const resolveFinalUrl = (baseUrl: string | undefined, url: string): string => {
-    try {
-        return new URL(url, baseUrl ?? "").toString();
-    } catch {
-        return (baseUrl ?? "") + url;
-    }
-};
 
 // -------------------------------------------------------------------------------------------------
 // httpClientWithMeta
@@ -276,4 +271,35 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
         post,     // => { wire, meta }
         postJson, // => { wire, meta } (y además setea headers via optics)
     };
+}
+
+
+export function httpClientStream(cfg: MakeHttpConfig = {}) {
+    const wire = makeHttpStream(cfg);
+
+    const make = (w: HttpClientStream) => {
+        // ✅ igual que en httpClient.ts
+        const withPromise = <R, E, A>(eff: Async<R, E, A>): AsyncWithPromise<R, E, A> =>
+            withAsyncPromise<R, E, A>((e, env) => runToPromise(e, env))(eff);
+
+        const request = (req: HttpRequest) => withPromise(w(req));
+
+        const getStream = (url: string, init?: InitNoMethodBody) => {
+            const base: HttpRequest = { method: "GET", url, init: init as any };
+            const req = setHeaderIfMissing("accept", "*/*")(base);
+            return request(req);
+        };
+
+        return {
+            request,
+            getStream,
+            get: getStream,
+
+            with: (mw: (n: HttpClientStream) => HttpClientStream) => make(mw(w)),
+            withRetry: (p: RetryPolicy) => make(withRetryStream(p)(w)),
+            wire: w,
+        };
+    };
+
+    return make(wire);
 }

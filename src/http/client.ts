@@ -1,10 +1,11 @@
 // src/http/client.ts
-import {Async, asyncFlatMap, asyncSucceed, asyncSync} from "../core/types/asyncEffect";
+import {Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed, asyncSync} from "../core/types/asyncEffect";
 import { fromPromiseAbortable } from "../core/runtime/runtime";
 import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 
 // 👇 optics
 import { Request, mergeHeadersUnder } from "./optics/request";
+import {RetryPolicy} from "./retry/retry";
 
 export type HttpError =
     | { _tag: "Abort" }
@@ -51,8 +52,27 @@ export type HttpWireResponseStream = {
     ms: number;
 };
 
+
 export type HttpClientStream = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponseStream>;
-export type HttpClient = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponse>;
+
+
+export type HttpClient = HttpClientFn & {
+    with: (mw: HttpMiddleware) => HttpClient;
+};
+
+
+export const withMiddleware =
+    (mw: HttpMiddleware) =>
+        (c: HttpClient): HttpClient =>
+            decorate(mw(c));
+
+export const decorate = (run: HttpClientFn): HttpClient =>
+    Object.assign(((req: HttpRequest) => run(req)) as HttpClientFn, {
+        with: (mw: HttpMiddleware) => decorate(mw(run)),
+    });
+
+export type HttpClientFn = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponse>;
+export type HttpMiddleware = (next: HttpClientFn) => HttpClientFn;
 
 const normalizeHttpError = (e: unknown): HttpError => {
     if (e instanceof DOMException && e.name === "AbortError") return { _tag: "Abort" };
@@ -60,8 +80,7 @@ const normalizeHttpError = (e: unknown): HttpError => {
     return { _tag: "FetchError", message: String(e) };
 };
 
-// --- NUEVO: normalizar HeadersInit -> Record<string,string> ---
-const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
+export const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
     if (!h) return undefined;
 
     // Headers
@@ -148,7 +167,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const defaultHeaders = cfg.headers ?? {};
     const normalize = normalizeRequest(defaultHeaders);
 
-    return (req0) =>
+    const run: HttpClientFn = (req0) =>
         fromPromiseAbortable<HttpError, HttpWireResponse>(
             async (signal) => {
                 const req = normalize(req0);
@@ -185,6 +204,81 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
             },
             normalizeHttpError
         );
+
+    return decorate(run);
 }
 
+
 // helpers existentes
+
+
+const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+const defaultRetryOnError = (e: HttpError) => e._tag === "FetchError";
+const defaultRetryOnStatus = (s: number) =>
+    s === 408 || s === 429 || s === 500 || s === 502 || s === 503 || s === 504;
+const backoffDelayMs = (attempt: number, base: number, cap: number) => {
+    const exp = base * Math.pow(2, attempt);
+    const lim = clamp(exp, 0, cap);
+    return Math.floor(Math.random() * lim);
+};
+const sleepMs = (ms: number) =>
+    fromPromiseAbortable<HttpError, void>(
+        (signal) =>
+            new Promise<void>((resolve, reject) => {
+                if (signal.aborted) return reject({ _tag: "Abort" } satisfies HttpError);
+
+                const id = setTimeout(resolve, ms);
+                signal.addEventListener(
+                    "abort",
+                    () => {
+                        clearTimeout(id);
+                        reject({ _tag: "Abort" } satisfies HttpError);
+                    },
+                    { once: true }
+                );
+            }),
+        (e) => (typeof e === "object" && e && "_tag" in (e as any) ? (e as HttpError) : ({ _tag: "FetchError", message: String(e) } as HttpError))
+    );
+const retryAfterMs = (headers: Record<string, string>) => {
+    const key = Object.keys(headers).find((k) => k.toLowerCase() === "retry-after");
+    if (!key) return undefined;
+
+    const v = headers[key]?.trim();
+    if (!v) return undefined;
+
+    // segundos
+    const secs = Number(v);
+    if (Number.isFinite(secs)) return Math.max(0, Math.floor(secs * 1000));
+
+    // fecha
+    const t = Date.parse(v);
+    if (Number.isFinite(t)) return Math.max(0, t - Date.now());
+
+    return undefined;
+};
+
+export const withRetryStream =
+    (p: RetryPolicy) =>
+        (next: HttpClientStream): HttpClientStream =>
+            ((req) => {
+                const loop = (attempt: number): any =>
+                    asyncFold(
+                        next(req),
+                        (e: HttpError) => {
+                            if (e._tag === "Abort" || e._tag === "BadUrl") return asyncFail(e);
+                            const canRetry = attempt < p.maxRetries && (p.retryOnError ?? defaultRetryOnError)(e);
+                            if (!canRetry) return asyncFail(e);
+                            const d = backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
+                            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1));
+                        },
+                        (w) => {
+                            const canRetry = attempt < p.maxRetries && (p.retryOnStatus ?? defaultRetryOnStatus)(w.status);
+                            if (!canRetry) return asyncSucceed(w);
+                            const ra = retryAfterMs(w.headers);
+                            const d = ra ?? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
+                            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1));
+                        }
+                    );
+
+                return loop(0);
+            }) as any;
