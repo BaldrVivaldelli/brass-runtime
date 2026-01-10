@@ -1,6 +1,6 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
-import {httpClientWithMeta} from "../http";
+import { httpClientWithMeta } from "../http";
 
 type Post = {
     userId: number;
@@ -10,7 +10,6 @@ type Post = {
 };
 
 async function main() {
-    // Transparente: construye makeHttp(cfg) + withMeta()
     const http = httpClientWithMeta({
         baseUrl: "https://jsonplaceholder.typicode.com",
     });
@@ -25,11 +24,16 @@ async function main() {
     console.log("returned isPromise:", p1 && typeof p1.then === "function");
 
     const r1 = await p1;
-    console.log(r1)
-    console.log("status:", r1.status, r1.meta.statusText ?? "");
-    console.log("ms:", r1.meta.ms);
-    console.log("title:", r1.title);
-    console.log("body:", r1.body);
+
+    console.log("status:", r1.response.status, r1.response.statusText ?? "");
+    console.log("ms:", r1.meta.durationMs);
+    console.log("urlFinal:", r1.meta.urlFinal);
+    console.log("title:", r1.response.body.title);
+    console.log("body:", r1.response.body);
+
+    // si querés ver el wire crudo:
+    // console.log("wire.status:", r1.wire.status);
+    // console.log("wire.bodyText:", r1.wire.bodyText);
 
     // ---------- POST JSON ----------
     console.log("\n== POST /posts (json) ==");
@@ -49,16 +53,14 @@ async function main() {
 
     const r2 = await p2;
 
-    // OJO: postJson hoy devuelve WIRE (HttpWireResponse) en el archivo que te pasé.
-    // Si querés meta+json también para POST, abajo te dejo 2 opciones.
-    console.log("wire.status:", r2.status, r2.statusText ?? "");
-    console.log("wire.ms:", r2.ms);
-    console.log("wire.bodyText:", r2.bodyText);
+    // postJson(withMeta) => { wire, meta }
+    console.log("wire.status:", r2.wire.status, r2.wire.statusText ?? "");
+    console.log("ms:", r2.meta.durationMs);
+    console.log("wire.bodyText:", r2.wire.bodyText);
 
-    // ---------- RAW WIRE ----------
-    // const wire = await toPromise(http.get("/posts/1"), {});
-    // console.log("wire.status:", wire.status, wire.statusText, "ms:", wire.ms);
-    // console.log("wire.bodyText:", wire.bodyText);
+    // si querés parsear el body del POST:
+    const created = JSON.parse(r2.wire.bodyText) as Post;
+    console.log("created id:", created.id);
 }
 
 main().catch((e) => {

@@ -4,7 +4,7 @@ import {
     HttpWireResponse,
     MakeHttpConfig,
     makeHttp,
-    HttpInit, HttpMethod, normalizeHeadersInit, makeHttpStream, withRetryStream, HttpClientStream,
+    HttpInit, HttpMethod, normalizeHeadersInit, makeHttpStream, withRetryStream, HttpClientStream, HttpMiddleware,
 } from "./client";
 
 import { toPromise as runToPromise } from "../core/runtime/runtime";
@@ -110,58 +110,44 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
 // httpClient (sin meta)
 // -------------------------------------------------------------------------------------------------
 
+export type Dx = {
+    request: (req: HttpRequest) => any;
+    get: (url: string, init?: any) => any;
+    post: (url: string, body?: string, init?: any) => any;
+    getText: (url: string, init?: any) => any;
+    getJson: <A>(url: string, init?: any) => any;
+    postJson: (url: string, body?: any, init?: any) => any;
+
+    with: (mw: HttpMiddleware) => Dx;
+    withRetry: (p: RetryPolicy) => Dx;
+
+    wire: HttpClient;
+};
 export function httpClient(cfg: MakeHttpConfig = {}) {
     const core = createHttpCore(cfg);
 
-    type Dx = {
-        request: (req: HttpRequest) => any; // tu AsyncWithPromise
-        get: (url: string, init?: any) => any;      // raw wire (tiene bodyText)
-        post: (url: string, body?: string, init?: any) => any; // raw wire
-        getText: (url: string, init?: any) => any;  // body: string
-        getJson: <A>(url: string, init?: any) => any; // body: A
-        postJson: (url: string, body?: any, init?: any) => any; // raw wire (hoy)
-        // 👇 extras DX
-        with: (mw: (next: HttpClient) => HttpClient) => Dx;
-        withRetry: (p: RetryPolicy) => Dx;
-        wire: HttpClient; // opcional, útil para power users
-    };
+
 
     const make = (wire: HttpClient): Dx => {
         const requestRaw = (req: HttpRequest) => wire(req);
         const request = (req: HttpRequest) => core.withPromise(requestRaw(req));
 
-        const get = (url: string, init?: any) => {
-            const req = core.buildReq("GET", url, init);
-            return request(req); // <- wire response: status/headers/bodyText/ms
-        };
-
-        const post = (url: string, body?: string, init?: any) => {
-            const req = core.buildReq("POST", url, init, body);
-            return request(req);
-        };
+        const get = (url: string, init?: any) => request(core.buildReq("GET", url, init));
+        const post = (url: string, body?: string, init?: any) => request(core.buildReq("POST", url, init, body));
 
         const getText = (url: string, init?: InitNoMethodBody) => {
             const req = core.buildReq("GET", url, init as any);
-
             return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, w.bodyText)));
         };
 
         const getJson = <A>(url: string, init?: InitNoMethodBody) => {
             const base = core.buildReq("GET", url, init as any);
-
-            // optics: default accept sin pisar
             const req = setHeaderIfMissing("accept", "application/json")(base);
-
-            return core.withPromise(
-                mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A))
-            );
+            return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A)));
         };
 
-
-        const postJson = (url: string, body?: any, init?: any) => {
-            const req = core.buildReq("POST", url, init, JSON.stringify(body ?? {}));
-            return request(req); // raw wire (tiene bodyText)
-        };
+        const postJson = (url: string, body?: any, init?: any) =>
+            request(core.buildReq("POST", url, init, JSON.stringify(body ?? {})));
 
         return {
             request,
@@ -170,14 +156,17 @@ export function httpClient(cfg: MakeHttpConfig = {}) {
             getText,
             getJson,
             postJson,
-            with: (mw) => make(mw(wire)),
-            withRetry: (p) => make(withRetry(p)(wire)),
+
+            with: (mw) => make(wire.with(mw)),
+            withRetry: (p) => make(wire.with(withRetry(p))),
+
             wire,
         };
     };
 
     return make(core.wire);
 }
+
 
 
 

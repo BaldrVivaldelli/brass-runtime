@@ -1,4 +1,12 @@
-import {HttpClient, HttpError, HttpMethod, HttpRequest, HttpWireResponse} from "../client";
+import {
+    HttpClient,
+    HttpClientFn,
+    HttpError,
+    HttpMethod,
+    HttpMiddleware,
+    HttpRequest,
+    HttpWireResponse
+} from "../client";
 import {Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed} from "../../core/types/asyncEffect";
 import {fromPromiseAbortable} from "../../core/runtime/runtime";
 
@@ -22,10 +30,10 @@ const defaultRetryOnError = (e: HttpError) => e._tag === "FetchError";
 const normalizeHttpError = (e: unknown): HttpError => {
     // AbortError (browser / node18+)
     if (typeof e === "object" && e !== null && "name" in e && (e as any).name === "AbortError") {
-        return { _tag: "Abort" };
+        return {_tag: "Abort"};
     }
     if (typeof e === "object" && e && "_tag" in (e as any)) return e as HttpError;
-    return { _tag: "FetchError", message: String(e) };
+    return {_tag: "FetchError", message: String(e)};
 };
 
 // sleep cancelable (si el fiber se interrumpe, cancela el timer)
@@ -41,12 +49,12 @@ const sleepMs = (ms: number): Async<unknown, HttpError, void> =>
                     const err =
                         typeof (globalThis as any).DOMException === "function"
                             ? new (globalThis as any).DOMException("Aborted", "AbortError")
-                            : ({ name: "AbortError" } as any);
+                            : ({name: "AbortError"} as any);
                     reject(err);
                 };
 
                 if (signal.aborted) return onAbort();
-                signal.addEventListener("abort", onAbort, { once: true });
+                signal.addEventListener("abort", onAbort, {once: true});
             }),
         normalizeHttpError
     );
@@ -82,8 +90,8 @@ const retryAfterMs = (headers: Record<string, string>): number | undefined => {
 };
 
 export const withRetry =
-    (p: RetryPolicy) =>
-        (next: HttpClient): HttpClient => {
+    (p: RetryPolicy): HttpMiddleware =>
+        (next: HttpClientFn): HttpClientFn => {
             const retryOnMethods = p.retryOnMethods ?? defaultRetryableMethods;
             const retryOnStatus = p.retryOnStatus ?? defaultRetryOnStatus;
             const retryOnError = p.retryOnError ?? defaultRetryOnError;
@@ -95,8 +103,6 @@ export const withRetry =
 
                 return asyncFold(
                     next(req),
-
-                    // onFailure
                     (e) => {
                         if (e._tag === "Abort" || e._tag === "BadUrl") return asyncFail(e);
 
@@ -106,15 +112,12 @@ export const withRetry =
                         const d = backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
                         return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1));
                     },
-
-                    // onSuccess
                     (w) => {
                         const canRetry = attempt < p.maxRetries && retryOnStatus(w.status);
                         if (!canRetry) return asyncSucceed(w);
 
                         const ra = retryAfterMs(w.headers);
                         const d = ra ?? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
-
                         return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1));
                     }
                 );
@@ -122,3 +125,4 @@ export const withRetry =
 
             return (req) => loop(req, 0);
         };
+
