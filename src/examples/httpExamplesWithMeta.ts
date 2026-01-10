@@ -25,9 +25,11 @@ async function main() {
     console.log("returned isPromise:", p1 && typeof p1.then === "function");
 
     const r1 = await p1;
+    console.log(r1)
     console.log("status:", r1.status, r1.meta.statusText ?? "");
     console.log("ms:", r1.meta.ms);
-    console.log("title:", r1.body.title);
+    console.log("title:", r1.title);
+    console.log("body:", r1.body);
 
     // ---------- POST JSON ----------
     console.log("\n== POST /posts (json) ==");

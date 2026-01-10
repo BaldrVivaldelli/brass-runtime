@@ -122,3 +122,29 @@ export function asyncInterruptible<R, E, A>(
 ): Async<R, E, A> {
     return async(register);
 }
+
+export type AsyncWithPromise<R, E, A> = Async<R, E, A> & {
+    toPromise: (env: R) => Promise<A>;
+    unsafeRunPromise: () => Promise<A>; // atajo para env = {}
+};
+
+
+export const withAsyncPromise =
+    <R, E, A>(run: (eff: Async<R, E, A>, env: R) => Promise<A>) =>
+        (eff: Async<R, E, A>): AsyncWithPromise<R, E, A> => {
+            const anyEff: any = eff;
+
+            //si lo llamo varias veces, no lo re-re escribo
+            if (!anyEff.toPromise) {
+                anyEff.toPromise = (env: R) => run(eff, env);
+                anyEff.unsafeRunPromise = () => run(eff, {} as R);
+            }
+
+            return anyEff as AsyncWithPromise<R, E, A>;
+        };
+
+export const mapAsync = <R, E, A, B>(fa: Async<R, E, A>, f: (a: A) => B): Async<R, E, B> =>
+    asyncFlatMap(fa, (a) => asyncSucceed(f(a)));
+
+export const mapTryAsync = <R, E, A, B>(fa: Async<R, E, A>, f: (a: A) => B): Async<R, E, B> =>
+    asyncFlatMap(fa, (a) => asyncSync(() => f(a)) as any);

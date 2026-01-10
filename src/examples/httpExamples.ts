@@ -1,6 +1,7 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
 import {httpClient} from "../http";
+import {mergeHeaders, setHeaderIfMissing} from "../http/optics/request";
 
 type Post = {
     userId: number;
@@ -57,6 +58,21 @@ async function main() {
     // const raw = await toPromise(http.get("/posts/1"), {});
     // console.log("wire.status:", raw.status);
     // console.log("wire.bodyText:", raw.bodyText);
+
+    const req = mergeHeaders({ accept: "application/json" })(
+        setHeaderIfMissing("content-type", "application/json")({
+            method: "POST",
+            url: "/posts",
+            body: JSON.stringify({
+                userId: 1,
+                title: "Hola Brass",
+                body: "Probando POST desde Brass HTTP client",
+            }),
+        })
+    );
+
+    const response_tres = await http.request(req).toPromise({});
+    console.log("response_tres.bodyText:", response_tres.bodyText);
 }
 
 main().catch((e) => {

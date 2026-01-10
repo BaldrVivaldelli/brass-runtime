@@ -1,10 +1,10 @@
 // src/http/client.ts
-import {async, Async, asyncFlatMap, asyncSucceed, asyncSync} from "../core/types/asyncEffect";
+import {Async, asyncFlatMap, asyncSucceed, asyncSync} from "../core/types/asyncEffect";
 import { fromPromiseAbortable } from "../core/runtime/runtime";
-import {none, Option, some} from "../core/types/option";
-import {succeed, ZIO} from "../core/types/effect";
 import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 
+// 👇 optics
+import { Request, mergeHeadersUnder } from "./optics/request";
 
 export type HttpError =
     | { _tag: "Abort" }
@@ -19,14 +19,15 @@ export type HttpMethod =
     | "DELETE"
     | "HEAD"
     | "OPTIONS";
+
 export type HttpInit = Omit<RequestInit, "method" | "body" | "headers">;
+
 export type HttpRequest = {
     method: HttpMethod;
     url: string; // relative o absolute
     headers?: Record<string, string>;
     body?: string;
-    // (si querés) params extra: redirect, cache, credentials, etc
-    init?: HttpInit
+    init?: HttpInit;
 };
 
 export type HttpWireResponse = {
@@ -42,7 +43,6 @@ export type MakeHttpConfig = {
     headers?: Record<string, string>;
 };
 
-
 export type HttpWireResponseStream = {
     status: number;
     statusText: string;
@@ -52,23 +52,76 @@ export type HttpWireResponseStream = {
 };
 
 export type HttpClientStream = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponseStream>;
-
 export type HttpClient = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponse>;
+
+const normalizeHttpError = (e: unknown): HttpError => {
+    if (e instanceof DOMException && e.name === "AbortError") return { _tag: "Abort" };
+    if (typeof e === "object" && e && "_tag" in (e as any)) return e as HttpError;
+    return { _tag: "FetchError", message: String(e) };
+};
+
+// --- NUEVO: normalizar HeadersInit -> Record<string,string> ---
+const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
+    if (!h) return undefined;
+
+    // Headers
+    if (typeof Headers !== "undefined" && h instanceof Headers) {
+        const out: Record<string, string> = {};
+        h.forEach((v: string, k: string) => (out[k] = v));
+        return out;
+    }
+
+    // [ [k,v], ... ]
+    if (Array.isArray(h)) return Object.fromEntries(h);
+
+    // Record<string,string>
+    if (typeof h === "object") return { ...(h as Record<string, string>) };
+
+    return undefined;
+};
+
+// --- NUEVO: aplica defaults + init.headers usando optics ---
+const normalizeRequest =
+    (defaultHeaders: Record<string, string>) =>
+        (req0: HttpRequest): HttpRequest => {
+            // defaults por abajo (no pisan req.headers)
+            let req = Object.keys(defaultHeaders).length
+                ? mergeHeadersUnder(defaultHeaders)(req0)
+                : req0;
+
+            // si alguien pasó init.headers “a lo fetch”, también lo contemplamos:
+            const initHeaders = normalizeHeadersInit((req0 as any).init?.headers);
+            if (initHeaders && Object.keys(initHeaders).length) {
+                // init.headers por abajo de req.headers, pero puede pisar defaults
+                req = mergeHeadersUnder(initHeaders)(req);
+            }
+
+            return req;
+        };
 
 export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
+    const normalize = normalizeRequest(defaultHeaders);
 
-    return (req) =>
+    return (req0) =>
         fromPromiseAbortable<HttpError, HttpWireResponseStream>(
             async (signal) => {
-                const url = new URL(req.url, baseUrl);
+                const req = normalize(req0);
+
+                let url: URL;
+                try {
+                    url = new URL(req.url, baseUrl);
+                } catch {
+                    throw { _tag: "BadUrl", message: `URL inválida: ${req.url}` } satisfies HttpError;
+                }
+
                 const started = performance.now();
 
                 const res = await fetch(url, {
                     ...(req.init ?? {}),
                     method: req.method,
-                    headers: { ...defaultHeaders, ...(req.headers ?? {}) },
+                    headers: Request.headers.get(req), // 👈 optics: headers ya normalizados
                     body: req.body,
                     signal,
                 });
@@ -90,20 +143,16 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
         );
 }
 
-
-const normalizeHttpError = (e: unknown): HttpError => {
-    if (e instanceof DOMException && e.name === "AbortError") return { _tag: "Abort" };
-    if (typeof e === "object" && e && "_tag" in (e as any)) return e as HttpError;
-    return { _tag: "FetchError", message: String(e) };
-};
-
 export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
+    const normalize = normalizeRequest(defaultHeaders);
 
-    return (req) =>
+    return (req0) =>
         fromPromiseAbortable<HttpError, HttpWireResponse>(
             async (signal) => {
+                const req = normalize(req0);
+
                 let url: URL;
                 try {
                     url = new URL(req.url, baseUrl);
@@ -116,12 +165,13 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                 const res = await fetch(url, {
                     ...(req.init ?? {}),
                     method: req.method,
-                    headers: { ...defaultHeaders, ...(req.headers ?? {}) },
+                    headers: Request.headers.get(req), // 👈 optics
                     body: req.body,
                     signal,
                 });
 
                 const bodyText = await res.text();
+
                 const headers: Record<string, string> = {};
                 res.headers.forEach((v, k) => (headers[k] = v));
 
@@ -137,14 +187,4 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
         );
 }
 
-// util mini: map y mapTry (sin depender de .map en Async)
-export const mapAsync = <R, E, A, B>(fa: Async<R, E, A>, f: (a: A) => B): Async<R, E, B> =>
-    asyncFlatMap(fa, (a) => asyncSucceed(f(a)));
-
-export const mapTryAsync = <R, E, A, B>(
-    fa: Async<R, E, A>,
-    f: (a: A) => B
-): Async<R, E, B> =>
-    asyncFlatMap(fa, (a) =>
-        asyncSync(() => f(a)) as any // asyncSync captura throw
-    );
+// helpers existentes
