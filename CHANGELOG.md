@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.8.0...v1.9.0) (2026-01-10)
+
+
+### Bug Fixes
+
+* fix types ([dd591b4](https://github.com/BaldrVivaldelli/brass-runtime/commit/dd591b4274a58daab0b702912b53c9053a224225))
+
 # [1.8.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.7.2...v1.8.0) (2026-01-10)
 
 ## [1.7.2](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.7.1...v1.7.2) (2026-01-07)
