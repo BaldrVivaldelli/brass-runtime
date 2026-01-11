@@ -1,3 +1,10 @@
+## [1.9.1](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.9.0...v1.9.1) (2026-01-11)
+
+
+### Bug Fixes
+
+* add type in postjson ([81ac36c](https://github.com/BaldrVivaldelli/brass-runtime/commit/81ac36c1293b4be91e401f59a9fb33372b287b69))
+
 # [1.9.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.8.0...v1.9.0) (2026-01-10)
 
 
