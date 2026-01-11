@@ -116,7 +116,7 @@ export type Dx = {
     post: (url: string, body?: string, init?: any) => any;
     getText: (url: string, init?: any) => any;
     getJson: <A>(url: string, init?: any) => any;
-    postJson: (url: string, body?: any, init?: any) => any;
+    postJson: <A>(url: string, body?: any, init?: any) => any;
 
     with: (mw: HttpMiddleware) => Dx;
     withRetry: (p: RetryPolicy) => Dx;
