@@ -32,13 +32,14 @@ async function main() {
     console.log("body:", r1.response.body);
 
     // si querés ver el wire crudo:
-    // console.log("wire.status:", r1.wire.status);
-    // console.log("wire.bodyText:", r1.wire.bodyText);
+     console.log("wire.status:", r1.wire.status);
+     console.log("wire.bodyText:", r1.wire.bodyText);
 
     // ---------- POST JSON ----------
     console.log("\n== POST /posts (json) ==");
+
     const p2: any = toPromise(
-        http.postJson(
+        http.postJson<Post>(
             "/posts",
             {
                 userId: 1,
@@ -53,14 +54,11 @@ async function main() {
 
     const r2 = await p2;
 
-    // postJson(withMeta) => { wire, meta }
+// postJson(withMeta) => { wire, response(json), meta }
     console.log("wire.status:", r2.wire.status, r2.wire.statusText ?? "");
     console.log("ms:", r2.meta.durationMs);
-    console.log("wire.bodyText:", r2.wire.bodyText);
-
-    // si querés parsear el body del POST:
-    const created = JSON.parse(r2.wire.bodyText) as Post;
-    console.log("created id:", created.id);
+// ✅ parseado
+    console.log("created id:", r2.response.body.id);
 }
 
 main().catch((e) => {

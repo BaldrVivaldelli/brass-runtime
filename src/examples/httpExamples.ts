@@ -41,8 +41,9 @@ async function main() {
     console.log("\n== POST /posts (json) ==");
 
     // postJson debería devolverte WIRE => tiene bodyText
+    // postJson ahora devuelve HttpResponse<Post> (parseado)
     const p2: any = toPromise(
-        http.postJson(
+        http.postJson<Post>(
             "/posts",
             {
                 userId: 1,
@@ -55,13 +56,10 @@ async function main() {
     );
     console.log("returned isPromise:", p2 && typeof p2.then === "function");
 
-    const wire = await p2;
+    const r2 = await p2;
     console.log("\n LLEGUE");
-    console.log("status:", wire.status);
-    console.log("bodyText:", wire.bodyText);
-
-    const created = JSON.parse(wire.bodyText) as Post;
-    console.log("created id:", created.id);
+    console.log("status:", r2.status);
+    console.log("created id:", r2.body.id);
 
     // ---------- RAW WIRE ----------
     // Si querés wire directo:
