@@ -5,6 +5,7 @@ import {
     MakeHttpConfig,
     makeHttp,
     HttpInit, HttpMethod, normalizeHeadersInit, makeHttpStream, withRetryStream, HttpClientStream, HttpMiddleware,
+    HttpError,
 } from "./client";
 
 import { toPromise as runToPromise } from "../core/runtime/runtime";
@@ -111,18 +112,21 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
 // -------------------------------------------------------------------------------------------------
 
 export type Dx = {
-    request: (req: HttpRequest) => any;
-    get: (url: string, init?: any) => any;
-    post: (url: string, body?: string, init?: any) => any;
-    getText: (url: string, init?: any) => any;
-    getJson: <A>(url: string, init?: any) => any;
-    postJson: <A>(url: string, body?: any, init?: any) => any;
+    request: (req: HttpRequest) => AsyncWithPromise<unknown, HttpError, HttpWireResponse>;
+    get: (url: string, init?: AnyInitWithHeaders) => AsyncWithPromise<unknown, HttpError, HttpWireResponse>;
+    post: (url: string, body?: string, init?: AnyInitWithHeaders) => AsyncWithPromise<unknown, HttpError, HttpWireResponse>;
+
+    getText: (url: string, init?: InitNoMethodBody) => AsyncWithPromise<unknown, HttpError, HttpResponse<string>>;
+    getJson: <A>(url: string, init?: InitNoMethodBody) => AsyncWithPromise<unknown, HttpError, HttpResponse<A>>;
+    postJson: <A>(url: string, bodyObj: unknown, init?: AnyInitWithHeaders) => AsyncWithPromise<unknown, HttpError, HttpResponse<A>>;
 
     with: (mw: HttpMiddleware) => Dx;
     withRetry: (p: RetryPolicy) => Dx;
 
+    // power users
     wire: HttpClient;
 };
+
 export function httpClient(cfg: MakeHttpConfig = {}) {
     const core = createHttpCore(cfg);
 
@@ -146,8 +150,18 @@ export function httpClient(cfg: MakeHttpConfig = {}) {
             return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A)));
         };
 
-        const postJson = (url: string, body?: any, init?: any) =>
-            request(core.buildReq("POST", url, init, JSON.stringify(body ?? {})));
+        const postJson = <A>(url: string, bodyObj: unknown, init?: AnyInitWithHeaders) => {
+            const base = core.buildReq("POST", url, init, JSON.stringify(bodyObj ?? {}));
+
+            // defaults sin pisar (optics)
+            const req = setHeaderIfMissing("content-type", "application/json")(
+                setHeaderIfMissing("accept", "application/json")(base)
+            );
+
+            return core.withPromise(
+                mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A))
+            );
+        };
 
         return {
             request,
@@ -206,20 +220,31 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
     };
 
     // Mantengo tu firma original (más “directa” con HttpInit)
+    // => { wire, response(json), meta }
     const postJson = <A>(
         url: string,
-        bodyObj: A,
+        bodyObj: unknown,
         init?: HttpInit & { headers?: Record<string, string> }
     ) => {
-        const base = core.buildReq("POST", url, init as any, JSON.stringify(bodyObj));
+        const base = core.buildReq("POST", url, init as any, JSON.stringify(bodyObj ?? {}));
 
-        // optics: defaults sin pisar si ya vinieron
+        // defaults sin pisar si ya vinieron
         const req = setHeaderIfMissing("content-type", "application/json")(
             setHeaderIfMissing("accept", "application/json")(base)
         );
 
-        return request(req);
+        const startedAt = Date.now();
+
+        return core.withPromise(
+            mapTryAsync(core.requestRaw(req), (w) => ({
+                wire: w,
+                response: core.toResponse(w, JSON.parse(w.bodyText) as A),
+                meta: mkMeta(req, w, startedAt),
+            } satisfies HttpResponseWithMeta<A>))
+        );
     };
+
+
 
     // => { wire, response(text), meta }
     const getText = (url: string, init?: InitNoMethodBody) => {
