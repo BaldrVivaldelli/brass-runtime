@@ -146,3 +146,27 @@ export function withScope<R, A>(
         scope.close();
     }
 }
+
+export function withScopeAsync<R, E, A>(
+    use: (scope: Scope<R>) => Async<R, E, A>
+): Async<R, E | Interrupted, A> {
+    return async((env, cb) => {
+        const scope = new Scope<R>(env);
+
+        // Ejecutamos el efecto dentro del scope y esperamos su Exit
+        const fiber = scope.fork(use(scope), env);
+
+        fiber.join((exit: Exit<E | Interrupted, A>) => {
+            try {
+                scope.close(exit);
+            } catch (closeErr) {
+                // Si close rompe, en este runtime normalmente conviene priorizar el error de close.
+                // Si preferís no “pisar” el exit original, decímelo y te lo adapto.
+                cb({ _tag: "Failure", error: closeErr as any } as any);
+                return;
+            }
+
+            cb(exit);
+        });
+    });
+}
