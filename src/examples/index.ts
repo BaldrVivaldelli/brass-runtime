@@ -1,4 +1,4 @@
-/*
+
 import "./demo";
 import "./fiberFinalizer";
 import "./resourceExample";
@@ -15,5 +15,5 @@ import "./httpExamplesWithMeta"
 import "./httpExamples"
 
 
-import "./httpClientStream"*/
+import "./httpClientStream"
 import "./scopeAsync"
