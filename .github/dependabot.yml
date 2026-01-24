@@ -1,0 +1,63 @@
+version: 2
+updates:
+  # npm (TypeScript/Node del proyecto)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "America/Argentina/Buenos_Aires"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "deps(npm)"
+      include: "scope"
+    # Evita ruido por majors (igual te llegarán PRs de seguridad si aplica)
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+    # Agrupa cambios típicos de tooling para que salgan en un solo PR
+    groups:
+      patches:
+        update-types: ["patch"]
+      minors:
+        update-types: ["minor"]
+      lint-test-ts:
+        patterns:
+          - "eslint*"
+          - "@typescript-eslint/*"
+          - "@types/*"
+          - "typescript"
+          - "vitest*"
+          - "vite*"
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions (archivos en .github/workflows)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:30"
+      timezone: "America/Argentina/Buenos_Aires"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      gha-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # Docker Compose (para la imagen/es del entorno spark-server)
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+      timezone: "America/Argentina/Buenos_Aires"
+    commit-message:
+      prefix: "deps(compose)"
+    groups:
+      compose-minor-patch:
+        update-types: ["minor", "patch"]

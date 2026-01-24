@@ -5,7 +5,7 @@ import { withScopeAsync } from "../core/runtime/scope";
 import { zipPar } from "../core/stream/structuredConcurrency";
 import { toPromise } from "../core/runtime/runtime";
 import { Scope } from "../core/runtime/scope"; // si tu Scope está en otro path, ajustalo
-y
+
 type Post = { id: number; userId: number; title: string; body: string };
 type NewPost = Omit<Post, "id">;
 
