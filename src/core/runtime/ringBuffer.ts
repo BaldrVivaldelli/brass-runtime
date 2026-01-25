@@ -1,47 +1,60 @@
 // ringBuffer.ts
+export const enum PushStatus {
+    Ok = 0,
+    Grew = 1 << 0,
+    Dropped = 1 << 1,
+}
+
 export class RingBuffer<T> {
     private buf: (T | undefined)[];
-    private head = 0; // index de lectura
-    private tail = 0; // index de escritura
+    private head = 0;
+    private tail = 0;
     private size_ = 0;
 
-    constructor(initialCapacity: number = 1024) {
-        const cap = Math.max(2, this.nextPow2(initialCapacity));
-        this.buf = new Array<T | undefined>(cap);
+    // nuevo
+    private readonly maxCap: number;
+
+    constructor(initialCapacity: number = 1024, maxCapacity: number = initialCapacity) {
+        const init = Math.max(2, this.nextPow2(initialCapacity));
+        const max = Math.max(init, this.nextPow2(maxCapacity));
+        this.buf = new Array<T | undefined>(init);
+        this.maxCap = max;
     }
 
-    get length(): number {
-        return this.size_;
-    }
+    get length(): number { return this.size_; }
+    get capacity(): number { return this.buf.length; }
+    isEmpty(): boolean { return this.size_ === 0; }
 
-    get capacity(): number {
-        return this.buf.length;
-    }
-
-    isEmpty(): boolean {
-        return this.size_ === 0;
-    }
-
-    push(value: T): void {
+    push(value: T): PushStatus {
         if (this.size_ === this.buf.length) {
-            this.grow();
+            // lleno
+            if (this.buf.length >= this.maxCap) {
+                return PushStatus.Dropped;
+            }
+            this.grow(); // crece (hasta maxCap)
+            // ojo: grow() ajusta head/tail/buf
+            this.buf[this.tail] = value;
+            this.tail = (this.tail + 1) & (this.buf.length - 1);
+            this.size_++;
+            return (PushStatus.Ok | PushStatus.Grew);
         }
+
         this.buf[this.tail] = value;
         this.tail = (this.tail + 1) & (this.buf.length - 1);
         this.size_++;
+        return PushStatus.Ok;
     }
 
     shift(): T | undefined {
         if (this.size_ === 0) return undefined;
         const value = this.buf[this.head];
-        this.buf[this.head] = undefined; // ayuda al GC
+        this.buf[this.head] = undefined;
         this.head = (this.head + 1) & (this.buf.length - 1);
         this.size_--;
         return value;
     }
 
     clear(): void {
-        // Limpieza simple
         this.buf.fill(undefined);
         this.head = 0;
         this.tail = 0;
@@ -50,9 +63,9 @@ export class RingBuffer<T> {
 
     private grow(): void {
         const old = this.buf;
-        const newBuf = new Array<T | undefined>(old.length * 2);
+        const nextLen = Math.min(old.length * 2, this.maxCap);
+        const newBuf = new Array<T | undefined>(nextLen);
 
-        // Copiamos en orden lógico (head -> tail)
         for (let i = 0; i < this.size_; i++) {
             newBuf[i] = old[(this.head + i) & (old.length - 1)];
         }
@@ -63,7 +76,6 @@ export class RingBuffer<T> {
     }
 
     private nextPow2(n: number): number {
-        // Redondea hacia arriba a potencia de 2 (para usar & mask)
         let x = 1;
         while (x < n) x <<= 1;
         return x;

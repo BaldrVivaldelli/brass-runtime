@@ -24,6 +24,7 @@ import {
 import {Scope} from "../runtime/scope";
 import {raceWith} from "./structuredConcurrency";
 import {Fiber, Interrupted} from "../runtime/fiber";
+import {getCurrentRuntime, Runtime} from "../runtime/runtime";
 
 
 export type Empty<R, E, A> = { readonly _tag: "Empty" };
@@ -200,7 +201,8 @@ function makeMergePull<R, E, A>(
 ): Async<R, Option<E>, [A, ZStream<R, E, A>]> {
     return async((env, cb) => {
         const id = ++mergePullId;
-        const scope = new Scope(env);
+        const runtime = getCurrentRuntime<R>()
+        const scope = new Scope(runtime);
 
         const leftPull  = uncons(onLeft);
         const rightPull = uncons(onRight);
@@ -214,7 +216,7 @@ function makeMergePull<R, E, A>(
             onLeftHandler,
             onRightHandler
         );
-        scope.fork(handler, env).join((ex) => {
+        scope.fork(handler).join((ex) => {
             scope.close(ex as any);
             cb(ex as any);
         });
@@ -273,11 +275,12 @@ export function uncons<R, E, A>(
             return makeMergePull(self.left, self.right, self.flip,0);
         case "Scoped":
             return async((env, cb) => {
-                const scope = new Scope(env);
+                const runtime = getCurrentRuntime<R>()
+                const scope = new Scope(runtime);
 
                 scope.addFinalizer((ex) => self.release(ex));
 
-                scope.fork(self.acquire as any, env).join((ex) => {
+                scope.fork(self.acquire as any).join((ex) => {
                     if (ex._tag === "Failure") {
                         scope.close(ex as any);
                         // acquire falla con E -> lo adaptamos a Option<E> = Some(E)
@@ -430,17 +433,14 @@ export function fromArray<A>(values: readonly A[]): ZStream<unknown, never, A> {
 export function collectStream<R, E, A>(stream: ZStream<R, E, A>): ZIO<R, E, A[]> {
     const loop = (cur: ZStream<R, E, A>, acc: A[]): ZIO<R, Option<E>, A[]> =>
         asyncFold(
-            uncons(cur), // ZIO<R, Option<E>, [A, ZStream<R,E,A>]>
+            uncons(cur),
             (opt: Option<E>) => {
-                // None => fin del stream
                 if (opt._tag === "None") return succeed(acc);
-                // Some(e) => error real (mantenemos Option<E>)
                 return fail(opt);
             },
             ([a, tail]) => loop(tail, [...acc, a])
         );
 
-    // Convertimos Option<E> -> E (None no debería ocurrir porque se maneja como success arriba)
     return mapError(loop(stream, []), (opt) => {
         if (opt._tag === "Some") return opt.value;
         throw new Error("unreachable: stream end handled as success");

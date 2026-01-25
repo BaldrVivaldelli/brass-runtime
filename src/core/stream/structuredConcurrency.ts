@@ -34,8 +34,8 @@ export function race<R, E, A>(
             cb(exit);
         };
 
-        const fiberLeft = scope.fork(left, env);
-        const fiberRight = scope.fork(right, env);
+        const fiberLeft = scope.fork(left);
+        const fiberRight = scope.fork(right);
 
         fiberLeft.join(onResult);
         fiberRight.join(onResult);
@@ -98,8 +98,8 @@ export function zipPar<R, E, A, B>(
             cb(errExit);
         };
 
-        const f1 = scope.fork(left, env);
-        const f2 = scope.fork(right, env);
+        const f1 = scope.fork(left);
+        const f2 = scope.fork(right);
 
         f1.join((exit) => {
             leftExit = exit;
@@ -133,7 +133,7 @@ export function collectAllPar<R, E, A>(
         let done = false;
 
         effects.forEach((eff, i) => {
-            const f = scope.fork(eff, env);
+            const f = scope.fork(eff);
 
             f.join((exit) => {
                 if (done) return;
@@ -187,14 +187,14 @@ export function raceWith<R, E, A, B, C>(
         const scope = parentScope.subScope();
         let done = false;
 
-        const fiberLeft = scope.fork(left, env);
-        const fiberRight = scope.fork(right, env);
+        const fiberLeft = scope.fork(left);
+        const fiberRight = scope.fork(right);
 
         const finish = (
             next: Async<R, E | Interrupted, C>
         ) => {
             // Corremos el handler dentro del MISMO scope, así puede interrumpir/join del perdedor.
-            scope.fork(next, env).join((exitNext) => {
+            scope.fork(next).join((exitNext) => {
                 // Cerramos el scope al final (esto asegura limpieza si el handler no cerró explícitamente)
                 scope.close(exitNext);
                 cb(exitNext);

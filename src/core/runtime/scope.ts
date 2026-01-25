@@ -1,8 +1,8 @@
-// src/scope.ts
-import {Fiber, Interrupted} from "./fiber";
-import {Exit} from "../types/effect";
-import {async, Async, asyncFlatMap, asyncFold, unit} from "../types/asyncEffect";
-import {fork} from "./runtime";
+// src/core/runtime/scope.ts
+import { Fiber, Interrupted } from "./fiber";
+import { Exit } from "../types/effect";
+import { async, Async, asyncFlatMap, asyncFold, unit } from "../types/asyncEffect";
+import { Runtime } from "./runtime";
 
 export type ScopeId = number;
 
@@ -44,8 +44,14 @@ export class Scope<R> {
     private readonly subScopes = new Set<Scope<R>>();
     private readonly finalizers: Array<(exit: Exit<any, any>) => Async<R, any, any>> = [];
 
-    constructor(private readonly env: R) {
+    constructor(private readonly runtime: Runtime<R>) {
+        // 👇 mantenemos tu comportamiento
         this.id = nextScopeId++;
+    }
+
+    /** Acceso al env del runtime (conserva tu modelo actual) */
+    private get env(): R {
+        return this.runtime.env;
     }
 
     /** registra un finalizer (LIFO) */
@@ -56,19 +62,19 @@ export class Scope<R> {
         this.finalizers.push(f);
     }
 
-    /** crea un sub scope */
+    /** crea un sub scope (mismo runtime) */
     subScope(): Scope<R> {
         if (this.closed) throw new Error("Scope closed");
-        const s = new Scope<R>(this.env);
+        const s = new Scope<R>(this.runtime);
         this.subScopes.add(s);
         return s;
     }
 
     /** fork en este scope */
-    fork<E, A>(eff: Async<R, E, A>, env: R): Fiber<E | Interrupted, A> {
+    fork<E, A>(eff: Async<R, E, A>): Fiber<E | Interrupted, A> {
         if (this.closed) throw new Error("Scope closed");
 
-        const f = fork(eff, env);
+        const f = this.runtime.fork(eff);
         this.children.add(f);
 
         f.join(() => {
@@ -78,8 +84,9 @@ export class Scope<R> {
         return f;
     }
 
+    /** close fire-and-forget (no bloquea) */
     close(exit: Exit<any, any> = { _tag: "Success", value: undefined }): void {
-        fork(this.closeAsync(exit), this.env);
+        this.runtime.fork(this.closeAsync(exit));
     }
 
     closeAsync(
@@ -103,11 +110,12 @@ export class Scope<R> {
 
             // 1) Interrumpir children best-effort
             for (const f of children) {
-                try { f.interrupt(); } catch {}
+                try {
+                    f.interrupt();
+                } catch {}
             }
 
             // 2) Construir efecto secuencial: cerrar subscopes
-
             let eff: Async<R, never, void> = unit<R>();
 
             for (const s of subScopes) {
@@ -126,20 +134,18 @@ export class Scope<R> {
             }
 
             // Ejecutar eff y completar el closeAsync cuando termina
-            const finFiber = fork(eff, this.env);
+            const finFiber = this.runtime.fork(eff);
             finFiber.join(() => cb({ _tag: "Success", value: undefined }));
         });
     }
 }
 
 /**
- * Ejecuta una función dentro de un scope estructurado.
- * Al final (éxito o error), se cierra el scope garantizando cleanup.
+ * Ejecuta una función dentro de un scope estructurado (sync).
+ * NOTA: En sync no tenés env real; por eso recibimos Runtime explícito.
  */
-export function withScope<R, A>(
-    body: (scope: Scope<R>) => A
-): A {
-    const scope = new Scope<R>({} as R);
+export function withScope<R, A>(runtime: Runtime<R>, body: (scope: Scope<R>) => A): A {
+    const scope = new Scope<R>(runtime);
     try {
         return body(scope);
     } finally {
@@ -147,25 +153,25 @@ export function withScope<R, A>(
     }
 }
 
+/**
+ * Versión async: crea scope, corre el efecto, cierra el scope con el Exit.
+ */
 export function withScopeAsync<R, E, A>(
+    runtime: Runtime<R>,
     use: (scope: Scope<R>) => Async<R, E, A>
 ): Async<R, E | Interrupted, A> {
-    return async((env, cb) => {
-        const scope = new Scope<R>(env);
+    return async((_env, cb) => {
+        const scope = new Scope<R>(runtime);
 
-        // Ejecutamos el efecto dentro del scope y esperamos su Exit
-        const fiber = scope.fork(use(scope), env);
+        const fiber = scope.fork(use(scope));
 
         fiber.join((exit: Exit<E | Interrupted, A>) => {
             try {
                 scope.close(exit);
             } catch (closeErr) {
-                // Si close rompe, en este runtime normalmente conviene priorizar el error de close.
-                // Si preferís no “pisar” el exit original, decímelo y te lo adapto.
                 cb({ _tag: "Failure", error: closeErr as any } as any);
                 return;
             }
-
             cb(exit);
         });
     });

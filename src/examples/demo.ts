@@ -6,7 +6,7 @@ import { withScope } from "../core/runtime/scope";
 
 import { async, type Async, asyncFlatMap, asyncSucceed } from "../core/types/asyncEffect";
 import { succeed } from "../core/types/effect";
-import {fork} from "../core/runtime/runtime"; // succeed ahora devuelve Async
+import { Runtime } from "../core/runtime/runtime"; // 👈 usar Runtime
 
 type Env = {};
 
@@ -22,8 +22,8 @@ function task(name: string, ms: number): Async<unknown, never, string> {
 }
 
 // Helper: correr un efecto y loguear su Exit
-function run<E, A>(label: string, eff: Async<Env, E, A>, env: Env) {
-    const f = fork(eff as any, env);
+function run<E, A>(runtime: Runtime<Env>, label: string, eff: Async<Env, E, A>) {
+    const f = runtime.fork(eff as any);
     f.join((exit: Exit<unknown, unknown>) => {
         const ex = exit as Exit<E, A>;
         console.log(label, ex);
@@ -33,12 +33,13 @@ function run<E, A>(label: string, eff: Async<Env, E, A>, env: Env) {
 
 function main() {
     const env: Env = {};
+    const runtime = new Runtime({ env });
 
     // Fibras simples
-    const fiberA = run<Interrupted, string>("Fiber A:", task("A", 1000) as any, env);
-    const fiberB = run<Interrupted, string>("Fiber B:", task("B", 500) as any, env);
+    const fiberA = run<Interrupted, string>(runtime, "Fiber A:", task("A", 1000) as any);
+    const fiberB = run<Interrupted, string>(runtime, "Fiber B:", task("B", 500) as any);
 
-    // “zip” de efectos (sin helper): flatMap + map
+    // “zip” de efectos
     const eff1 = succeed(10);
     const eff2 = succeed(20);
     const sumEff: Async<Env, never, [number, number]> =
@@ -46,9 +47,9 @@ function main() {
             asyncFlatMap(eff2 as any, (b: number) => asyncSucceed([a, b] as [number, number]))
         );
 
-    run("zip(eff1, eff2):", sumEff as any, env);
+    run(runtime, "zip(eff1, eff2):", sumEff as any);
 
-    // foreach sobre array (sin helper): secuenciar efectos
+    // foreach sobre array
     const nums = [1, 2, 3];
     const foreachEff: Async<Env, never, number[]> = nums.reduce(
         (accEff, n) =>
@@ -58,20 +59,20 @@ function main() {
         asyncSucceed([] as number[])
     );
 
-    run("foreach array:", foreachEff as any, env);
+    run(runtime, "foreach array:", foreachEff as any);
 
-    // Stream map + collect (collectStream devuelve Async)
+    // Stream map + collect
     const s = fromArray([1, 2, 3, 4]);
     const sMapped = mapStream(s, (n) => n * 10);
-    const collectedEff = collectStream(sMapped); // <- ahora NO recibe env acá
+    const collectedEff = collectStream(sMapped);
 
-    run("Stream mapeado:", collectedEff as any, env);
+    run(runtime, "Stream mapeado:", collectedEff as any);
 
-    // Scope
-    withScope((scope) => {
-        const f1 = scope.fork(task("A", 1000), env);
-        const f2 = scope.fork(task("B", 1500), env);
-        const f3 = scope.fork(task("C", 2000), env);
+    // Scope (ahora recibe runtime)
+    withScope(runtime, (scope) => {
+        const f1 = scope.fork(task("A", 1000));
+        const f2 = scope.fork(task("B", 1500));
+        const f3 = scope.fork(task("C", 2000));
 
         console.log("Tareas lanzadas dentro del scope");
 
@@ -85,7 +86,6 @@ function main() {
         f3.join(console.log);
     });
 
-    // (opcional) esperar a que terminen A/B si querés
     fiberA.join(() => {});
     fiberB.join(() => {});
 }

@@ -1,8 +1,18 @@
 // src/resourceExample.ts
 
-import {withScope} from "../core/runtime/scope";
-import {acquireRelease, async, Async, asyncFlatMap, asyncSucceed, asyncTotal} from "../core/types/asyncEffect";
-import {Exit} from "../core/types/effect";
+import { withScope } from "../core/runtime/scope";
+import {
+    acquireRelease,
+    async,
+    Async,
+    asyncFlatMap,
+    asyncSucceed,
+    asyncTotal,
+} from "../core/types/asyncEffect";
+import { Exit } from "../core/types/effect";
+import { Runtime } from "../core/runtime/runtime";
+
+type Env = {};
 
 type FileHandle = {
     name: string;
@@ -18,13 +28,22 @@ function openFile(name: string): FileHandle {
         close() {
             console.log("CLOSE FILE:", name);
             this.closed = true;
-        }
+        },
     };
 }
 
+function sleep(ms: number): Async<unknown, never, void> {
+    return async((_, cb: (exit: Exit<never, void>) => void) => {
+        const t = setTimeout(() => cb({ _tag: "Success", value: undefined }), ms);
+        return () => clearTimeout(t);
+    });
+}
+
 function main() {
-    withScope(scope => {
-        const env = {};
+    const env: Env = {};
+    const runtime = new Runtime({ env });
+
+    withScope(runtime, (scope) => {
         const program =
             acquireRelease(
                 asyncTotal(() => openFile("data.txt")),
@@ -39,11 +58,8 @@ function main() {
         // use the resource
         scope.fork(
             asyncFlatMap(program, (fh) =>
-                asyncFlatMap(sleep(1000), () =>
-                    asyncSucceed(`Using ${fh.name}`)
-                )
-            ),
-            env
+                asyncFlatMap(sleep(1000), () => asyncSucceed(`Using ${fh.name}`))
+            )
         );
 
         // cancel whole scope early (to force cleanup)
@@ -53,11 +69,5 @@ function main() {
         }, 500);
     });
 }
-function sleep(ms: number): Async<unknown, never, void> {
-    return async((_, cb: (exit: Exit<never, void>) => void) => {
-        setTimeout(() => {
-            cb({ _tag: "Success", value: undefined });
-        }, ms);
-    });
-}
+
 main();

@@ -1,4 +1,3 @@
-
 import "./demo";
 import "./fiberFinalizer";
 import "./resourceExample";
@@ -7,13 +6,11 @@ import "./toPromise"
 import "./fromPromise"
 import "./fiberFinalizer";
 import "./mergeStreamSync"
-
 import "./hub"
 import "./zPipeline"
 import "./httpExamplesWithMeta"
-
 import "./httpExamples"
-
-
 import "./httpClientStream"
 import "./scopeAsync"
+import "./observabilitySinks"
+
