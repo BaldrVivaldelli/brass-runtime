@@ -1,6 +1,6 @@
 import { toPromise } from "../core/runtime/runtime";
 import { collectStream } from "../core/stream/stream";
-import { httpClientStream } from "../http";
+import { httpClientStream } from "../http/index";
 
 function chunksToString(chunks: Uint8Array[]): string {
     const dec = new TextDecoder();

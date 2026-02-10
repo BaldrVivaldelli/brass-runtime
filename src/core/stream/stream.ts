@@ -305,43 +305,56 @@ export function uncons<R, E, A>(
     }
 }
 
-
+export function assertNever(x: never, msg?: string): never {
+  throw new Error(msg ?? `Unexpected value: ${String(x)}`);
+}
 // ---------- combinadores extra opcionales ----------
 
 export function mapStream<R, E, A, B>(
-    self: ZStream<R, E, A>,
-    f: (a: A) => B
+  self: ZStream<R, E, A>,
+  f: (a: A) => B
 ): ZStream<R, E, B> {
-    switch (self._tag) {
-        case "Empty":
-            return emptyStream<R, E, B>();
+  switch (self._tag) {
+    case "Empty":
+      return emptyStream<R, E, B>();
 
-        case "Emit":
-            return emitStream<R, E, B>(map(self.value, f));
+    case "Emit":
+      return emitStream<R, E, B>(map(self.value, f));
 
-        case "FromPull":
-            return fromPull(
-                map(self.pull, ([a, tail]): [B, ZStream<R, E, B>] => [
-                    f(a),
-                    mapStream(tail, f),
-                ])
-            );
+    case "FromPull":
+      return fromPull(
+        map(self.pull, ([a, tail]): [B, ZStream<R, E, B>] => [f(a), mapStream(tail, f)])
+      );
 
-        case "Concat":
-            return concatStream<R, E, B>(
-                mapStream(self.left, f),
-                mapStream(self.right, f)
-            );
+    case "Concat":
+      return concatStream<R, E, B>(mapStream(self.left, f), mapStream(self.right, f));
 
-        case "Flatten": {
-            const mappedOuter: ZStream<R, E, ZStream<R, E, B>> = mapStream(
-                self.stream,
-                (inner) => mapStream(inner, f)
-            );
-            return flattenStream<R, E, B>(mappedOuter);
-        }
+    case "Flatten": {
+      const mappedOuter: ZStream<R, E, ZStream<R, E, B>> = mapStream(
+        self.stream,
+        (inner) => mapStream(inner, f)
+      );
+      return flattenStream<R, E, B>(mappedOuter);
     }
+
+    case "Merge":
+      return mergeStream<R, E, B>(
+        mapStream(self.left, f),
+        mapStream(self.right, f),
+        self.flip
+      );
+
+    case "Scoped":
+      return unwrapScoped<R, E, B>(
+        map(self.acquire, (s) => mapStream(s, f)),
+        self.release
+      );
+
+    default:
+      return assertNever(self);
+  }
 }
+
 
 export function rangeStream(start: number, end: number): ZStream<unknown, never, number> {
     const go = (i: number): ZStream<unknown, never, number> =>

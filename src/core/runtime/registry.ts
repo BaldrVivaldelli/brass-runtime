@@ -1,4 +1,4 @@
-import type { RuntimeEvent } from "./events";
+import type { RuntimeEmitContext, RuntimeEvent, RuntimeEventRecord, RuntimeHooks } from "./events";
 
 export type FiberRunState = "Queued" | "Running" | "Suspended" | "Done";
 
@@ -27,108 +27,98 @@ export type ScopeInfo = {
     ownerFiberId?: number;
     openAt: number;
     closedAt?: number;
-    finalizers: Array<{ id: number; label?: string; status: "added"|"running"|"done" }>;
+    finalizers: Array<{ id: number; label?: string; status: "added" | "running" | "done" }>;
 };
 
-export class RuntimeRegistry {
+export class RuntimeRegistry implements RuntimeHooks {
     fibers = new Map<number, FiberInfo>();
     scopes = new Map<number, ScopeInfo>();
 
-    private recent: RuntimeEvent[] = [];
+    private seq = 1;
+    private recent: RuntimeEventRecord[] = [];
     private recentCap = 2000;
 
-    onEvent = (ev: RuntimeEvent) => {
-        // ring buffer de eventos recientes (para dumps explicables)
-        this.recent.push(ev);
+    emit(ev: RuntimeEvent, ctx: RuntimeEmitContext) {
+        const rec: RuntimeEventRecord = {
+            ...ev,
+            ...ctx,
+            seq: this.seq++,
+            wallTs: Date.now(),
+            ts: typeof performance !== "undefined" ? performance.now() : Date.now(),
+        };
+
+        this.recent.push(rec);
+
         if (this.recent.length > this.recentCap) this.recent.shift();
 
-        switch (ev.type) {
+        switch (rec.type) {
             case "fiber.start": {
-                const id = ev.fiberId!;
+                const id = rec.fiberId;
                 this.fibers.set(id, {
                     fiberId: id,
-                    parentFiberId: ev.parentFiberId,
-                    name: (ev.data?.name as any) ?? undefined,
+                    parentFiberId: rec.parentFiberId,
+                    name: rec.name,
                     runState: "Running",
                     status: "Running",
-                    createdAt: ev.wallTs,
-                    lastActiveAt: ev.wallTs,
-                    scopeId: ev.scopeId,
-                    traceId: ev.traceId,
-                    spanId: ev.spanId,
+                    createdAt: rec.wallTs,
+                    lastActiveAt: rec.wallTs,
+                    scopeId: rec.scopeId,
+                    traceId: rec.traceId,
+                    spanId: rec.spanId,
                 });
                 break;
             }
+
             case "fiber.suspend": {
-                const f = this.fibers.get(ev.fiberId!);
+                const f = this.fibers.get(rec.fiberId);
                 if (f) {
                     f.runState = "Suspended";
-                    f.lastActiveAt = ev.wallTs;
-                    f.awaiting = { reason: String(ev.data?.reason ?? "unknown"), detail: ev.data?.detail as any };
+                    f.lastActiveAt = rec.wallTs;
+                    f.awaiting = { reason: rec.reason ?? "unknown" };
                 }
                 break;
             }
+
             case "fiber.resume": {
-                const f = this.fibers.get(ev.fiberId!);
+                const f = this.fibers.get(rec.fiberId);
                 if (f) {
                     f.runState = "Running";
-                    f.lastActiveAt = ev.wallTs;
+                    f.lastActiveAt = rec.wallTs;
                     f.awaiting = undefined;
                 }
                 break;
             }
+
             case "fiber.end": {
-                const f = this.fibers.get(ev.fiberId!);
+                const f = this.fibers.get(rec.fiberId);
                 if (f) {
                     f.runState = "Done";
-                    f.lastActiveAt = ev.wallTs;
-                    f.status = (ev.data?.status as any) ?? "Done";
-                    f.lastEnd = { status: String(ev.data?.status ?? "done"), error: ev.data?.error as any };
+                    f.lastActiveAt = rec.wallTs;
+                    f.status = rec.status === "interrupted" ? "Interrupted" : "Done";
+                    f.lastEnd = { status: rec.status, error: rec.error as any };
                 }
                 break;
             }
 
             case "scope.open": {
-                const sid = ev.scopeId!;
+                const sid = rec.scopeId;
                 this.scopes.set(sid, {
                     scopeId: sid,
-                    parentScopeId: ev.data?.parentScopeId as any,
-                    ownerFiberId: ev.fiberId,
-                    openAt: ev.wallTs,
+                    parentScopeId: rec.parentScopeId,
+                    ownerFiberId: rec.fiberId,
+                    openAt: rec.wallTs,
                     finalizers: [],
                 });
                 break;
             }
+
             case "scope.close": {
-                const s = this.scopes.get(ev.scopeId!);
-                if (s) s.closedAt = ev.wallTs;
-                break;
-            }
-            case "finalizer.add": {
-                const s = this.scopes.get(ev.scopeId!);
-                if (s) s.finalizers.push({ id: Number(ev.data?.finalizerId), label: ev.data?.label as any, status: "added" });
-                break;
-            }
-            case "finalizer.run": {
-                const s = this.scopes.get(ev.scopeId!);
-                if (s) {
-                    const id = Number(ev.data?.finalizerId);
-                    const fz = s.finalizers.find(x => x.id === id);
-                    if (fz) fz.status = "running";
-                }
-                break;
-            }
-            case "finalizer.done": {
-                const s = this.scopes.get(ev.scopeId!);
-                if (s) {
-                    const id = Number(ev.data?.finalizerId);
-                    const fz = s.finalizers.find(x => x.id === id);
-                    if (fz) fz.status = "done";
-                }
+                const s = this.scopes.get(rec.scopeId);
+                if (s) s.closedAt = rec.wallTs;
                 break;
             }
         }
-    };
+    }
 
     getRecentEvents() { return this.recent.slice(); }
 }

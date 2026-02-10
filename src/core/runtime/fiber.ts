@@ -3,6 +3,7 @@ import { Exit } from "../types/effect";
 import { Async } from "../types/asyncEffect";
 import { globalScheduler, Scheduler } from "./scheduler";
 import {Runtime} from "./runtime";
+import {FiberContext} from "./contex";
 
 export type FiberId = number;
 export type Interrupted = { readonly _tag: "Interrupted" };
@@ -94,7 +95,10 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     private readonly fiberFinalizers: Array<(exit: Exit<E | Interrupted, A>) => void> = [];
     private finalizersDrained = false;
 
-    // ✅ Runtime-first: constructor recibe Runtime, no (env, scheduler)
+    fiberContext!: FiberContext;
+    name?: string;
+    scopeId?: number;
+
     constructor(runtime: Runtime<R>, effect: Async<R, E, A>) {
         this.id = nextId++;
         this.runtime = runtime;

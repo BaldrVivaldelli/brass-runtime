@@ -3,6 +3,12 @@ import { globalScheduler, Scheduler } from "./scheduler";
 import {Fiber, getCurrentFiber, Interrupted, RuntimeFiber} from "./fiber";
 import { Exit } from "../types/effect";
 import { Canceler } from "../types/cancel";
+import type { RuntimeEvent, RuntimeEmitContext, RuntimeHooks } from "./events";
+import type { emptyContext ,FiberContext, TraceContext } from "./contex";
+import { defaultTracer, type BrassEnv } from "./tracer";
+import { makeForkPolicy } from "./forkPolicy";
+
+
 
 type NodeCallback<A> = (err: Error | null, result: A) => void;
 
@@ -11,16 +17,10 @@ type NodeCallback<A> = (err: Error | null, result: A) => void;
  * La idea es que en próximas versiones puedas enchufar EventBus / sinks sin tocar fibers.
  * Por ahora lo dejamos mínimo y sin dependencia a event bus.
  */
-export type RuntimeEmitContext = {
+/*export type RuntimeEmitContext = {
     // si más adelante querés, podés agregar fiberId/scopeId/traceId/spanId
-};
+};*/
 
-export type RuntimeEvent =
-    | { type: "log"; level: "debug" | "info" | "warn" | "error"; message: string; fields?: Record<string, unknown> };
-
-export interface RuntimeHooks {
-    emit(ev: RuntimeEvent, ctx?: RuntimeEmitContext): void;
-}
 
 const noopHooks: RuntimeHooks = {
     emit() {},
@@ -34,15 +34,21 @@ export class Runtime<R> {
     readonly env: R;
     readonly scheduler: Scheduler;
     readonly hooks: RuntimeHooks;
+    readonly forkPolicy
 
     constructor(args: { env: R; scheduler?: Scheduler; hooks?: RuntimeHooks }) {
         this.env = args.env;
         this.scheduler = args.scheduler ?? globalScheduler;
         this.hooks = args.hooks ?? noopHooks;
+        this.forkPolicy = makeForkPolicy(this.env, this.hooks);
     }
 
     fork<E, A>(effect: Async<R, E, A>): Fiber<E, A> {
-        const fiber = new RuntimeFiber(this, effect);
+        const parent = getCurrentFiber();
+        const fiber = new RuntimeFiber(this, effect) as any;
+
+        this.forkPolicy.initChild(fiber, parent as any);
+
         fiber.schedule("initial-step");
         return fiber;
     }
@@ -75,7 +81,7 @@ export class Runtime<R> {
     withHooks(hooks: RuntimeHooks): Runtime<R> {
         return new Runtime({ env: this.env, scheduler: this.scheduler, hooks });
     }
-    private emit(ev: RuntimeEvent) {
+    emit(ev: RuntimeEvent) {
         const f = getCurrentFiber() as any;
 
         const ctx: RuntimeEmitContext = {

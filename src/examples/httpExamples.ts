@@ -1,7 +1,7 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
-import { httpClient } from "../http";
 import { mergeHeaders, setHeaderIfMissing } from "../http/optics/request";
+import { httpClient } from "../http/httpClient";
 
 type Post = {
     userId: number;

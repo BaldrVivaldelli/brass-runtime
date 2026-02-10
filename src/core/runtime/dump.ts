@@ -17,7 +17,10 @@ export function dumpAllFibers(reg: RuntimeRegistry): string {
 
     lines.push(`=== Recent Events ===`);
     for (const ev of reg.getRecentEvents().slice(-80)) {
-        lines.push(`${ev.seq} ${new Date(ev.wallTs).toISOString()} ${ev.type} fiber=${ev.fiberId ?? "-"} scope=${ev.scopeId ?? "-"} trace=${ev.traceId ?? "-"}`);
+    lines.push(
+        `${ev.seq} ${new Date(ev.wallTs).toISOString()} ${ev.type}` +
+        ` fiber=${ev.fiberId ?? "-"} scope=${ev.scopeId ?? "-"} trace=${ev.traceId ?? "-"}`
+    );
     }
     return lines.join("\n");
 }

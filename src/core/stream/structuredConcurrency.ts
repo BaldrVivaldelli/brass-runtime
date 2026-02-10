@@ -3,6 +3,7 @@
 import { Exit } from "../types/effect";
 import { async, Async } from "../types/asyncEffect";
 import { Scope } from "../runtime/scope";
+import type { Fiber } from "../runtime/fiber";
 import { Interrupted } from "../runtime/fiber";
 
 type AnyFiber<R, E, A> = ReturnType<Scope<R>["fork"]>;
@@ -169,48 +170,44 @@ export function collectAllPar<R, E, A>(
 }
 
 export function raceWith<R, E, A, B, C>(
-    left: Async<R, E, A>,
-    right: Async<R, E, B>,
-    parentScope: Scope<R>,
-    onLeft: (
-        exit: Exit<E | Interrupted, A>,
-        rightFiber: AnyFiber<R, E | Interrupted, B>,
-        scope: Scope<R>
-    ) => Async<R, E | Interrupted, C>,
-    onRight: (
-        exit: Exit<E | Interrupted, B>,
-        leftFiber: AnyFiber<R, E | Interrupted, A>,
-        scope: Scope<R>
-    ) => Async<R, E | Interrupted, C>
+  left: Async<R, E, A>,
+  right: Async<R, E, B>,
+  parentScope: Scope<R>,
+  onLeft: (
+    exit: Exit<E | Interrupted, A>,
+    rightFiber: Fiber<E | Interrupted, B>,
+    scope: Scope<R>
+  ) => Async<R, E | Interrupted, C>,
+  onRight: (
+    exit: Exit<E | Interrupted, B>,
+    leftFiber: Fiber<E | Interrupted, A>,
+    scope: Scope<R>
+  ) => Async<R, E | Interrupted, C>
 ): Async<R, E | Interrupted, C> {
-    return async((env, cb) => {
-        const scope = parentScope.subScope();
-        let done = false;
+  return async((env, cb) => {
+    const scope = parentScope.subScope();
+    let done = false;
 
-        const fiberLeft = scope.fork(left);
-        const fiberRight = scope.fork(right);
+    const fiberLeft = scope.fork(left) as Fiber<E | Interrupted, A>;
+    const fiberRight = scope.fork(right) as Fiber<E | Interrupted, B>;
 
-        const finish = (
-            next: Async<R, E | Interrupted, C>
-        ) => {
-            // Corremos el handler dentro del MISMO scope, así puede interrumpir/join del perdedor.
-            scope.fork(next).join((exitNext) => {
-                // Cerramos el scope al final (esto asegura limpieza si el handler no cerró explícitamente)
-                scope.close(exitNext);
-                cb(exitNext);
-            });
-        };
+    const finish = (next: Async<R, E | Interrupted, C>) => {
+      scope.fork(next).join((exitNext) => {
+        scope.close(exitNext);
+        cb(exitNext);
+      });
+    };
 
-        fiberLeft.join((exitL) => {
-            if (done) return;
-            done = true;
-            finish(onLeft(exitL, fiberRight as AnyFiber<R, E | Interrupted, B>, scope));
-        });
-
-        fiberRight.join((exitR) => {
-            if (done) return;
-            done = true;
-            finish(onRight(exitR, fiberLeft as AnyFiber<R, E | Interrupted, A>, scope));
-        });
+    fiberLeft.join((exitL) => {
+      if (done) return;
+      done = true;
+      finish(onLeft(exitL, fiberRight, scope));
     });
+
+    fiberRight.join((exitR) => {
+      if (done) return;
+      done = true;
+      finish(onRight(exitR, fiberLeft, scope));
+    });
+  });
 }
