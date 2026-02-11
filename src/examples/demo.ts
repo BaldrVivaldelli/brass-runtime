@@ -1,93 +1,108 @@
-import { Interrupted } from "../core/runtime/fiber";
 import type { Exit } from "../core/types/effect";
+import { succeed } from "../core/types/effect";
 
 import { collectStream, fromArray, mapStream } from "../core/stream/stream";
 import { withScope } from "../core/runtime/scope";
 
-import { async, type Async, asyncFlatMap, asyncSucceed } from "../core/types/asyncEffect";
-import { succeed } from "../core/types/effect";
-import { Runtime } from "../core/runtime/runtime"; // 👈 usar Runtime
+import { asyncFlatMap, asyncSucceed, type Async } from "../core/types/asyncEffect";
+import type { Interrupted } from "../core/runtime/fiber";
+import { fromPromiseAbortable, Runtime } from "../core/runtime/runtime";
 
 type Env = {};
 
-export function sleep(ms: number): Async<unknown, never, void> {
-    return async((_, cb) => {
-        const t = setTimeout(() => cb({ _tag: "Success", value: undefined }), ms);
-        return () => clearTimeout(t);
-    });
+// sleep abortable que falla con Interrupted
+export function sleep(ms: number): Async<unknown, Interrupted, void> {
+  return fromPromiseAbortable<Interrupted, void>(
+    (signal) =>
+      new Promise<void>((resolve, reject) => {
+        const id = setTimeout(resolve, ms);
+
+        const onAbort = () => {
+          clearTimeout(id);
+          reject({ _tag: "Interrupted" } satisfies Interrupted);
+        };
+
+        if (signal.aborted) return onAbort();
+        signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    (e) =>
+      typeof e === "object" && e !== null && (e as any)._tag === "Interrupted"
+        ? (e as Interrupted)
+        : ({ _tag: "Interrupted" } as Interrupted)
+  );
 }
 
-function task(name: string, ms: number): Async<unknown, never, string> {
-    return asyncFlatMap(sleep(ms), () => asyncSucceed(`Terminé ${name} después de ${ms}ms`));
+function task(name: string, ms: number): Async<unknown, Interrupted, string> {
+  return asyncFlatMap(sleep(ms), () => asyncSucceed(`Terminé ${name} después de ${ms}ms`));
 }
 
-// Helper: correr un efecto y loguear su Exit
+// Helper: corre un efecto y loguea su Exit (incluyendo Interrupted)
 function run<E, A>(runtime: Runtime<Env>, label: string, eff: Async<Env, E, A>) {
-    const f = runtime.fork(eff as any);
-    f.join((exit: Exit<unknown, unknown>) => {
-        const ex = exit as Exit<E, A>;
-        console.log(label, ex);
-    });
-    return f;
+  const f = runtime.fork(eff);
+  f.join((exit: Exit<E | Interrupted, A>) => {
+    console.log(label, exit);
+  });
+  return f;
 }
 
 function main() {
-    const env: Env = {};
-    const runtime = new Runtime({ env });
+  const env: Env = {};
 
-    // Fibras simples
-    const fiberA = run<Interrupted, string>(runtime, "Fiber A:", task("A", 1000) as any);
-    const fiberB = run<Interrupted, string>(runtime, "Fiber B:", task("B", 500) as any);
+  // ✅ tu Runtime espera { env: R; ... }
+  const runtime: Runtime<Env> = new Runtime<Env>({ env });
 
-    // “zip” de efectos
-    const eff1 = succeed(10);
-    const eff2 = succeed(20);
-    const sumEff: Async<Env, never, [number, number]> =
-        asyncFlatMap(eff1 as any, (a: number) =>
-            asyncFlatMap(eff2 as any, (b: number) => asyncSucceed([a, b] as [number, number]))
-        );
+  // Root fibers (NO scoped)
+  console.log("== root fibers (not scoped) ==");
+  const rootA = run(runtime, "root A:", task("A", 1000));
+  const rootB = run(runtime, "root B:", task("B", 500));
 
-    run(runtime, "zip(eff1, eff2):", sumEff as any);
+  // “zip” demo
+  const eff1 = succeed(10);
+  const eff2 = succeed(20);
+  const sumEff: Async<Env, never, [number, number]> = asyncFlatMap(
+    eff1 as any,
+    (a: number) => asyncFlatMap(eff2 as any, (b: number) => asyncSucceed([a, b] as [number, number]))
+  );
+  run(runtime, "zip(eff1, eff2):", sumEff as any);
 
-    // foreach sobre array
-    const nums = [1, 2, 3];
-    const foreachEff: Async<Env, never, number[]> = nums.reduce(
-        (accEff, n) =>
-            asyncFlatMap(accEff as any, (acc: number[]) =>
-                asyncFlatMap(succeed(n * 2) as any, (m: number) => asyncSucceed([...acc, m]))
-            ),
-        asyncSucceed([] as number[])
-    );
+  // foreach demo
+  const nums = [1, 2, 3];
+  const foreachEff: Async<Env, never, number[]> = nums.reduce(
+    (accEff, n) =>
+      asyncFlatMap(accEff as any, (acc: number[]) =>
+        asyncFlatMap(succeed(n * 2) as any, (m: number) => asyncSucceed([...acc, m]))
+      ),
+    asyncSucceed([] as number[])
+  );
+  run(runtime, "foreach array:", foreachEff as any);
 
-    run(runtime, "foreach array:", foreachEff as any);
+  // Stream map + collect demo
+  const s = fromArray([1, 2, 3, 4]);
+  const sMapped = mapStream(s, (n) => n * 10);
+  run(runtime, "Stream mapeado:", collectStream(sMapped) as any);
 
-    // Stream map + collect
-    const s = fromArray([1, 2, 3, 4]);
-    const sMapped = mapStream(s, (n) => n * 10);
-    const collectedEff = collectStream(sMapped);
+  // Scoped fibers (SE interrumpen)
+  console.log("== scoped fibers (will be interrupted) ==");
+  withScope(runtime, (scope) => {
+    const f1 = scope.fork(task("A", 1000));
+    const f2 = scope.fork(task("B", 1500));
+    const f3 = scope.fork(task("C", 2000));
 
-    run(runtime, "Stream mapeado:", collectedEff as any);
+    console.log("Tareas lanzadas dentro del scope");
 
-    // Scope (ahora recibe runtime)
-    withScope(runtime, (scope) => {
-        const f1 = scope.fork(task("A", 1000));
-        const f2 = scope.fork(task("B", 1500));
-        const f3 = scope.fork(task("C", 2000));
+    setTimeout(() => {
+      console.log("CANCELANDO TODO EL SCOPE...");
+      scope.close();
+    }, 300);
 
-        console.log("Tareas lanzadas dentro del scope");
+    f1.join((ex) => console.log("scope f1:", ex));
+    f2.join((ex) => console.log("scope f2:", ex));
+    f3.join((ex) => console.log("scope f3:", ex));
+  });
 
-        setTimeout(() => {
-            console.log("CANCELANDO TODO EL SCOPE...");
-            scope.close();
-        }, 1200);
-
-        f1.join(console.log);
-        f2.join(console.log);
-        f3.join(console.log);
-    });
-
-    fiberA.join(() => {});
-    fiberB.join(() => {});
+  // opcional: para que el proceso no termine “antes” en algunos runners
+  rootA.join(() => {});
+  rootB.join(() => {});
 }
 
 main();

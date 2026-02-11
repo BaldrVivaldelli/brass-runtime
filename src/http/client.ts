@@ -6,6 +6,7 @@ import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 // 👇 optics
 import { Request, mergeHeadersUnder } from "./optics/request";
 import {RetryPolicy} from "./retry/retry";
+import { sleepMs } from "./sleep";
 
 export type HttpError =
     | { _tag: "Abort" }
@@ -54,6 +55,7 @@ export type HttpWireResponseStream = {
 
 
 export type HttpClientStream = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponseStream>;
+
 
 
 export type HttpClient = HttpClientFn & {
@@ -221,24 +223,7 @@ const backoffDelayMs = (attempt: number, base: number, cap: number) => {
     const lim = clamp(exp, 0, cap);
     return Math.floor(Math.random() * lim);
 };
-const sleepMs = (ms: number) =>
-    fromPromiseAbortable<HttpError, void>(
-        (signal) =>
-            new Promise<void>((resolve, reject) => {
-                if (signal.aborted) return reject({ _tag: "Abort" } satisfies HttpError);
 
-                const id = setTimeout(resolve, ms);
-                signal.addEventListener(
-                    "abort",
-                    () => {
-                        clearTimeout(id);
-                        reject({ _tag: "Abort" } satisfies HttpError);
-                    },
-                    { once: true }
-                );
-            }),
-        (e) => (typeof e === "object" && e && "_tag" in (e as any) ? (e as HttpError) : ({ _tag: "FetchError", message: String(e) } as HttpError))
-    );
 const retryAfterMs = (headers: Record<string, string>) => {
     const key = Object.keys(headers).find((k) => k.toLowerCase() === "retry-after");
     if (!key) return undefined;
@@ -258,27 +243,40 @@ const retryAfterMs = (headers: Record<string, string>) => {
 };
 
 export const withRetryStream =
-    (p: RetryPolicy) =>
-        (next: HttpClientStream): HttpClientStream =>
-            ((req) => {
-                const loop = (attempt: number): any =>
-                    asyncFold(
-                        next(req),
-                        (e: HttpError) => {
-                            if (e._tag === "Abort" || e._tag === "BadUrl") return asyncFail(e);
-                            const canRetry = attempt < p.maxRetries && (p.retryOnError ?? defaultRetryOnError)(e);
-                            if (!canRetry) return asyncFail(e);
-                            const d = backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
-                            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1));
-                        },
-                        (w) => {
-                            const canRetry = attempt < p.maxRetries && (p.retryOnStatus ?? defaultRetryOnStatus)(w.status);
-                            if (!canRetry) return asyncSucceed(w);
-                            const ra = retryAfterMs(w.headers);
-                            const d = ra ?? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
-                            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1));
-                        }
-                    );
+  (p: RetryPolicy) =>
+  (next: HttpClientStream): HttpClientStream =>
+    ((req: Parameters<HttpClientStream>[0]) => {
+      type Out = ReturnType<HttpClientStream>; // Async<unknown, HttpError, HttpWireResponseStream>
 
-                return loop(0);
-            }) as any;
+      const loop = (attempt: number): Out =>
+        asyncFold(
+          next(req),
+          (e: HttpError) => {
+            // Errores no-reintentables
+            if (e._tag === "Abort" || e._tag === "BadUrl") return asyncFail(e) as Out;
+
+            const canRetry =
+              attempt < p.maxRetries &&
+              (p.retryOnError ?? defaultRetryOnError)(e);
+
+            if (!canRetry) return asyncFail(e) as Out;
+
+            const d = backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
+            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1)) as Out;
+          },
+          (w) => {
+            const canRetry =
+              attempt < p.maxRetries &&
+              (p.retryOnStatus ?? defaultRetryOnStatus)(w.status);
+
+            if (!canRetry) return asyncSucceed(w) as Out;
+
+            const ra = retryAfterMs(w.headers);
+            const d = ra ?? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs);
+
+            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1)) as Out;
+          }
+        ) as Out;
+
+      return loop(0);
+    }) as HttpClientStream;

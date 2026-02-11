@@ -1,6 +1,6 @@
 import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
-import { httpClientWithMeta } from "../http";
+import { httpClientWithMeta } from "../http/httpClient";
 
 type Post = {
     userId: number;

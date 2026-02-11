@@ -9,6 +9,7 @@ import {
 } from "../client";
 import {Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed} from "../../core/types/asyncEffect";
 import {fromPromiseAbortable} from "../../core/runtime/runtime";
+import { sleepMs } from "../sleep";
 
 export type RetryPolicy = {
     maxRetries: number;
@@ -36,28 +37,6 @@ const normalizeHttpError = (e: unknown): HttpError => {
     return {_tag: "FetchError", message: String(e)};
 };
 
-// sleep cancelable (si el fiber se interrumpe, cancela el timer)
-const sleepMs = (ms: number): Async<unknown, HttpError, void> =>
-    fromPromiseAbortable<HttpError, void>(
-        (signal) =>
-            new Promise<void>((resolve, reject) => {
-                const id = setTimeout(resolve, ms);
-
-                const onAbort = () => {
-                    clearTimeout(id);
-                    // forzamos un AbortError “standard-ish”
-                    const err =
-                        typeof (globalThis as any).DOMException === "function"
-                            ? new (globalThis as any).DOMException("Aborted", "AbortError")
-                            : ({name: "AbortError"} as any);
-                    reject(err);
-                };
-
-                if (signal.aborted) return onAbort();
-                signal.addEventListener("abort", onAbort, {once: true});
-            }),
-        normalizeHttpError
-    );
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 

@@ -149,3 +149,11 @@ test("fetch works", async () => {
 - Cancelación con `AbortSignal`
 - `race`, `timeout`, `retry`
 - Integración con React / Bun / Workers
+
+
+---
+
+## Next
+
+- Learn how interruption and `Scope` work: [Cancellation & interruption](./cancellation.md)
+- Enable logging/tracing with hooks: [Observability](./observability.md)

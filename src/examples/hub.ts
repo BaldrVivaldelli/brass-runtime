@@ -2,7 +2,7 @@ import {async, Async, asyncCatchAll, asyncFlatMap, asyncSync} from "../core/type
 import {makeHub} from "../core/stream/hub";
 import {fork, unsafeRunAsync} from "../core/runtime/runtime";
 import {QueueClosed} from "../core/stream/queue";
-import {Fiber} from "../core/runtime/fiber";
+import {Fiber, Interrupted} from "../core/runtime/fiber";
 import {Exit} from "../core/types/effect";
 
 const log = (msg: string): Async<unknown, any, void> =>
@@ -33,10 +33,11 @@ const consumer = <A>(
 const hub = makeHub<number>(8, "Dropping"); // para broadcast suele ir mejor Dropping/Sliding
 
 //TODO: Pensar si lo subo a fiber, porque seguramente se use mucho y hay que ver la forma de meterlo en el ciclo de vida
-const awaitFiber = <E, A>(f: Fiber<E, A>): Async<unknown, E, A> =>
-    async((_env, cb: (exit: Exit<E, A>) => void) => {
-        f.join(cb);
-    });
+const awaitFiber = <E, A>(f: Fiber<E, A>): Async<unknown, E | Interrupted, A> =>
+  async((_env, cb: (exit: Exit<E | Interrupted, A>) => void) => {
+    f.join(cb);
+  });
+
 
 const program =
     asyncFlatMap(hub.subscribe(), (sub1) =>

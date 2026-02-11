@@ -76,8 +76,8 @@ Applied via `withMeta(client)` — never forced.
 ## Basic usage (no meta)
 
 ```ts
-import { httpClient } from "../http/httpClient";
-import { toPromise } from "../runtime/runtime";
+import { httpClient } from "brass-runtime/http";
+import { toPromise } from "brass-runtime";
 
 type Post = {
   id: number;

@@ -164,27 +164,40 @@ export function dropP<A>(n: number): ZPipeline<unknown, never, A, A> {
  * - Upstream error E => fail(E)
  * - f(a) fails with Ep => fail(Ep)
  */
-export function mapEffectP<Rp, Ep, A, B>(
-    f: (a: A) => Async<Rp, Ep, B>
-): ZPipeline<Rp, Ep, A, B> {
-    return (<R, E>(input: ZStream<R, E, A>) => {
-        const loop = (cur: ZStream<R, E, A>): ZStream<R & Rp, E | Ep, B> =>
-            fromPull(
-                asyncFold(
-                    asyncMapError(uncons(cur), (opt: Option<E>) => widenOpt<E, Ep>(opt)),
-                    (opt: Option<E | Ep>) => asyncFail(opt),
-                    ([a, tail]) =>
-                        asyncFold(
-                            asyncMapError(f(a) as any, (e: Ep) => some(e as any as E | Ep)),
-                            (opt2: Option<E | Ep>) => asyncFail(opt2),
-                            (b: B) => asyncSucceed([b, loop(tail as any)] as const)
-                        ) as any
-                ) as any
-            );
+const raiseToOpt =
+  <E, Ep, R, B>(fa: Async<R, Ep, B>): Async<R, Option<E | Ep>, B> =>
+    asyncMapError(fa, (e: Ep) => some(e as unknown as E | Ep));
 
-        return loop(input) as any;
-    }) as any;
+export function mapEffectP<Rp, Ep, A, B>(
+  f: (a: A) => Async<Rp, Ep, B>
+): ZPipeline<Rp, Ep, A, B> {
+  return (<R, E>(input: ZStream<R, E, A>) => {
+    const raiseToOpt =
+      <E0>(fa: Async<Rp, Ep, B>): Async<Rp, Option<E0 | Ep>, B> =>
+        asyncMapError(fa, (e: Ep) => some(e as unknown as E0 | Ep));
+
+    const loop = (cur: ZStream<R & Rp, E, A>): ZStream<R & Rp, E | Ep, B> =>
+      fromPull(
+        asyncFold(
+          asyncMapError(
+            uncons(cur),
+            (opt: Option<E>) => widenOpt<E, Ep>(opt)
+          ),
+          (opt: Option<E | Ep>) => asyncFail(opt),
+          ([a, tail]) =>
+            asyncFold(
+              raiseToOpt<E>(f(a)),                     // Async<Rp, ...>
+              (opt2: Option<E | Ep>) => asyncFail(opt2),
+              (b: B) => asyncSucceed([b, loop(tail as any)] as const)
+            )
+        )
+      );
+
+    return loop(input as any) as any;
+  }) as any;
 }
+
+
 
 /** Tap each element with an effect, preserving the element. */
 export function tapEffectP<Rp, Ep, A>(

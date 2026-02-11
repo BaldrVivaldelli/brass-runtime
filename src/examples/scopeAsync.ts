@@ -1,10 +1,10 @@
 // tests/httpScopeAsync.spec.ts (o scripts/httpScopeAsync.test.ts)
-
-import { httpClientWithMeta } from "../http";
 import { withScopeAsync } from "../core/runtime/scope";
 import { zipPar } from "../core/stream/structuredConcurrency";
 import { Runtime } from "../core/runtime/runtime";
 import { Scope } from "../core/runtime/scope";
+import { httpClientWithMeta } from "../http/httpClient";
+
 
 type Post = { id: number; userId: number; title: string; body: string };
 type NewPost = Omit<Post, "id">;
