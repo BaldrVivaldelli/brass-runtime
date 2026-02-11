@@ -1,9 +1,11 @@
 # 🛠️ brass-runtime — Mini ZIO-like runtime in TypeScript
 
-A small experimental runtime inspired by **ZIO 2**, implemented in vanilla TypeScript and intentionally built without using `Promise` / `async`/`await` as the primary semantic primitive.
+A small experimental runtime inspired by **ZIO 2**, implemented in vanilla TypeScript and intentionally built without using `Promise` / `async`/`await` as the **primary semantic primitive**.
 
-`brass-runtime` is the **foundation**: it provides the effect system, fibers, scheduler, scopes and streams.
-Higher-level modules (HTTP, streaming utilities, integrations) are built **on top of this runtime**, not baked into it.
+`brass-runtime` is the foundation: it provides an effect system, fibers, scheduler, scopes, and streams.
+Higher-level modules (HTTP, streaming utilities, integrations) are built **on top of the runtime**, not baked into it.
+
+> You can still interop with the outside world (timers, fetch, Node APIs) via explicit, cancellable bridges such as `fromPromiseAbortable`.
 
 ---
 
@@ -19,44 +21,87 @@ If you like ZIO’s separation between `zio-core`, `zio-streams`, and `zio-http`
 
 ---
 
-## Core concepts (this package)
+## Core concepts
 
-- Pure, sync core effect: `Effect<R, E, A>` and `Exit<E, A>`
+- Sync core effect: `Effect<R, E, A>` and `Exit<E, A>`
 - Algebraic async representation: `Async<R, E, A>`
-- Cooperative `Scheduler` for deterministic execution
-- Lightweight `Fiber`s with interruption and finalizers
+- Cooperative `Scheduler` (observable / testable)
+- Lightweight `Fiber`s with interruption & finalizers
 - Structured `Scope`s for resource safety
 - ZStream-style streams with backpressure
 
 ---
 
+## Install
+
+```bash
+npm i brass-runtime
+```
+
+---
+
+## Quick start
+
+### Run an effect
+
+```ts
+import { succeed } from "brass-runtime";
+import { Runtime, toPromise } from "brass-runtime/runtime";
+
+const runtime = new Runtime({ env: {} });
+
+const value = await toPromise(succeed(123), runtime.env);
+console.log(value); // 123
+```
+
+### Structured concurrency with Scope
+
+```ts
+import { withScope } from "brass-runtime/scope";
+import { Runtime } from "brass-runtime/runtime";
+
+const runtime = new Runtime({ env: {} });
+
+withScope(runtime, (scope) => {
+  const f = scope.fork(/* Async effect */);
+  // later...
+  scope.close(); // interrupts child fibers + runs finalizers
+});
+```
+
+> `toPromise` is just a convenience bridge for examples/DX. The runtime semantics remain explicit.
+
+---
+
 ## Modules built on top of brass-runtime
 
-These are **optional layers**, implemented using the runtime primitives.
+These are optional layers, implemented using the runtime primitives.
 
-### 🌐 brass-http (HTTP client)
+### 🌐 HTTP client (brass-http layer)
 
 A ZIO-style HTTP client built on top of fibers and `Async`.
 
 - Lazy & cancelable HTTP requests
-- No Promise-based semantics
-- Explicit wire / content / metadata separation
+- Explicit wire/content separation
 - Middleware-friendly (logging, retry, timeout, etc.)
 - Integrated with fiber interruption via `AbortController`
 
-
-👉 [**Read the HTTP module docs:** ](./docs/http.md)
+👉 **Docs:** [HTTP module](./docs/http.md)
 
 Example:
-```ts
-const http = httpClient({
-  baseUrl: "https://jsonplaceholder.typicode.com",
-});
 
-const post = await toPromise(
-  http.getJson<Post>("/posts/1"),
-  {}
-);
+```ts
+import { httpClientStream } from "brass-runtime/http";
+import { toPromise, Runtime } from "brass-runtime/runtime";
+
+type Post = { id: number; title: string; body: string };
+
+const runtime = new Runtime({ env: {} });
+
+const client = httpClientStream({ baseUrl: "https://jsonplaceholder.typicode.com" });
+
+const res = await toPromise(client.getJson<Post>("/posts/1"), runtime.env);
+console.log(res.status, res.value.title);
 ```
 
 ---
@@ -76,10 +121,14 @@ Examples:
 
 ---
 
-## Getting Started
+## Docs
 
-👉 **Start here:**  
-➡️ [Getting Started](./docs/getting-started.md)
+- [Getting Started](./docs/getting-started.md)
+- [Architecture](./docs/ARCHITECTURE.md)
+- [Cancellation & Interruption](./docs/cancellation.md)
+- [Observability: Hooks & Tracing](./docs/observability.md)
+- [HTTP module](./docs/http.md)
+- [Modules overview](./docs/modules.md)
 
 ---
 
@@ -88,7 +137,7 @@ Examples:
 - Stream buffering with backpressure (`buffer`)
 - Abortable async integration (`fromPromiseAbortable`)
 - Fiber-safe `toPromise` for examples & DX
-- New HTTP module (`brass-http`) built on top of the runtime
+- HTTP client module built on top of the runtime
 
 ---
 
@@ -111,7 +160,7 @@ Examples:
 - [x] Pipelines (`ZPipeline`-style)
 
 ### Libraries
-- [x] HTTP client (`brass-http`)
+- [x] HTTP client
 - [ ] Retry / timeout middleware
 - [ ] Logging / metrics layers
 
@@ -130,7 +179,7 @@ Examples:
 
 - Runtime invariants matter — avoid sneaking Promises into semantics
 - Prefer libraries on top of the runtime over changes in the core
-- Small, focused PRs are welcome
+- Small, focused PRs are welcome (your repo may enforce PR-only changes)
 
 ---
 
