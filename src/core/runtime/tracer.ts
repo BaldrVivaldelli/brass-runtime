@@ -1,3 +1,5 @@
+import { TraceContext } from "./contex";
+
 export interface Tracer {
     newTraceId(): string;
     newSpanId(): string;
@@ -10,9 +12,9 @@ export const defaultTracer: Tracer = {
 };
 
 export type BrassEnv = {
-    brass?: {
-        tracer?: Tracer;
-        traceSeed?: { traceId: string; spanId: string; sampled?: boolean };
-        childName?: (parentName?: string) => string | undefined;
-    };
+  brass?: {
+    tracer?: Tracer;
+    traceSeed?: TraceContext;
+    childName?: (parentName?: string) => string | undefined;
+  };
 };
