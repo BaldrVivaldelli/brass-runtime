@@ -2,8 +2,8 @@
   "name": "brass-runtime",
   "version": "1.10.0",
   "description": "Effect runtime utilities for TypeScript",
-  "license": "ISC",
-  "author": "",
+  "license": "MIT",
+  "author": "Augusto Vivaldelli",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -66,5 +66,13 @@
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaldrVivaldelli/brass-runtime.git"
+  },
+  "bugs": {
+    "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
+  },
+  "homepage": "https://github.com/BaldrVivaldelli/brass-runtime#readme"
 }
