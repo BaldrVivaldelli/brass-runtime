@@ -279,3 +279,14 @@ But:
 ---
 
 MIT License © 2025
+
+
+---
+
+## Further reading
+
+- [Getting started](./getting-started.md)
+- [Modules overview](./modules.md)
+- [Cancellation & interruption](./cancellation.md)
+- [Observability (hooks & events)](./observability.md)
+- [HTTP client](./http.md)
