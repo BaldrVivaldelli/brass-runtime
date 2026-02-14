@@ -8,7 +8,6 @@ import {
     HttpWireResponse
 } from "../client";
 import {Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed} from "../../core/types/asyncEffect";
-import {fromPromiseAbortable} from "../../core/runtime/runtime";
 import { sleepMs } from "../sleep";
 
 export type RetryPolicy = {

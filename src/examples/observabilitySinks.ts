@@ -5,6 +5,9 @@ import type { RuntimeEvent, RuntimeEmitContext, RuntimeHooks } from "../core/run
 import { async, asyncFlatMap, asyncSucceed, asyncSync, type Async } from "../core/types/asyncEffect";
 import { withScopeAsync } from "../core/runtime/scope";
 
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
+
 // ---------------------
 // Logger sink (JSON) + ctx
 // ---------------------
@@ -139,14 +142,14 @@ async function main() {
 
             // cancelar el scope antes de que terminen todos (para ver interrupciones)
             setTimeout(() => {
-                rt.log("warn", "scope.close()", { reason: "demo-timeout" });
+                rt.emit({ type: "log", level: "warn", message: "scope.close()", fields: { reason: "demo-timeout" } });
                 scope.close();
             }, 260);
         }) as any
     );
 
     await rt.toPromise(program);
-    rt.log("info", "example.done");
+    rt.emit({ type: "log", level: "info", message: "example.done" });
 }
 
 main().catch((e) => {

@@ -3,6 +3,9 @@ import { toPromise } from "../core/runtime/runtime";
 import { mergeHeaders, setHeaderIfMissing } from "../http/optics/request";
 import { httpClient } from "../http/httpClient";
 
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
+
 type Post = {
     userId: number;
     id: number;
@@ -24,7 +27,6 @@ async function main() {
     });
 
     console.log("== start ==");
-    console.log("toPromise.length:", toPromise.length);
     console.log("globalScheduler keys:", Object.keys(globalScheduler ?? {}));
 
     // ---------- GET JSON ----------
@@ -43,8 +45,7 @@ async function main() {
     // postJson debería devolverte WIRE => tiene bodyText
     // postJson ahora devuelve HttpResponse<Post> (parseado)
     const p2: any = toPromise(
-        http.postJson<Post>(
-            "/posts",
+        http.postJson<Post>("/posts",
             {
                 userId: 1,
                 title: "Hola Brass",
@@ -52,9 +53,8 @@ async function main() {
             },
             { headers: { accept: "application/json" } }
         ),
-        {}
     );
-    console.log("returned isPromise:", p2 && typeof p2.then === "function");
+    console.log("returned isPromise:", p2 && typeof p2.then === "function", {});
 
     const r2 = await p2;
     console.log("\n LLEGUE");

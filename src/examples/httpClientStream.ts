@@ -2,6 +2,9 @@ import { toPromise } from "../core/runtime/runtime";
 import { collectStream } from "../core/stream/stream";
 import { httpClientStream } from "../http/index";
 
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
+
 function chunksToString(chunks: Uint8Array[]): string {
     const dec = new TextDecoder();
     return chunks.map((c) => dec.decode(c, { stream: true })).join("") + dec.decode();
@@ -15,7 +18,7 @@ async function main() {
     const res = await toPromise(client.get("/posts/1"), {});
     console.log("status:", res.status);
 
-    const bytes = await toPromise(collectStream(res.body), {});
+    const bytes = (await toPromise(collectStream(res.body as any), {})) as Uint8Array[];
     const text = chunksToString(bytes);
     const json = JSON.parse(text);
 

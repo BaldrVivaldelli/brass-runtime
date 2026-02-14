@@ -6,7 +6,8 @@ import { asyncFlatMap, asyncSucceed, asyncSync } from "../types/asyncEffect";
 
 import {none, Option, some} from "../types/option";
 import { bounded } from "./queue";
-import {fork} from "../runtime/runtime";
+import { fork } from "../runtime/runtime";
+import { unsafeGetCurrentRuntime } from "../runtime/fiber";
 
 type Signal<E, A> =
     | { _tag: "Elem"; value: A }
@@ -73,7 +74,7 @@ export function buffer<R, E, A>(
         register: (env: {} & R, cb: { (exit: any): void; (exit: any): void; }) => {
             const go = () => {
                 if (!started) {
-                    fork(start(env) as any, env).join(() => {
+                    unsafeGetCurrentRuntime<{} & R>().fork(start(env) as any).join(() => {
                         pullFromQueue(env, cb);
                     });
                     return;
@@ -87,7 +88,7 @@ export function buffer<R, E, A>(
     function pullFromQueue(env: {} & R, cb: (exit: any) => void) {
         const takeEff: Async<{} & R, never, Signal<E, A>> = q.take();
 
-        fork(takeEff as any, env).join((ex: any) => {
+        unsafeGetCurrentRuntime<{} & R>().fork(takeEff as any).join((ex: any) => {
             if (ex._tag !== "Success") return; // take no debería fallar
 
             const sig = ex.value as Signal<E, A>;
@@ -99,12 +100,12 @@ export function buffer<R, E, A>(
 
                 case "End":
                     producer?.interrupt?.();
-                    cb({ _tag: "Failure", error: none });
+                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: none } });
                     return;
 
                 case "Fail":
                     producer?.interrupt?.();
-                    cb({ _tag: "Failure", error: some(sig.error) });
+                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(sig.error) } });
                     return;
             }
         });

@@ -2,6 +2,9 @@ import { collectStream, fromArray, merge } from "../core/stream/stream";
 import {toPromise} from "../core/runtime/runtime";
 import {Async} from "../core/types/asyncEffect";
 
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
+
 async function main() {
     console.log("== merge test start ==");
 

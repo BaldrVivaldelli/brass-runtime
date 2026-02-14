@@ -2,6 +2,9 @@ import { globalScheduler } from "../core/runtime/scheduler";
 import { toPromise } from "../core/runtime/runtime";
 import { httpClientWithMeta } from "../http/httpClient";
 
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
+
 type Post = {
     userId: number;
     id: number;
@@ -39,8 +42,7 @@ async function main() {
     console.log("\n== POST /posts (json) ==");
 
     const p2: any = toPromise(
-        http.postJson<Post>(
-            "/posts",
+        http.postJson<Post>("/posts",
             {
                 userId: 1,
                 title: "Hola Brass",
@@ -48,9 +50,8 @@ async function main() {
             },
             { headers: { accept: "application/json" } }
         ),
-        {}
     );
-    console.log("returned isPromise:", p2 && typeof p2.then === "function");
+    console.log("returned isPromise:", p2 && typeof p2.then === "function", {});
 
     const r2 = await p2;
 

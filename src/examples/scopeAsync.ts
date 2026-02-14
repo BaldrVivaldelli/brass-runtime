@@ -1,5 +1,8 @@
 // tests/httpScopeAsync.spec.ts (o scripts/httpScopeAsync.test.ts)
 import { withScopeAsync } from "../core/runtime/scope";
+
+// This example targets Node; keep types lightweight for library compilation.
+declare const process: any;
 import { zipPar } from "../core/stream/structuredConcurrency";
 import { Runtime } from "../core/runtime/runtime";
 import { Scope } from "../core/runtime/scope";

@@ -1,14 +1,8 @@
 // ----- ADT de Stream -----
 
 import {
-    catchAll, Exit,
-    fail,
-    flatMap,
-    map,
-    mapError,
-    orElseOptional,
-    succeed, sync,
-    ZIO,
+    Cause,
+    Exit, fail, flatMap, map, mapError, orElseOptional, succeed, sync, ZIO,
 } from "../types/effect.js";
 import { none, Option, some } from "../types/option.js";
 import {
@@ -21,10 +15,11 @@ import {
     asyncSucceed,
     asyncSync
 } from "../types/asyncEffect";
-import {Scope} from "../runtime/scope";
-import {raceWith} from "./structuredConcurrency";
-import {Fiber, Interrupted} from "../runtime/fiber";
-import {getCurrentRuntime, Runtime} from "../runtime/runtime";
+import { Scope } from "../runtime/scope";
+import { raceWith } from "./structuredConcurrency";
+import { Fiber, getCurrentFiber, unsafeGetCurrentRuntime } from "../runtime/fiber";
+import { unsafeRunFoldWithEnv } from "../runtime/runtime.js";
+
 
 
 export type Empty<R, E, A> = { readonly _tag: "Empty" };
@@ -63,6 +58,16 @@ export type Scoped<R, E, A> = {
     readonly release: (exit: Exit<any, any>) => Async<R, any, void>;
 };
 
+export type Managed<R, E, A> = {
+    readonly _tag: "Managed";
+    readonly acquire: ZIO<R, E, {
+        stream: ZStream<R, E, A>;
+        release: (exit: Exit<any, any>) => Async<R, any, void>;
+    }
+    >;
+};
+
+
 export type ZStream<R, E, A> =
     | Empty<R, E, A>
     | Emit<R, E, A>
@@ -70,7 +75,8 @@ export type ZStream<R, E, A> =
     | FromPull<R, E, A>
     | Flatten<R, E, A>
     | Merge<R, E, A>
-    | Scoped<R, E, A>;
+    | Scoped<R, E, A>
+    | Managed<R, E, A>;
 
 
 export type Normalize<E> = (u: unknown) => E;
@@ -93,12 +99,10 @@ export const unwrapScoped = <R, E, A>(
 });
 
 export const managedStream = <R, E, A>(
-    acquire: Async<R, E, { stream: ZStream<R, E, A>; release: (exit: Exit<any, any>) => Async<R, any, void> }>
+    acquire: ZIO<R, E, { stream: ZStream<R, E, A>; release: (exit: Exit<any, any>) => Async<R, any, void> }>
 ): ZStream<R, E, A> => ({
-    _tag: "Scoped",
-    acquire: asyncFlatMap(acquire, (x) => asyncSucceed(x.stream)) as any,
-    release: (exit) =>
-        asyncFlatMap(acquire, (x) => x.release(exit)) as any
+    _tag: "Managed",
+    acquire,
 });
 
 
@@ -138,6 +142,9 @@ export const flattenStream = <R, E, A>(
     stream,
 });
 
+type UnconsValue<R, E, A> = [A, ZStream<R, E, A>];
+type Pull<R, E, A> = Async<R, Option<E>, UnconsValue<R, E, A>>;
+
 
 function streamToRaceWithHandler<R, E, A>(
     winnerSide: "L" | "R",
@@ -146,13 +153,13 @@ function streamToRaceWithHandler<R, E, A>(
     flip: boolean,
     id: number
 ): (
-    exit: Exit<Option<E> | Interrupted, [A, ZStream<R, E, A>]>,
-    otherFiber: Fiber<Option<E> | Interrupted, [A, ZStream<R, E, A>]>,
+    exit: Exit<Option<E>, [A, ZStream<R, E, A>]>,
+    otherFiber: Fiber<Option<E>, [A, ZStream<R, E, A>]>,
     scope: Scope<R>
-) => Async<R, Option<E> | Interrupted, [A, ZStream<R, E, A>]> {
+) => Async<R, Option<E>, [A, ZStream<R, E, A>]> {
     return (exit, otherFiber, scope) => {
         if (exit._tag === "Failure") {
-            /*console.log(`[mergePull#${id}] failure error=`, exit.error);*/
+            /*console.log(`[mergePull#${id}] failure error=`, (exit.cause as any).error);*/
         }
 
         if (exit._tag === "Success") {
@@ -167,21 +174,20 @@ function streamToRaceWithHandler<R, E, A>(
             // reconstruimos el merge actualizando el lado ganador
             const next =
                 winnerSide === "L"
-                    ? fromPull(makeMergePull(tailWin, rightStream, !flip,id))
-                    : fromPull(makeMergePull(leftStream, tailWin, !flip,id));
+                    ? fromPull(makeMergePull(tailWin, rightStream, !flip, id))
+                    : fromPull(makeMergePull(leftStream, tailWin, !flip, id));
 
             return asyncSucceed([a, next]);
         }
 
-        // failure: Option<E> o Interrupted
-        const err = exit.error as unknown;
-
-        // Interrupted -> propagamos
-        if (typeof err === "object" && err !== null && (err as any)._tag === "Interrupted") {
-            return asyncFail(err as any);
+        // failure: Option<E> o Interrupt
+        if (exit.cause._tag === "Interrupt") {
+            // Propagamos la interrupción (no contamina E)
+            return async((_env, cb) => { cb({ _tag: "Failure", cause: { _tag: "Interrupt" } } as any); });
         }
 
-        const opt = err as Option<E>;
+        const opt = (exit.cause as any).error as Option<E>;
+
 
         // End(None): NO cancelamos el otro. Seguimos con el stream del otro lado.
         if (opt._tag === "None") {
@@ -201,14 +207,14 @@ function makeMergePull<R, E, A>(
 ): Async<R, Option<E>, [A, ZStream<R, E, A>]> {
     return async((env, cb) => {
         const id = ++mergePullId;
-        const runtime = getCurrentRuntime<R>()
+        const runtime = unsafeGetCurrentRuntime<R>()
         const scope = new Scope(runtime);
 
-        const leftPull  = uncons(onLeft);
+        const leftPull = uncons(onLeft);
         const rightPull = uncons(onRight);
 
-        const onLeftHandler  = streamToRaceWithHandler("L", onLeft, onRight, flip,id);
-        const onRightHandler = streamToRaceWithHandler("R", onLeft, onRight, flip,id);
+        const onLeftHandler = streamToRaceWithHandler("L", onLeft, onRight, flip, id);
+        const onRightHandler = streamToRaceWithHandler("R", onLeft, onRight, flip, id);
         const handler = raceWith(
             leftPull,
             rightPull,
@@ -229,7 +235,7 @@ export function merge<R, E, A>(
     left: ZStream<R, E, A>,
     right: ZStream<R, E, A>
 ): ZStream<R, E, A> {
-    return fromPull(makeMergePull(left, right, true,0));
+    return fromPull(makeMergePull(left, right, true, 0));
 }
 
 
@@ -272,87 +278,186 @@ export function uncons<R, E, A>(
                 )
             )
         case "Merge":
-            return makeMergePull(self.left, self.right, self.flip,0);
+            return makeMergePull(self.left, self.right, self.flip, 0);
         case "Scoped":
             return async((env, cb) => {
-                const runtime = getCurrentRuntime<R>()
+                const runtime = unsafeGetCurrentRuntime<R>();
                 const scope = new Scope(runtime);
 
-                scope.addFinalizer((ex) => self.release(ex));
+                // 👇 Si el consumidor corta (ej: takeP) igual cerramos el scope al finalizar el fiber.
+                const fiber = getCurrentFiber();
+                fiber?.addFinalizer((exit) => {
+                    try {
+                        scope.close(exit as any);
+                    } catch { }
+                });
+
+                const closeWith = (exit: Exit<any, any>) => {
+                    // End-of-stream = Failure(None) => para finalizers suele ser más útil tratarlo como Success
+                    if (exit._tag === "Failure") {
+                        const err = (exit.cause as any).error as any;
+                        if (err && typeof err === "object" && err._tag === "None") {
+                            scope.close({ _tag: "Success", value: undefined });
+                            return;
+                        }
+                    }
+                    scope.close(exit);
+                };
+
+                // Wrap del stream para cerrar el scope SOLO cuando termina/falla (no en cada elemento).
+                const wrap = (s: ZStream<R, E, A>): ZStream<R, E, A> =>
+                    fromPull(
+                        async((env2, cb2) => {
+                            const pull = uncons(s) as unknown as Pull<R, E, A>;
+                            unsafeRunFoldWithEnv<R, Option<E>, UnconsValue<R, E, A>>(
+                                pull,
+                                env2,
+                                (cause) => {
+                                    const ex = { _tag: "Failure", cause } as any;
+                                    closeWith(ex);
+                                    cb2(ex);
+                                },
+                                ([a, tail]) => {
+                                    cb2({ _tag: "Success", value: [a, wrap(tail)] } as any);
+                                }
+                            );
+                        })
+                    );
+
+                // Acquire en scope
+                scope.fork(self.acquire as any).join((ex) => {
+                    if (ex._tag === "Failure") {
+                        // 👇 IMPORTANTE: NO registramos finalizer si acquire falló
+                        closeWith(ex as any);
+                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(((ex.cause as any).error) as any) } } as any); // E -> Option<E>
+                        return;
+                    }
+
+                    // 👇 Registrar release SOLO si acquire tuvo éxito
+                    scope.addFinalizer((exit) => self.release(exit));
+
+                    const inner = ex.value as ZStream<R, E, A>;
+                    unsafeGetCurrentRuntime<R>().fork(uncons(wrap(inner)) as any).join(cb as any);
+                });
+            });
+        case "Managed":
+            return async((env, cb) => {
+                const runtime = unsafeGetCurrentRuntime<R>();
+                const scope = new Scope(runtime);
+
+                // Si el consumidor corta (take/interrupt), igual cerramos el scope.
+                getCurrentFiber()?.addFinalizer((exit) => {
+                    try { scope.close(exit as any); } catch { }
+                });
+
+                const closeWith = (exit: Exit<any, any>) => {
+                    // End-of-stream = Failure(None) => para finalizers suele ser más útil tratarlo como Success
+                    if (exit._tag === "Failure") {
+                        const err = (exit.cause as any).error as any;
+                        if (err && typeof err === "object" && err._tag === "None") {
+                            scope.close({ _tag: "Success", value: undefined });
+                            return;
+                        }
+                    }
+                    scope.close(exit);
+                };
 
                 scope.fork(self.acquire as any).join((ex) => {
                     if (ex._tag === "Failure") {
                         scope.close(ex as any);
-                        // acquire falla con E -> lo adaptamos a Option<E> = Some(E)
-                        cb({ _tag: "Failure", error: some(ex.error as any) } as any);
+                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(((ex.cause as any).error) as any) } } as any);
                         return;
                     }
 
-                    const inner = ex.value as ZStream<R, E, A>;
+                    const { stream: inner, release } = ex.value as {
+                        stream: ZStream<R, E, A>;
+                        release: (exit: Exit<any, any>) => Async<R, any, void>;
+                    };
 
-                    // IMPORTANTE: transformamos el stream en uno que, cuando termine,
-                    // cierre el scope para disparar finalizers.
-                    const pulled = uncons(inner);
+                    // Release correcto (del mismo acquire)
+                    scope.addFinalizer((exit) => release(exit));
 
-                    // Si inner termina o falla, cerramos scope y propagamos
-                    (pulled as any)(env, (ex2: any) => {
-                        scope.close(ex2);
-                        cb(ex2);
-                    });
+                    // Mantener el scope vivo hasta que el stream termine o falle
+                    const wrap = (s: ZStream<R, E, A>): ZStream<R, E, A> =>
+                        fromPull(
+                            async((env2, cb2) => {
+                                (uncons(s) as any)(env2, (ex2: any) => {
+                                    if (ex2._tag === "Failure") {
+                                        closeWith(ex2);
+                                        cb2(ex2);
+                                        return;
+                                    }
+                                    const [a, tail] = ex2.value as [A, ZStream<R, E, A>];
+                                    cb2({ _tag: "Success", value: [a, wrap(tail)] } as any);
+                                });
+                            }) as any
+                        );
+
+                    unsafeGetCurrentRuntime<R>().fork(uncons(wrap(inner)) as any).join(cb as any);
                 });
             });
-
     }
 }
 
+
+
+
+
+
 export function assertNever(x: never, msg?: string): never {
-  throw new Error(msg ?? `Unexpected value: ${String(x)}`);
+    throw new Error(msg ?? `Unexpected value: ${String(x)}`);
 }
 // ---------- combinadores extra opcionales ----------
 
 export function mapStream<R, E, A, B>(
-  self: ZStream<R, E, A>,
-  f: (a: A) => B
+    self: ZStream<R, E, A>,
+    f: (a: A) => B
 ): ZStream<R, E, B> {
-  switch (self._tag) {
-    case "Empty":
-      return emptyStream<R, E, B>();
+    switch (self._tag) {
+        case "Empty":
+            return emptyStream<R, E, B>();
 
-    case "Emit":
-      return emitStream<R, E, B>(map(self.value, f));
+        case "Emit":
+            return emitStream<R, E, B>(map(self.value, f));
 
-    case "FromPull":
-      return fromPull(
-        map(self.pull, ([a, tail]): [B, ZStream<R, E, B>] => [f(a), mapStream(tail, f)])
-      );
+        case "FromPull":
+            return fromPull(
+                map(self.pull, ([a, tail]): [B, ZStream<R, E, B>] => [f(a), mapStream(tail, f)])
+            );
 
-    case "Concat":
-      return concatStream<R, E, B>(mapStream(self.left, f), mapStream(self.right, f));
+        case "Concat":
+            return concatStream<R, E, B>(mapStream(self.left, f), mapStream(self.right, f));
 
-    case "Flatten": {
-      const mappedOuter: ZStream<R, E, ZStream<R, E, B>> = mapStream(
-        self.stream,
-        (inner) => mapStream(inner, f)
-      );
-      return flattenStream<R, E, B>(mappedOuter);
+        case "Flatten": {
+            const mappedOuter: ZStream<R, E, ZStream<R, E, B>> = mapStream(
+                self.stream,
+                (inner) => mapStream(inner, f)
+            );
+            return flattenStream<R, E, B>(mappedOuter);
+        }
+
+        case "Merge":
+            return mergeStream<R, E, B>(
+                mapStream(self.left, f),
+                mapStream(self.right, f),
+                self.flip
+            );
+
+        case "Scoped":
+            return unwrapScoped<R, E, B>(
+                map(self.acquire, (s) => mapStream(s, f)),
+                self.release
+            );
+        case "Managed":
+            return managedStream<R, E, B>(
+                map(self.acquire, ({ stream, release }) => ({
+                    stream: mapStream(stream, f),
+                    release,
+                }))
+            );
+        default:
+            return assertNever(self);
     }
-
-    case "Merge":
-      return mergeStream<R, E, B>(
-        mapStream(self.left, f),
-        mapStream(self.right, f),
-        self.flip
-      );
-
-    case "Scoped":
-      return unwrapScoped<R, E, B>(
-        map(self.acquire, (s) => mapStream(s, f)),
-        self.release
-      );
-
-    default:
-      return assertNever(self);
-  }
 }
 
 
@@ -474,7 +579,7 @@ function readerStream<E>(
             reader.read()
                 .then(({ done, value }) => {
                     if (done) {
-                        cb({ _tag: "Failure", error: none }); // fin normal
+                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: none } }); // fin normal
                         return;
                     }
                     cb({
@@ -484,7 +589,7 @@ function readerStream<E>(
                 })
                 .catch((e) => {
                     // Error real => Some(e)
-                    cb({ _tag: "Failure", error: some(normalizeError(e)) });
+                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(e)) } });
                 });
         }) as any;
 

@@ -66,7 +66,7 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
         // fallar todos los takers suspendidos
         while (takers.length > 0) {
             const t = takers.shift()!;
-            t({ _tag: "Failure", error: QueueClosedErr });
+            t({ _tag: "Failure", cause: { _tag: "Fail", error: QueueClosedErr } });
         }
 
         // liberar offers suspendidos
@@ -151,7 +151,7 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
                 }
 
                 if (closed) {
-                    cb({ _tag: "Failure", error: QueueClosedErr });
+                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: QueueClosedErr } });
                     return;
                 }
 

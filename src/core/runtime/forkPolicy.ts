@@ -13,7 +13,11 @@ export function makeForkPolicy<R>(env: R, hooks: RuntimeHooks) {
     const svc = resolveForkServices(env as any);
 
     return {
-        initChild(fiber: RuntimeFiber<any, any, any> & any, parent?: (RuntimeFiber<any, any, any> & any) | null) {
+        initChild(
+            fiber: RuntimeFiber<any, any, any> & any,
+            parent?: (RuntimeFiber<any, any, any> & any) | null,
+            scopeId?: number
+        ) {
             const parentCtx: FiberContext | undefined = parent?.fiberContext;
 
             // 1) context (log + trace)
@@ -27,32 +31,38 @@ export function makeForkPolicy<R>(env: R, hooks: RuntimeHooks) {
             fiber.parentFiberId = parent?.id;
             fiber.name = svc.childName(parent?.name);
 
+            // ✅ asociar fiber al scope (si se provee)
+            if (scopeId !== undefined) fiber.scopeId = scopeId;
+
             // 3) evento start (si estás usando events.ts)
             hooks.emit(
-                { type: "fiber.start", fiberId: fiber.id, parentFiberId: parent?.id, name: fiber.name },
+                {
+                    type: "fiber.start",
+                    fiberId: fiber.id,
+                    parentFiberId: parent?.id,
+                    scopeId: fiber.scopeId, // ✅ ahora viaja
+                    name: fiber.name,
+                },
                 { fiberId: parent?.id, traceId: parentCtx?.trace?.traceId, spanId: parentCtx?.trace?.spanId }
             );
         },
     };
 }
 
-
 function resolveForkServices(env?: BrassEnv): ForkServices {
-  const defaultTracer: Tracer = {
-    newTraceId: () => crypto.randomUUID(),
-    newSpanId: () => crypto.randomUUID(),
-  };
+    const defaultTracer: Tracer = {
+        newTraceId: () => crypto.randomUUID(),
+        newSpanId: () => crypto.randomUUID(),
+    };
 
-  const brass = env?.brass;
+    const brass = env?.brass;
 
-  const tracer = brass?.tracer ?? defaultTracer;
-  const seed = brass?.traceSeed;
+    const tracer = brass?.tracer ?? defaultTracer;
+    const seed = brass?.traceSeed;
 
-  const childName =
-    brass?.childName ??
-    ((p?: string) => (p ? `${p}/child` : undefined));
+    const childName = brass?.childName ?? ((p?: string) => (p ? `${p}/child` : undefined));
 
-  return { tracer, seed, childName };
+    return { tracer, seed, childName };
 }
 
 function forkTrace(svc: ForkServices, parentTrace: TraceContext | null): TraceContext | null {

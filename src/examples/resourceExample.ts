@@ -1,6 +1,5 @@
 // src/resourceExample.ts
 
-import { withScope } from "../core/runtime/scope";
 import {
     acquireRelease,
     async,
@@ -11,6 +10,7 @@ import {
 } from "../core/types/asyncEffect";
 import { Exit } from "../core/types/effect";
 import { Runtime } from "../core/runtime/runtime";
+import { withScope } from "../core/runtime/scope";
 
 type Env = {};
 

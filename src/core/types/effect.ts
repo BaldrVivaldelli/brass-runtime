@@ -3,9 +3,13 @@ import { asyncFail, asyncFlatMap, asyncFold, asyncMap, asyncMapError, asyncSucce
 import type { Option } from "./option";
 import { none } from "./option";
 
+export type Cause<E> =
+  | { _tag: "Fail"; error: E }
+  | { _tag: "Interrupt" };
+
 export type Exit<E, A> =
-    | { readonly _tag: "Success"; readonly value: A }
-    | { readonly _tag: "Failure"; readonly error: E };
+  | { _tag: "Success"; value: A }
+  | { _tag: "Failure"; cause: Cause<E> };
 
 export type ZIO<R, E, A> = Async<R, E, A>;
 
