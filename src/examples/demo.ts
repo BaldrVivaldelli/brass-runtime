@@ -19,16 +19,16 @@ export function sleep(ms: number): Async<unknown, Interrupted, void> {
 
         const onAbort = () => {
           clearTimeout(id);
-          reject({ _tag: "Interrupted" } satisfies Interrupted);
+          reject({ _tag: "Interrupt" } satisfies Interrupted);
         };
 
         if (signal.aborted) return onAbort();
         signal.addEventListener("abort", onAbort, { once: true });
       }),
     (e) =>
-      typeof e === "object" && e !== null && (e as any)._tag === "Interrupted"
+      typeof e === "object" && e !== null && (e as any)._tag === "Interrupt"
         ? (e as Interrupted)
-        : ({ _tag: "Interrupted" } as Interrupted)
+        : ({ _tag: "Interrupt" } as Interrupted)
   );
 }
 
@@ -39,7 +39,7 @@ function task(name: string, ms: number): Async<unknown, Interrupted, string> {
 // Helper: corre un efecto y loguea su Exit (incluyendo Interrupted)
 function run<E, A>(runtime: Runtime<Env>, label: string, eff: Async<Env, E, A>) {
   const f = runtime.fork(eff);
-  f.join((exit: Exit<E | Interrupted, A>) => {
+  f.join((exit) => {
     console.log(label, exit);
   });
   return f;
@@ -83,7 +83,7 @@ function main() {
 
   // Scoped fibers (SE interrumpen)
   console.log("== scoped fibers (will be interrupted) ==");
-  withScope(runtime, (scope) => {
+  withScope(runtime, (scope: any) => {
     const f1 = scope.fork(task("A", 1000));
     const f2 = scope.fork(task("B", 1500));
     const f3 = scope.fork(task("C", 2000));
@@ -95,9 +95,9 @@ function main() {
       scope.close();
     }, 300);
 
-    f1.join((ex) => console.log("scope f1:", ex));
-    f2.join((ex) => console.log("scope f2:", ex));
-    f3.join((ex) => console.log("scope f3:", ex));
+    f1.join((ex: any) => console.log("scope f1:", ex));
+    f2.join((ex: any) => console.log("scope f2:", ex));
+    f3.join((ex: any) => console.log("scope f3:", ex));
   });
 
   // opcional: para que el proceso no termine “antes” en algunos runners

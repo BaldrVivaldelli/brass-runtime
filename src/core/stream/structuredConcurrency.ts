@@ -1,10 +1,9 @@
 // src/structuredConcurrency.ts
 
-import { Exit } from "../types/effect";
+import { Cause, Exit } from "../types/effect";
 import { async, Async } from "../types/asyncEffect";
 import { Scope } from "../runtime/scope";
 import type { Fiber } from "../runtime/fiber";
-import { Interrupted } from "../runtime/fiber";
 
 type AnyFiber<R, E, A> = ReturnType<Scope<R>["fork"]>;
 
@@ -18,14 +17,14 @@ export function race<R, E, A>(
     left: Async<R, E, A>,
     right: Async<R, E, A>,
     parentScope: Scope<R>
-): Async<R, E | Interrupted, A> {
+): Async<R, E , A> {
     return async((env, cb) => {
         // cada carrera tiene su propio scope interno
         const scope = parentScope.subScope();
 
         let done = false;
 
-        const onResult = (exit: Exit<E | Interrupted, A>) => {
+        const onResult = (exit: Exit<E , A>) => {
             if (done) return;
             done = true;
 
@@ -53,12 +52,12 @@ export function zipPar<R, E, A, B>(
     left: Async<R, E, A>,
     right: Async<R, E, B>,
     parentScope: Scope<R>
-): Async<R, E | Interrupted, [A, B]> {
+): Async<R, E , [A, B]> {
     return async((env, cb) => {
         const scope = parentScope.subScope();
 
-        let leftExit: Exit<E | Interrupted, A> | null = null;
-        let rightExit: Exit<E | Interrupted, B> | null = null;
+        let leftExit: Exit<E , A> | null = null;
+        let rightExit: Exit<E , B> | null = null;
         let done = false;
 
         const checkDone = () => {
@@ -78,21 +77,21 @@ export function zipPar<R, E, A, B>(
             }
 
             // algún error, cancelar todo
-            let cause: E | Interrupted;
+            let cause: Cause<E>;
 
             if (leftExit._tag === "Failure") {
-                cause = leftExit.error;
+                cause = leftExit.cause;
             } else if (rightExit._tag === "Failure") {
-                cause = rightExit.error;
+                cause = rightExit.cause;
             } else {
                 // Esto es lógicamente imposible, pero lo ponemos
                 // para mantener feliz a TypeScript.
                 throw new Error("zipPar: unreachable state (no Failure exit)");
             }
 
-            const errExit: Exit<E | Interrupted, [A, B]> = {
+            const errExit: Exit<E , [A, B]> = {
                 _tag: "Failure",
-                error: cause,
+                cause,
             };
 
             scope.close(errExit);
@@ -125,7 +124,7 @@ export function zipPar<R, E, A, B>(
 export function collectAllPar<R, E, A>(
     effects: ReadonlyArray<Async<R, E, A>>,
     parentScope: Scope<R>
-): Async<R, E | Interrupted, A[]> {
+): Async<R, E , A[]> {
     return async((env, cb) => {
         const scope = parentScope.subScope();
         const results: A[] = new Array(effects.length);
@@ -142,9 +141,9 @@ export function collectAllPar<R, E, A>(
                 if (exit._tag === "Failure") {
                     done = true;
 
-                    const errExit: Exit<E | Interrupted, A[]> = {
+                    const errExit: Exit<E , A[]> = {
                         _tag: "Failure",
-                        error: exit.error,
+                        cause: exit.cause,
                     };
 
                     scope.close(errExit);
@@ -157,7 +156,7 @@ export function collectAllPar<R, E, A>(
 
                 if (completed === effects.length) {
                     done = true;
-                    const successExit: Exit<E | Interrupted, A[]> = {
+                    const successExit: Exit<E , A[]> = {
                         _tag: "Success",
                         value: results,
                     };
@@ -174,24 +173,24 @@ export function raceWith<R, E, A, B, C>(
   right: Async<R, E, B>,
   parentScope: Scope<R>,
   onLeft: (
-    exit: Exit<E | Interrupted, A>,
-    rightFiber: Fiber<E | Interrupted, B>,
+    exit: Exit<E , A>,
+    rightFiber: Fiber<E , B>,
     scope: Scope<R>
-  ) => Async<R, E | Interrupted, C>,
+  ) => Async<R, E , C>,
   onRight: (
-    exit: Exit<E | Interrupted, B>,
-    leftFiber: Fiber<E | Interrupted, A>,
+    exit: Exit<E , B>,
+    leftFiber: Fiber<E , A>,
     scope: Scope<R>
-  ) => Async<R, E | Interrupted, C>
-): Async<R, E | Interrupted, C> {
+  ) => Async<R, E , C>
+): Async<R, E , C> {
   return async((env, cb) => {
     const scope = parentScope.subScope();
     let done = false;
 
-    const fiberLeft = scope.fork(left) as Fiber<E | Interrupted, A>;
-    const fiberRight = scope.fork(right) as Fiber<E | Interrupted, B>;
+    const fiberLeft = scope.fork(left) as Fiber<E , A>;
+    const fiberRight = scope.fork(right) as Fiber<E , B>;
 
-    const finish = (next: Async<R, E | Interrupted, C>) => {
+    const finish = (next: Async<R, E , C>) => {
       scope.fork(next).join((exitNext) => {
         scope.close(exitNext);
         cb(exitNext);

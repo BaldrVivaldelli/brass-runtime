@@ -1,29 +1,14 @@
 import { async, Async } from "../types/asyncEffect";
 import { globalScheduler, Scheduler } from "./scheduler";
-import {Fiber, getCurrentFiber, Interrupted, RuntimeFiber} from "./fiber";
-import { Exit } from "../types/effect";
-import { Canceler } from "../types/cancel";
+import { Fiber, getCurrentFiber, RuntimeFiber } from "./fiber";
+import { Cause, Exit } from "../types/effect";
 import type { RuntimeEvent, RuntimeEmitContext, RuntimeHooks } from "./events";
-import type { emptyContext ,FiberContext, TraceContext } from "./contex";
-import { defaultTracer, type BrassEnv } from "./tracer";
 import { makeForkPolicy } from "./forkPolicy";
+import { RuntimeRegistry } from "./registry";
 
-
-
-type NodeCallback<A> = (err: Error | null, result: A) => void;
-
-/**
- * --- Runtime Hooks (por ahora NOOP) ---
- * La idea es que en próximas versiones puedas enchufar EventBus / sinks sin tocar fibers.
- * Por ahora lo dejamos mínimo y sin dependencia a event bus.
- */
-/*export type RuntimeEmitContext = {
-    // si más adelante querés, podés agregar fiberId/scopeId/traceId/spanId
-};*/
-
-
-const noopHooks: RuntimeHooks = {
-    emit() {},
+// fallback hooks (no-op)
+const NoopHooks: RuntimeHooks = {
+    emit() { },
 };
 
 /**
@@ -34,28 +19,55 @@ export class Runtime<R> {
     readonly env: R;
     readonly scheduler: Scheduler;
     readonly hooks: RuntimeHooks;
-    readonly forkPolicy
+    readonly forkPolicy;
+
+    // opcional: registry para observabilidad
+    registry?: RuntimeRegistry;
 
     constructor(args: { env: R; scheduler?: Scheduler; hooks?: RuntimeHooks }) {
         this.env = args.env;
         this.scheduler = args.scheduler ?? globalScheduler;
-        this.hooks = args.hooks ?? noopHooks;
-        this.forkPolicy = makeForkPolicy(this.env, this.hooks);
+        this.hooks = args.hooks ?? NoopHooks;
+        this.forkPolicy = makeForkPolicy(this.env as any, this.hooks);
     }
 
-    fork<E, A>(effect: Async<R, E, A>): Fiber<E, A> {
+    /** Deriva un runtime con env extendido (estilo provide/locally) */
+    provide<R2>(env: R2): Runtime<R & R2> {
+        return new Runtime({ env: Object.assign({}, this.env, env) as any, scheduler: this.scheduler, hooks: this.hooks });
+    }
+
+    emit(ev: RuntimeEvent) {
+        const f = getCurrentFiber() as any;
+
+        const ctx: RuntimeEmitContext = {
+            fiberId: f?.id,
+            scopeId: f?.scopeId, // ✅ FIX: era f?.scope
+            traceId: f?.fiberContext?.trace?.traceId,
+            spanId: f?.fiberContext?.trace?.spanId,
+        };
+
+        // 👇 CLAVE: siempre pasar ctx (nunca undefined)
+        this.hooks.emit(ev, ctx);
+    }
+
+    /**
+     * ✅ CAMBIO: fork(effect, scopeId?) y pasa scopeId a forkPolicy
+     */
+    fork<E, A>(effect: Async<R, E, A>, scopeId?: number): Fiber<E, A> {
         const parent = getCurrentFiber();
         const fiber = new RuntimeFiber(this, effect) as any;
 
-        this.forkPolicy.initChild(fiber, parent as any);
+        // Si el caller provee scopeId (p.ej. Scope.fork), lo seteamos antes de initChild
+        if (scopeId !== undefined) fiber.scopeId = scopeId;
 
+        this.forkPolicy.initChild(fiber, parent as any, scopeId);
         fiber.schedule("initial-step");
         return fiber;
     }
 
     unsafeRunAsync<E, A>(
         effect: Async<R, E, A>,
-        cb: (exit: Exit<E | Interrupted, A>) => void
+        cb: (exit: Exit<E, A>) => void
     ): void {
         const fiber = this.fork(effect);
         fiber.join(cb);
@@ -64,203 +76,111 @@ export class Runtime<R> {
     toPromise<E, A>(effect: Async<R, E, A>): Promise<A> {
         return new Promise((resolve, reject) => {
             const fiber = this.fork(effect);
-            fiber.join((exit: Exit<unknown, unknown>) => {
-                const ex = exit as Exit<E, A>;
-                if (ex._tag === "Success") resolve(ex.value);
-                else reject(ex.error);
+            fiber.join((exit) => {
+                if (exit._tag === "Success") resolve(exit.value);
+                else {
+                    const c: any = (exit as any).cause;
+                    if (c?._tag === "Fail") reject(c.error);
+                    else reject(new Error("Interrupted"));
+                }
             });
         });
     }
 
-    // Si querés un logger del runtime (por ahora solo hook):
-    log(level: "debug" | "info" | "warn" | "error", message: string, fields?: Record<string, unknown>) {
-        /*this.hooks.emit({ type: "log", level, message, fields });*/
-        this.emit({ type: "log", level, message, fields });
+    // helper: correr un efecto y “tirar” el resultado
+    unsafeRun<E, A>(effect: Async<R, E, A>): void {
+        this.unsafeRunAsync(effect, () => { });
     }
 
-    withHooks(hooks: RuntimeHooks): Runtime<R> {
-        return new Runtime({ env: this.env, scheduler: this.scheduler, hooks });
-    }
-    emit(ev: RuntimeEvent) {
-        const f = getCurrentFiber() as any;
+    delay<E, A>(ms: number, eff: Async<R, E, A>): Async<R, E, A> {
+        return async((_env, cb) => {
+            const handle = setTimeout(() => {
+                this.unsafeRunAsync(eff, cb);
+            }, ms);
 
-        const ctx: RuntimeEmitContext = {
-            fiberId: f?.id,
-            scopeId: f?.scope?.id,
-            traceId: f?.fiberContext?.trace?.traceId,
-            spanId: f?.fiberContext?.trace?.spanId,
-        };
-
-        // 👇 CLAVE: siempre pasar ctx (nunca undefined)
-        this.hooks.emit(ev, ctx);
+            // Canceler
+            return () => clearTimeout(handle);
+        });
     }
+
+    // util para crear runtime default
     static make<R>(env: R, scheduler: Scheduler = globalScheduler): Runtime<R> {
         return new Runtime({ env, scheduler });
     }
+
+    /** Convenience logger: emits a RuntimeEvent of type "log". */
+    log(level: "debug" | "info" | "warn" | "error", message: string, fields?: Record<string, unknown>): void {
+        this.emit({ type: "log", level, message, fields });
+    }
 }
 
-/**
- * ---------------------------------------------------------------------------
- * Helpers existentes (los dejo igual) + wrappers que usan Runtime por debajo
- * ---------------------------------------------------------------------------
- */
+// -----------------------------------------------------------------------------
+// Top-level helpers (used by examples)
+// -----------------------------------------------------------------------------
 
-export function from<A>(f: (cb: NodeCallback<A>) => void): Async<{}, Error, A>;
-export function from<A>(thunk: () => Promise<A>): Async<{}, Error, A>;
-export function from<A>(x: any): Async<{}, Error, A> {
-    return async((env, cb) => {
-        let done = false;
-        const once = (r: any) => {
-            if (!done) {
-                done = true;
-                cb(r);
-            }
-        };
-        const fail = (e: unknown) =>
-            once({ _tag: "Failure", error: e instanceof Error ? e : new Error(String(e)) });
-        const ok = (v: A) => once({ _tag: "Success", value: v });
-
-        try {
-            // Si la función espera callback (arity >= 1), asumimos callback-style
-            if (typeof x === "function" && x.length >= 1) {
-                (x as (cb: NodeCallback<A>) => void)((err, result) => (err ? fail(err) : ok(result)));
-            } else {
-                (x as () => Promise<A>)().then(ok, fail);
-            }
-        } catch (e) {
-            fail(e);
-        }
-    });
+/** Create a runtime from `env` and fork the given effect. */
+export function fork<R, E, A>(effect: Async<R, E, A>, env?: R): Fiber<E, A> {
+    return Runtime.make((env ?? ({} as any)) as R).fork(effect);
 }
 
-export type BrassError = { _tag: "Abort" } | { _tag: "PromiseRejected"; reason: unknown };
-
-/**
- * --- Wrappers legacy (mantienen tu API actual) ---
- * Internamente crean un Runtime ad-hoc con env + scheduler.
- */
-
-export function fork<R, E, A>(
-    effect: Async<R, E, A>,
-    env: R,
-    scheduler: Scheduler = globalScheduler
-): Fiber<E, A> {
-    return new Runtime({ env, scheduler }).fork(effect);
-}
-
+/** Run an effect with `env` and invoke `cb` with the final Exit. */
 export function unsafeRunAsync<R, E, A>(
     effect: Async<R, E, A>,
-    env: R,
-    cb: (exit: Exit<E | Interrupted, A>) => void
+    env: R | undefined,
+    cb: (exit: Exit<E, A>) => void
 ): void {
-    return new Runtime({ env }).unsafeRunAsync(effect, cb);
+    Runtime.make((env ?? ({} as any)) as R).unsafeRunAsync(effect, cb);
 }
 
-export function toPromise<R, E, A>(eff: Async<R, E, A>, env: R): Promise<A> {
-    return new Runtime({ env }).toPromise(eff);
+/** Run an effect with `env` and return a Promise of its success value. */
+export function toPromise<R, E, A>(effect: Async<R, E, A>, env?: R): Promise<A> {
+    return Runtime.make((env ?? ({} as any)) as R).toPromise(effect);
 }
 
-export function fromPromise<R, E, A>(
-    thunk: (env: R) => Promise<A>,
-    onError: (e: unknown) => E
+/**
+ * Create an Async from an abortable Promise.
+ * Type params are ordered as `<E, A, R = unknown>` to match call-sites.
+ */
+export function fromPromiseAbortable<E, A, R = unknown>(
+    make: (signal: AbortSignal, env: R) => Promise<A>,
+    onReject: (u: unknown) => E
 ): Async<R, E, A> {
-    return async((env: R, cb: (exit: Exit<E, A>) => void) => {
-        thunk(env)
-            .then((value) => cb({ _tag: "Success", value }))
-            .catch((err) => cb({ _tag: "Failure", error: onError(err) }));
-    });
+    return {
+        _tag: "Async",
+        register: (env: R, cb: (exit: Exit<E, A>) => void) => {
+            const controller = new AbortController();
+            let done = false;
+
+            make(controller.signal, env)
+                .then((value) => {
+                    if (done) return;
+                    done = true;
+                    cb(Exit.succeed(value));
+                })
+                .catch((err) => {
+                    if (done) return;
+                    done = true;
+                   cb(Exit.failCause(Cause.fail(onReject(err))));
+                });
+
+            return () => {
+                if (done) return;
+                done = true;
+                controller.abort();
+                cb(Exit.failCause(Cause.interrupt()));
+            };
+        },
+    };
 }
 
-export function fromCallback<A>(f: (cb: NodeCallback<A>) => void): Async<{}, Error, A> {
-    return async((env, cb) => {
-        let done = false;
-        const once = (x: { _tag: "Failure"; error: Error } | { _tag: "Success"; value: A }) => {
-            if (done) return;
-            done = true;
-            cb(x);
-        };
-
-        try {
-            f((err, result) => {
-                if (err) once({ _tag: "Failure", error: err });
-                else once({ _tag: "Success", value: result });
-            });
-        } catch (e) {
-            once({ _tag: "Failure", error: e instanceof Error ? e : new Error(String(e)) });
-        }
-    });
+export function unsafeRunFoldWithEnv<R, E, A>(
+  eff: Async<R, E, A>,
+  env: R,
+  onFailure: (cause: Cause<E>) => void,
+  onSuccess: (value: A) => void
+): void {
+  unsafeRunAsync(eff, env, (ex: any) => {
+    if (ex._tag === "Failure") onFailure(ex.cause);
+    else onSuccess(ex.value);
+  });
 }
-
-export function tryPromiseAbortable<A>(thunk: (signal: AbortSignal) => Promise<A>): Async<unknown, BrassError, A>;
-export function tryPromiseAbortable<R, A>(
-    thunk: (env: R, signal: AbortSignal) => Promise<A>
-): Async<R, BrassError, A>;
-export function tryPromiseAbortable<R, A>(
-    thunk: ((signal: AbortSignal) => Promise<A>) | ((env: R, signal: AbortSignal) => Promise<A>)
-): Async<R, BrassError, A> {
-    const lifted = (env: R, signal: AbortSignal) =>
-        thunk.length === 1 ? (thunk as (signal: AbortSignal) => Promise<A>)(signal) : (thunk as (env: R, signal: AbortSignal) => Promise<A>)(env, signal);
-
-    return fromPromiseAbortable(lifted, (e): BrassError =>
-        isAbortError(e) ? { _tag: "Abort" } : { _tag: "PromiseRejected", reason: e }
-    );
-}
-
-// 1) Overload: thunk usa SOLO signal (env = unknown)
-export function fromPromiseAbortable<E, A>(
-    thunk: (signal: AbortSignal) => Promise<A>,
-    onError: (e: unknown) => E
-): Async<unknown, E, A>;
-
-// 2) Overload: thunk usa env + signal (tu firma actual)
-export function fromPromiseAbortable<R, E, A>(
-    thunk: (env: R, signal: AbortSignal) => Promise<A>,
-    onError: (e: unknown) => E
-): Async<R, E, A>;
-
-// 3) Implementación (usa `any` internamente para unificar)
-export function fromPromiseAbortable<R, E, A>(
-    thunk: ((signal: AbortSignal) => Promise<A>) | ((env: R, signal: AbortSignal) => Promise<A>),
-    onError: (e: unknown) => E
-): Async<R, E, A> {
-    return async((env: R, cb: (exit: Exit<E, A>) => void): void | Canceler => {
-        const ac = new AbortController();
-        let done = false;
-
-        const safeCb = (exit: Exit<E, A>) => {
-            if (done) return;
-            done = true;
-            cb(exit);
-        };
-
-        try {
-            // Si thunk declara 1 parámetro, asumimos (signal) => Promise<A>
-            const p =
-                thunk.length === 1
-                    ? (thunk as (signal: AbortSignal) => Promise<A>)(ac.signal)
-                    : (thunk as (env: R, signal: AbortSignal) => Promise<A>)(env, ac.signal);
-
-            p.then((value) => safeCb({ _tag: "Success", value })).catch((err) => safeCb({ _tag: "Failure", error: onError(err) }));
-        } catch (e) {
-            safeCb({ _tag: "Failure", error: onError(e) });
-        }
-
-        return () => {
-            done = true;
-            ac.abort();
-        };
-    });
-}
-
-const isAbortError = (e: unknown): boolean =>
-    typeof e === "object" && e !== null && "name" in e && (e as any).name === "AbortError";
-
-export function getCurrentRuntime<R>(): Runtime<R> {
-    const f = getCurrentFiber();
-    if (!f) {
-        throw new Error("No current runtime: estás llamando esto fuera de un fiber (fuera del runtime).");
-    }
-    return (f as any).runtime as Runtime<R>;
-}
-
-

@@ -1,5 +1,5 @@
 // src/core/runtime/scope.ts
-import { Fiber, Interrupted } from "./fiber";
+import { Fiber, getCurrentFiber } from "./fiber";
 import { Exit } from "../types/effect";
 import { async, Async, asyncFlatMap, asyncFold, unit } from "../types/asyncEffect";
 import { Runtime } from "./runtime";
@@ -26,16 +26,7 @@ function awaitAll<E, A>(fibers: Fiber<E, A>[]): Async<any, never, void> {
     });
 }
 
-// ignora errores del efecto (close nunca falla)
-function ignoreErrors<R>(eff: Async<R, any, any>): Async<R, never, void> {
-    return asyncFold(
-        eff as any,
-        () => unit<R>() as any,
-        () => unit<R>() as any
-    ) as any;
-}
-
-export class Scope<R> {
+class Scope<R> {
     readonly id: ScopeId;
 
     private closed = false;
@@ -44,14 +35,17 @@ export class Scope<R> {
     private readonly subScopes = new Set<Scope<R>>();
     private readonly finalizers: Array<(exit: Exit<any, any>) => Async<R, any, any>> = [];
 
-    constructor(private readonly runtime: Runtime<R>) {
-        // 👇 mantenemos tu comportamiento
+    constructor(private readonly runtime: Runtime<R>, private readonly parentScopeId?: ScopeId) {
         this.id = nextScopeId++;
-    }
 
-    /** Acceso al env del runtime (conserva tu modelo actual) */
-    private get env(): R {
-        return this.runtime.env;
+        const inferredParent = this.parentScopeId ?? (getCurrentFiber() as any)?.scopeId;
+
+        // ✅ scope.open
+        this.runtime.emit({
+            type: "scope.open",
+            scopeId: this.id,
+            parentScopeId: inferredParent,
+        });
     }
 
     /** registra un finalizer (LIFO) */
@@ -65,21 +59,19 @@ export class Scope<R> {
     /** crea un sub scope (mismo runtime) */
     subScope(): Scope<R> {
         if (this.closed) throw new Error("Scope closed");
-        const s = new Scope<R>(this.runtime);
+        const s = new Scope<R>(this.runtime, this.id);
         this.subScopes.add(s);
         return s;
     }
 
-    /** fork en este scope */
-    fork<E, A>(eff: Async<R, E, A>): Fiber<E | Interrupted, A> {
+    /** ✅ fork en este scope */
+    fork<E, A>(eff: Async<R, E, A>): Fiber<E, A> {
         if (this.closed) throw new Error("Scope closed");
 
-        const f = this.runtime.fork(eff);
-        this.children.add(f);
+        const f = this.runtime.fork(eff, this.id);
 
-        f.join(() => {
-            this.children.delete(f);
-        });
+        this.children.add(f);
+        f.join(() => this.children.delete(f));
 
         return f;
     }
@@ -91,88 +83,97 @@ export class Scope<R> {
 
     closeAsync(
         exit: Exit<any, any> = { _tag: "Success", value: undefined },
-        options: CloseOptions = {}
-    ): Async<R, never, void> {
-        return async((_env, cb) => {
-            if (this.closed) {
-                cb({ _tag: "Success", value: undefined });
-                return;
-            }
-            this.closed = true;
+        opts: CloseOptions = { awaitChildren: true }
+    ): Async<R, any, void> {
+        return asyncFlatMap(unit<R>(), () =>
+            async((env, cb) => {
+                if (this.closed) {
+                    cb({ _tag: "Success", value: undefined });
+                    return;
+                }
+                this.closed = true;
 
-            // snapshot para evitar carreras con mutaciones posteriores
-            const children = Array.from(this.children);
-            const subScopes = Array.from(this.subScopes);
+                const children = Array.from(this.children);
+                const subScopes = Array.from(this.subScopes);
 
-            // “freeze” registries
-            this.children.clear();
-            this.subScopes.clear();
+                // 1) close subscopes
+                const closeSubs = subScopes.reduceRight(
+                    (acc, s) => asyncFlatMap(acc, () => s.closeAsync(exit, opts)),
+                    unit<R>() as any
+                );
 
-            // 1) Interrumpir children best-effort
-            for (const f of children) {
-                try {
-                    f.interrupt();
-                } catch {}
-            }
+                // 2) run finalizers LIFO
+                const runFinalizers = this.finalizers.reduceRight(
+                    (acc, fin) =>
+                        asyncFlatMap(acc, () =>
+                            asyncFold(
+                                fin(exit),              // ✅ NO se llama con (env, cb)
+                                () => unit<R>(),
+                                () => unit<R>()
+                            )
+                        ),
+                    unit<R>() as any
+                );
 
-            // 2) Construir efecto secuencial: cerrar subscopes
-            let eff: Async<R, never, void> = unit<R>();
+                // 3) optionally await children
+                const awaitChildrenEff = opts.awaitChildren ? (awaitAll(children) as any) : (unit<R>() as any);
 
-            for (const s of subScopes) {
-                eff = asyncFlatMap(eff, () => s.closeAsync(exit, options));
-            }
+                const all = asyncFlatMap(closeSubs, () => asyncFlatMap(awaitChildrenEff, () => runFinalizers));
+                this.runtime.fork(all as any).join(() => {
+                    // ✅ scope.close al finalizar realmente
+                    const status =
+                        exit._tag === "Success"
+                            ? "success"
+                            : exit.cause._tag === "Interrupt"
+                                ? "interrupted"
+                                : "failure";
 
-            // 3) Finalizers en LIFO, secuenciales, sin fallar
-            while (this.finalizers.length > 0) {
-                const fin = this.finalizers.pop()!;
-                eff = asyncFlatMap(eff, () => ignoreErrors(fin(exit)));
-            }
 
-            // 4) (Opcional) esperar a que terminen children
-            if (options.awaitChildren) {
-                eff = asyncFlatMap(eff, () => awaitAll(children));
-            }
+                    this.runtime.emit({
+                        type: "scope.close",
+                        scopeId: this.id,
+                        status,
+                        error: exit._tag === "Failure" && exit.cause._tag === "Fail" ? (exit.cause as any).error : undefined,
+                    });
 
-            // Ejecutar eff y completar el closeAsync cuando termina
-            const finFiber = this.runtime.fork(eff);
-            finFiber.join(() => cb({ _tag: "Success", value: undefined }));
-        });
+                    cb({ _tag: "Success", value: undefined });
+                });
+            })
+        );
     }
 }
 
-/**
- * Ejecuta una función dentro de un scope estructurado (sync).
- * NOTA: En sync no tenés env real; por eso recibimos Runtime explícito.
- */
-export function withScope<R, A>(runtime: Runtime<R>, body: (scope: Scope<R>) => A): A {
-    const scope = new Scope<R>(runtime);
-    try {
-        return body(scope);
-    } finally {
-        scope.close();
-    }
-}
-
-/**
- * Versión async: crea scope, corre el efecto, cierra el scope con el Exit.
- */
 export function withScopeAsync<R, E, A>(
     runtime: Runtime<R>,
-    use: (scope: Scope<R>) => Async<R, E, A>
-): Async<R, E | Interrupted, A> {
-    return async((_env, cb) => {
+    f: (scope: Scope<R>) => Async<R, E, A>
+): Async<R, E, A> {
+    return async((env, cb) => {
         const scope = new Scope<R>(runtime);
-
-        const fiber = scope.fork(use(scope));
-
-        fiber.join((exit: Exit<E | Interrupted, A>) => {
-            try {
-                scope.close(exit);
-            } catch (closeErr) {
-                cb({ _tag: "Failure", error: closeErr as any } as any);
-                return;
-            }
+        runtime.fork(f(scope)).join((exit: any) => {
+            // close scope siempre
+            runtime.fork(scope.closeAsync(exit));
             cb(exit);
         });
+    });
+}
+
+export { Scope };
+
+// -----------------------------------------------------------------------------
+// Convenience helper used by examples: allow a callback that returns `void`.
+// If you return an Async, use withScopeAsync.
+// -----------------------------------------------------------------------------
+
+export function withScope<R>(runtime: Runtime<R>, f: (scope: Scope<R>) => void): Async<R, never, void>;
+export function withScope<R, E, A>(runtime: Runtime<R>, f: (scope: Scope<R>) => Async<R, E, A>): Async<R, E, A>;
+export function withScope<R, E, A>(
+    runtime: Runtime<R>,
+    f: (scope: Scope<R>) => void | Async<R, E, A>
+): Async<R, any, any> {
+    return withScopeAsync(runtime, (scope) => {
+        const out = f(scope);
+        // If callback returned an Async ADT, use it. Otherwise treat it as `void`.
+        if (out && typeof out === "object" && "_tag" in out) return out;
+        return unit<R>() as any;
     });
 }

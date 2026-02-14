@@ -8,11 +8,12 @@ const isHttpError = (e: unknown): e is HttpError =>
 
 const normalizeHttpError = (e: unknown): HttpError => {
   if (isHttpError(e)) return e;
-  // si querés mapear DOMException AbortError a Abort:
+
   if (typeof e === "object" && e !== null && (e as any).name === "AbortError") {
-    return { _tag: "Abort" };
+    return { _tag: "Abort" } satisfies HttpError;
   }
-  return { _tag: "FetchError", message: String(e) } as any;
+
+  return { _tag: "FetchError", message: String(e) } satisfies HttpError;
 };
 
 export const sleepMs = (ms: number): Async<unknown, HttpError, void> =>
