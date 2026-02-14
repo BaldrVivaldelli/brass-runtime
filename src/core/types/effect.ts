@@ -4,13 +4,33 @@ import type { Option } from "./option";
 import { none } from "./option";
 
 export type Cause<E> =
-  | { _tag: "Fail"; error: E }
-  | { _tag: "Interrupt" };
+    | { readonly _tag: "Fail"; readonly error: E }
+    | { readonly _tag: "Interrupt" }
+    | { readonly _tag: "Die"; readonly defect: unknown };
+
+
+export const Cause = {
+    fail: <E>(error: E): Cause<E> => ({ _tag: "Fail", error }),
+    interrupt: <E = never>(): Cause<E> => ({ _tag: "Interrupt" }),
+    die: <E = never>(defect: unknown): Cause<E> => ({ _tag: "Die", defect }),
+};
 
 export type Exit<E, A> =
-  | { _tag: "Success"; value: A }
-  | { _tag: "Failure"; cause: Cause<E> };
+    | { _tag: "Success"; value: A }
+    | { _tag: "Failure"; cause: Cause<E> };
 
+
+export const Exit = {
+    succeed: <E = never, A = never>(value: A): Exit<E, A> => ({
+        _tag: "Success",
+        value,
+    }),
+
+    failCause: <E = never, A = never>(cause: Cause<E>): Exit<E, A> => ({
+        _tag: "Failure",
+        cause,
+    }),
+};
 export type ZIO<R, E, A> = Async<R, E, A>;
 
 export const succeed = <A>(value: A): ZIO<unknown, never, A> => asyncSucceed(value);

@@ -125,8 +125,9 @@ class Scope<R> {
                         exit._tag === "Success"
                             ? "success"
                             : exit.cause._tag === "Interrupt"
-                              ? "interrupted"
-                              : "failure";
+                                ? "interrupted"
+                                : "failure";
+
 
                     this.runtime.emit({
                         type: "scope.close",
@@ -148,10 +149,10 @@ export function withScopeAsync<R, E, A>(
 ): Async<R, E, A> {
     return async((env, cb) => {
         const scope = new Scope<R>(runtime);
-        runtime.fork(f(scope) as any).join((exit: any) => {
+        runtime.fork(f(scope)).join((exit: any) => {
             // close scope siempre
-            runtime.fork(scope.closeAsync(exit as any));
-            cb(exit as any);
+            runtime.fork(scope.closeAsync(exit));
+            cb(exit);
         });
     });
 }
@@ -170,7 +171,7 @@ export function withScope<R, E, A>(
     f: (scope: Scope<R>) => void | Async<R, E, A>
 ): Async<R, any, any> {
     return withScopeAsync(runtime, (scope) => {
-        const out = f(scope) as any;
+        const out = f(scope);
         // If callback returned an Async ADT, use it. Otherwise treat it as `void`.
         if (out && typeof out === "object" && "_tag" in out) return out;
         return unit<R>() as any;

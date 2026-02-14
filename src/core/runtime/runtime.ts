@@ -155,19 +155,19 @@ export function fromPromiseAbortable<E, A, R = unknown>(
                 .then((value) => {
                     if (done) return;
                     done = true;
-                    cb({ _tag: "Success", value });
+                    cb(Exit.succeed(value));
                 })
                 .catch((err) => {
                     if (done) return;
                     done = true;
-                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: onReject(err) } });
+                   cb(Exit.failCause(Cause.fail(onReject(err))));
                 });
 
             return () => {
                 if (done) return;
                 done = true;
                 controller.abort();
-                cb({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+                cb(Exit.failCause(Cause.interrupt()));
             };
         },
     };

@@ -1,5 +1,5 @@
 // src/fiber.ts
-import { Exit } from "../types/effect";
+import { Cause, Exit } from "../types/effect";
 import { Async } from "../types/asyncEffect";
 import { globalScheduler, Scheduler } from "./scheduler";
 import { Runtime, unsafeRunAsync } from "./runtime";
@@ -35,6 +35,7 @@ export type Fiber<E, A> = {
     readonly status: () => FiberStatus;
     readonly join: (cb: (exit: Exit<E, A>) => void) => void;
     readonly interrupt: () => void;
+    // si querés soportar finalizers Async, cambiá esto a: (exit) => void | Async<...>
     readonly addFinalizer: (f: (exit: Exit<E, A>) => void) => void;
 };
 
@@ -92,7 +93,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         }
     )[] = [];
 
-    private readonly fiberFinalizers: Array<(exit: Exit<E, A>) => void> = [];
+    private readonly fiberFinalizers: Array<(exit: Exit<E, A>) => any> = [];
     private finalizersDrained = false;
 
     fiberContext!: FiberContext;
@@ -129,7 +130,6 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
     status(): FiberStatus {
         if (this.result == null) return "Running";
-        // si terminó por interrupción
         if (this.result._tag === "Failure" && this.result.cause._tag === "Interrupt") return "Interrupted";
         return "Done";
     }
@@ -174,10 +174,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
                         case STEP.SUSPEND:
                             this.runState = RUN.SUSPENDED;
-
-                            // ✅ suspend cuando devolvemos SUSPEND (i.e. entramos a Async)
                             this.emit({ type: "fiber.suspend", fiberId: this.id });
-
                             return;
 
                         case STEP.DONE:
@@ -197,11 +194,11 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         while (this.fiberFinalizers.length > 0) {
             const fin = this.fiberFinalizers.pop()!;
             try {
-                const eff = fin(exit) as any;
+                const eff = fin(exit);
 
                 // Si devolvió un Async (tu ADT), lo ejecutamos.
                 if (eff && typeof eff === "object" && "_tag" in eff) {
-                    unsafeRunAsync(eff, this.env as any, () => { });
+                    unsafeRunAsync(eff as any, this.env as any, () => { });
                 }
             } catch {
                 // best-effort: jamás tumbar el runtime por un finalizer
@@ -221,11 +218,10 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
         this.result = exit;
 
-        // ✅ fiber.end (exactly once)
         const status =
             exit._tag === "Success"
                 ? "success"
-                : (exit.cause as any)?._tag === "Interrupted"
+                : exit.cause._tag === "Interrupt"
                     ? "interrupted"
                     : "failure";
 
@@ -243,7 +239,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     private onSuccess(value: any): void {
         const frame = this.stack.pop();
         if (!frame) {
-            this.notify({ _tag: "Success", value });
+            this.notify(Exit.succeed(value));
             return;
         }
 
@@ -251,7 +247,8 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             try {
                 this.current = frame.k(value);
             } catch (e) {
-                this.notify({ _tag: "Failure", cause: e as any });
+                // throw => defecto (no E)
+                this.notify(Exit.failCause(Cause.die<E>(e)));
             }
             return;
         }
@@ -260,7 +257,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         try {
             this.current = frame.onSuccess(value);
         } catch (e) {
-            this.notify({ _tag: "Failure", cause: e as any });
+            this.notify(Exit.failCause(Cause.die<E>(e)));
         }
     }
 
@@ -279,7 +276,8 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             // SuccessCont se descarta
         }
 
-        this.notify({ _tag: "Failure", cause: { _tag: "Fail", error } });
+        // este es “fail” del dominio del effect
+        this.notify(Exit.failCause(Cause.fail(error as E)));
     }
 
     private budget = DEFAULT_BUDGET;
@@ -289,7 +287,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
         // interrupción cooperativa
         if (this.interrupted) {
-            this.notify({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+            this.notify(Exit.failCause(Cause.interrupt()));
             return STEP.DONE;
         }
 
@@ -335,29 +333,35 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
                     let done = false;
 
-                    const cb = (exit: Exit<any, any>) => {
+                    const cb = (exit: Exit<E, any>) => {
                         if (done) return;
                         done = true;
 
                         if (this.result != null || this.closing != null) return;
 
                         if (exit._tag === "Success") {
-                            this.current = ({ _tag: "Succeed", value: exit.value } as any);
+                            this.current = Async.succeed(exit.value);
                             this.schedule("async-resume");
                             return;
                         }
 
-                        // Failure
-                        if (exit.cause._tag === "Interrupt") {
-                            this.notify({ _tag: "Failure", cause: { _tag: "Interrupt" } } as any);
+                        const cause = exit.cause;
+
+                        if (cause._tag === "Interrupt") {
+                            this.notify(Exit.failCause(Cause.interrupt()));
                             return;
                         }
 
-                        this.current = ({ _tag: "Fail", error: (exit.cause as any).error } as any);
-                        this.schedule("async-resume");
+                        if (cause._tag === "Fail") {
+                            this.current = Async.fail(cause.error);
+                            this.schedule("async-resume");
+                            return;
+                        }
+
+                        // Die => defecto fatal, NO es un E
+                        this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
                     };
 
-                    // ✅ TU Async usa register, no run
                     const canceler = current.register(this.env, cb);
 
                     if (typeof canceler === "function") {
@@ -365,29 +369,32 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                             done = true;
                             try {
                                 canceler();
-                            } catch { }
+                            } catch {
+                                // ignore
+                            }
                         });
                     }
 
                     return STEP.SUSPEND;
                 }
 
+
                 case "Fork": {
-                    // tu lógica existente (si la tenés)
                     const child = this.runtime.fork(current.effect, current.scopeId);
                     this.onSuccess(child as any);
                     break;
                 }
+
                 case "Sync": {
                     try {
                         const a = (current as any).thunk(this.env);
                         this.onSuccess(a);
                     } catch (e) {
-                        // Si falla una Sync, lo tratamos como Fail con el error capturado
                         this.onFailure(e);
                     }
                     break;
                 }
+
                 default: {
                     this.onFailure(new Error(`Unknown opcode: ${current._tag}`));
                     return STEP.CONTINUE;
@@ -426,4 +433,3 @@ export function withCurrentFiber<T>(fiber: RuntimeFiber<any, any, any>, f: () =>
         _current = prev;
     }
 }
-

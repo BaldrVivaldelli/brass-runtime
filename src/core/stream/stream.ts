@@ -146,6 +146,7 @@ type UnconsValue<R, E, A> = [A, ZStream<R, E, A>];
 type Pull<R, E, A> = Async<R, Option<E>, UnconsValue<R, E, A>>;
 
 
+
 function streamToRaceWithHandler<R, E, A>(
     winnerSide: "L" | "R",
     leftStream: ZStream<R, E, A>,
@@ -183,7 +184,7 @@ function streamToRaceWithHandler<R, E, A>(
         // failure: Option<E> o Interrupt
         if (exit.cause._tag === "Interrupt") {
             // Propagamos la interrupción (no contamina E)
-            return async((_env, cb) => { cb({ _tag: "Failure", cause: { _tag: "Interrupt" } } as any); });
+            return async((_env, cb) => { cb(Exit.failCause(Cause.interrupt())) });
         }
 
         const opt = (exit.cause as any).error as Option<E>;
@@ -309,20 +310,22 @@ export function uncons<R, E, A>(
                     fromPull(
                         async((env2, cb2) => {
                             const pull = uncons(s) as unknown as Pull<R, E, A>;
+
                             unsafeRunFoldWithEnv<R, Option<E>, UnconsValue<R, E, A>>(
                                 pull,
                                 env2,
                                 (cause) => {
-                                    const ex = { _tag: "Failure", cause } as any;
+                                    const ex = Exit.failCause<Option<E>, UnconsValue<R, E, A>>(cause);
                                     closeWith(ex);
                                     cb2(ex);
                                 },
                                 ([a, tail]) => {
-                                    cb2({ _tag: "Success", value: [a, wrap(tail)] } as any);
+                                    cb2(Exit.succeed<Option<E>, UnconsValue<R, E, A>>([a, wrap(tail)]));
                                 }
                             );
                         })
                     );
+
 
                 // Acquire en scope
                 scope.fork(self.acquire as any).join((ex) => {
@@ -388,7 +391,7 @@ export function uncons<R, E, A>(
                                         return;
                                     }
                                     const [a, tail] = ex2.value as [A, ZStream<R, E, A>];
-                                    cb2({ _tag: "Success", value: [a, wrap(tail)] } as any);
+                                    cb2(Exit.succeed([a, wrap(tail)]));
                                 });
                             }) as any
                         );

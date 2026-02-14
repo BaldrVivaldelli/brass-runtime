@@ -1,21 +1,31 @@
 // src/asyncEffect.ts
 import type { Exit } from "./effect";
-import {Canceler} from "./cancel";
-import {Scope} from "../runtime/scope";
+import { Canceler } from "./cancel";
+import { Scope } from "../runtime/scope";
+
 
 
 
 export type Async<R, E, A> =
-    | { _tag: "Succeed"; value: A }
-    | { _tag: "Fail"; error: E }
-    | { _tag: "Sync"; thunk: (env: R) => A }
-    | { _tag: "Async"; register: (env: R, cb: (exit: Exit<E, A>) => void) => void | Canceler }
-    | { _tag: "FlatMap"; first: Async<R, E, any>; andThen: (a: any) => Async<R, E, A> }
+    | { readonly _tag: "Succeed"; readonly value: A }
+    | { readonly _tag: "Fail"; readonly error: E }
+    | { readonly _tag: "Sync"; readonly thunk: (env: R) => A }
     | {
-    _tag: "Fold";
-    first: Async<R, E, any>;
-    onFailure: (e: any) => Async<R, E, A>;
-    onSuccess: (a: any) => Async<R, E, A>;
+        readonly _tag: "Async";
+        readonly register: (env: R, cb: (exit: Exit<E, A>) => void) => void | (() => void);
+    }
+    | { readonly _tag: "FlatMap"; readonly first: Async<R, E, any>; readonly andThen: (a: any) => Async<R, E, A> }
+    | { readonly _tag: "Fold"; readonly first: Async<R, E, any>; readonly onFailure: (e: any) => Async<R, E, A>; readonly onSuccess: (a: any) => Async<R, E, A> }
+    | { readonly _tag: "Fork"; readonly effect: Async<R, E, any>; readonly scopeId?: number };
+
+// ✅ VALUE: constructores (esto arregla TS2693)
+export const Async = {
+    succeed: <R, E, A>(value: A): Async<R, E, A> => ({ _tag: "Succeed", value }),
+    fail: <R, E, A = never>(error: E): Async<R, E, A> => ({ _tag: "Fail", error }),
+    sync: <R, E, A>(thunk: (env: R) => A): Async<R, E, A> => ({ _tag: "Sync", thunk }),
+    async: <R, E, A>(
+        register: (env: R, cb: (exit: Exit<E, A>) => void) => void | (() => void)
+    ): Async<R, E, A> => ({ _tag: "Async", register }),
 };
 
 
