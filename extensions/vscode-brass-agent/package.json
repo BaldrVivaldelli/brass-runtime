@@ -1,0 +1,719 @@
+{
+  "name": "vscode-brass-agent",
+  "displayName": "Brass Agent",
+  "description": "VS Code client for the brass-agent CLI.",
+  "version": "0.1.0-alpha.0",
+  "publisher": "baldr-vivaldelli",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/BaldrVivaldelli/brass-runtime.git",
+    "directory": "extensions/vscode-brass-agent"
+  },
+  "homepage": "https://github.com/BaldrVivaldelli/brass-runtime/tree/main/extensions/vscode-brass-agent",
+  "bugs": {
+    "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "AI",
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:brassAgent.chat",
+    "onCommand:brassAgent.quickRun",
+    "onCommand:brassAgent.init",
+    "onCommand:brassAgent.doctor",
+    "onCommand:brassAgent.propose",
+    "onCommand:brassAgent.apply",
+    "onCommand:brassAgent.readOnly",
+    "onCommand:brassAgent.fixTests",
+    "onCommand:brassAgent.typecheck",
+    "onCommand:brassAgent.lint",
+    "onCommand:brassAgent.runConfiguredBatch",
+    "onCommand:brassAgent.runBatchFile",
+    "onCommand:brassAgent.showLastPatchPreview",
+    "onCommand:brassAgent.showOutput",
+    "onCommand:brassAgent.cancel",
+    "onView:brassAgent.runs",
+    "onCommand:brassAgent.openHistoryRun",
+    "onCommand:brassAgent.showHistoryPatch",
+    "onCommand:brassAgent.rerunHistoryRun",
+    "onCommand:brassAgent.refreshHistory",
+    "onCommand:brassAgent.clearHistory",
+    "onCommand:brassAgent.openChat",
+    "onCommand:brassAgent.askSelection",
+    "onCommand:brassAgent.fixSelection",
+    "onCommand:brassAgent.explainSelection",
+    "onCommand:brassAgent.generateTestForSelection",
+    "onCommand:brassAgent.refactorSelection",
+    "onCommand:brassAgent.explainProblem",
+    "onCommand:brassAgent.fixProblem",
+    "onCommand:brassAgent.explainProblems",
+    "onCommand:brassAgent.fixProblems",
+    "onCommand:brassAgent.fixCurrentFileProblems",
+    "onCommand:brassAgent.inlineAssist",
+    "onCommand:brassAgent.configureLlm",
+    "onCommand:brassAgent.configureWorkspace",
+    "onView:brassAgent.project",
+    "onCommand:brassAgent.openProjectDashboard",
+    "onCommand:brassAgent.refreshProjectDashboard",
+    "onCommand:brassAgent.openChatInEditor",
+    "onCommand:brassAgent.openProjectDashboardInEditor",
+    "onCommand:brassAgent.focusChatLayout"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "brassAgent.quickRun",
+        "title": "New Run...",
+        "category": "Brass Agent",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "brassAgent.openChat",
+        "title": "Open Chat",
+        "category": "Brass Agent",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "brassAgent.openChatInEditor",
+        "title": "Open Chat in Editor",
+        "category": "Brass Agent",
+        "icon": "$(layout-panel-center)"
+      },
+      {
+        "command": "brassAgent.focusChatLayout",
+        "title": "Focus Chat Layout",
+        "category": "Brass Agent",
+        "icon": "$(layout-centered)"
+      },
+      {
+        "command": "brassAgent.openProjectDashboard",
+        "title": "Open Project Dashboard",
+        "category": "Brass Agent",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "brassAgent.openProjectDashboardInEditor",
+        "title": "Open Project Dashboard in Editor",
+        "category": "Brass Agent",
+        "icon": "$(layout-panel-center)"
+      },
+      {
+        "command": "brassAgent.refreshProjectDashboard",
+        "title": "Refresh Project Dashboard",
+        "category": "Brass Agent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "brassAgent.inlineAssist",
+        "title": "Inline Assist...",
+        "category": "Brass Agent",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "brassAgent.askSelection",
+        "title": "Ask About Selection",
+        "category": "Brass Agent",
+        "icon": "$(comment)"
+      },
+      {
+        "command": "brassAgent.explainSelection",
+        "title": "Explain Selection",
+        "category": "Brass Agent",
+        "icon": "$(book)"
+      },
+      {
+        "command": "brassAgent.fixSelection",
+        "title": "Fix Selection",
+        "category": "Brass Agent",
+        "icon": "$(wand)"
+      },
+      {
+        "command": "brassAgent.init",
+        "title": "Initialize Workspace",
+        "category": "Brass Agent",
+        "icon": "$(rocket)"
+      },
+      {
+        "command": "brassAgent.doctor",
+        "title": "Doctor",
+        "category": "Brass Agent",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "brassAgent.configureCli",
+        "title": "Configure CLI",
+        "category": "Brass Agent",
+        "icon": "$(plug)"
+      },
+      {
+        "command": "brassAgent.configureLlm",
+        "title": "Configure Model",
+        "category": "Brass Agent",
+        "icon": "$(key)"
+      },
+      {
+        "command": "brassAgent.configureWorkspace",
+        "title": "Configure Workspace",
+        "category": "Brass Agent",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "brassAgent.propose",
+        "title": "Propose Fix...",
+        "category": "Brass Agent",
+        "icon": "$(lightbulb)"
+      },
+      {
+        "command": "brassAgent.apply",
+        "title": "Apply Fix...",
+        "category": "Brass Agent",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "brassAgent.readOnly",
+        "title": "Inspect Workspace",
+        "category": "Brass Agent",
+        "icon": "$(search)"
+      },
+      {
+        "command": "brassAgent.fixTests",
+        "title": "Fix Tests",
+        "category": "Brass Agent",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "brassAgent.typecheck",
+        "title": "Typecheck",
+        "category": "Brass Agent",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "brassAgent.lint",
+        "title": "Lint",
+        "category": "Brass Agent",
+        "icon": "$(symbol-color)"
+      },
+      {
+        "command": "brassAgent.runBatchFile",
+        "title": "Run Batch File...",
+        "category": "Brass Agent",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "brassAgent.runConfiguredBatch",
+        "title": "Run Configured Batch",
+        "category": "Brass Agent",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "brassAgent.showLastPatchPreview",
+        "title": "Show Last Patch Preview",
+        "category": "Brass Agent",
+        "icon": "$(preview)"
+      },
+      {
+        "command": "brassAgent.showOutput",
+        "title": "Show Output",
+        "category": "Brass Agent",
+        "icon": "$(output)"
+      },
+      {
+        "command": "brassAgent.cancel",
+        "title": "Cancel Current Run",
+        "category": "Brass Agent",
+        "icon": "$(circle-slash)"
+      },
+      {
+        "command": "brassAgent.openHistoryRun",
+        "title": "Open Run Details",
+        "category": "Brass Agent",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "brassAgent.showHistoryPatch",
+        "title": "Show History Patch",
+        "category": "Brass Agent",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "brassAgent.rerunHistoryRun",
+        "title": "Rerun History Run",
+        "category": "Brass Agent",
+        "icon": "$(debug-rerun)"
+      },
+      {
+        "command": "brassAgent.refreshHistory",
+        "title": "Refresh History",
+        "category": "Brass Agent",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "brassAgent.clearHistory",
+        "title": "Clear History",
+        "category": "Brass Agent",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "brassAgent.explainProblems",
+        "title": "Explain Workspace Problems",
+        "category": "Brass Agent",
+        "icon": "$(book)"
+      },
+      {
+        "command": "brassAgent.fixProblems",
+        "title": "Fix Workspace Problems",
+        "category": "Brass Agent",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "brassAgent.fixCurrentFileProblems",
+        "title": "Fix Current File Problems",
+        "category": "Brass Agent",
+        "icon": "$(file-code)"
+      },
+      {
+        "command": "brassAgent.generateTestForSelection",
+        "title": "Generate Test For Selection",
+        "category": "Brass Agent",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "brassAgent.refactorSelection",
+        "title": "Refactor Selection",
+        "category": "Brass Agent",
+        "icon": "$(symbol-method)"
+      },
+      {
+        "command": "brassAgent.explainProblem",
+        "title": "Explain Problem",
+        "category": "Brass Agent",
+        "icon": "$(book)"
+      },
+      {
+        "command": "brassAgent.fixProblem",
+        "title": "Fix Problem",
+        "category": "Brass Agent",
+        "icon": "$(lightbulb)"
+      }
+    ],
+    "configuration": {
+      "title": "Brass Agent",
+      "properties": {
+        "brassAgent.command": {
+          "type": "string",
+          "default": "auto",
+          "description": "Command, absolute path, or auto. Use auto to let the extension prefer its bundled CLI, workspace node_modules/.bin, a brass-runtime checkout, then PATH."
+        },
+        "brassAgent.extraArgs": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Additional arguments passed before the agent goal."
+        },
+        "brassAgent.environment": {
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Additional environment variables for the brass-agent process. Secrets should preferably come from your shell or VS Code secret storage in a future version."
+        },
+        "brassAgent.historyLimit": {
+          "type": "number",
+          "default": 50,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of Brass Agent runs to keep in the workspace sidebar history."
+        },
+        "brassAgent.storePatchesInHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Store proposed/applied unified diffs in VS Code workspace history so they can be reopened later. Disable if you do not want patch contents persisted in VS Code workspace storage."
+        },
+        "brassAgent.chatHistoryLimit": {
+          "type": "number",
+          "default": 80,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of Brass Agent chat messages to persist in VS Code workspace storage."
+        },
+        "brassAgent.problemContextLimit": {
+          "type": "number",
+          "default": 40,
+          "minimum": 1,
+          "maximum": 500,
+          "description": "Maximum number of VS Code diagnostics included in Brass Agent problem-aware chat prompts."
+        },
+        "brassAgent.inlineAssistSurroundingLines": {
+          "type": "number",
+          "default": 20,
+          "minimum": 0,
+          "maximum": 200,
+          "description": "Number of surrounding lines included when Brass Agent Inline Assist is used without an explicit selection."
+        },
+        "brassAgent.preferBundledCli": {
+          "type": "boolean",
+          "default": true,
+          "description": "When brassAgent.command is auto, prefer the CLI bundled inside the VS Code extension before workspace/global discovery."
+        },
+        "brassAgent.nodeCommand": {
+          "type": "string",
+          "default": "node",
+          "description": "Node.js executable used by the VS Code extension when launching a bundled JavaScript brass-agent CLI. Leave as node unless your Node binary has a custom path."
+        },
+        "brassAgent.llm.provider": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "google",
+            "openai-compatible",
+            "fake"
+          ],
+          "description": "LLM provider used by VS Code-launched brass-agent runs. API keys are stored in VS Code Secret Storage via Brass Agent: Configure Model."
+        },
+        "brassAgent.llm.google.model": {
+          "type": "string",
+          "default": "gemini-2.5-flash",
+          "description": "Gemini model used when brassAgent.llm.provider is google."
+        },
+        "brassAgent.llm.openaiCompatible.endpoint": {
+          "type": "string",
+          "default": "https://api.openai.com/v1/chat/completions",
+          "description": "OpenAI-compatible /chat/completions endpoint used when brassAgent.llm.provider is openai-compatible."
+        },
+        "brassAgent.llm.openaiCompatible.model": {
+          "type": "string",
+          "default": "gpt-4.1",
+          "description": "Model name used when brassAgent.llm.provider is openai-compatible."
+        },
+        "brassAgent.language.response": {
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "match-user",
+            "es",
+            "en",
+            "pt",
+            "fr",
+            "de",
+            "it"
+          ],
+          "description": "Preferred response language for VS Code-launched brass-agent runs. auto matches the user prompt when possible; es forces Spanish."
+        },
+        "brassAgent.chat.defaultLocation": {
+          "type": "string",
+          "default": "sidebar",
+          "enum": [
+            "sidebar",
+            "editor"
+          ],
+          "description": "Where Brass Agent opens chat by default. Use editor for a larger focus-mode tab; sidebar keeps the chat in the Brass Agent activity view."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "brassAgent",
+          "title": "Brass Agent",
+          "icon": "resources/brass-agent.svg"
+        }
+      ]
+    },
+    "views": {
+      "brassAgent": [
+        {
+          "type": "webview",
+          "id": "brassAgent.project",
+          "name": "Project",
+          "visibility": "collapsed"
+        },
+        {
+          "type": "webview",
+          "id": "brassAgent.chat",
+          "name": "Chat"
+        },
+        {
+          "id": "brassAgent.runs",
+          "name": "Run History",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "brassAgent.quickRun",
+          "when": "view == brassAgent.runs",
+          "group": "navigation@0"
+        },
+        {
+          "command": "brassAgent.cancel",
+          "when": "view == brassAgent.runs && brassAgent.running",
+          "group": "navigation@1"
+        },
+        {
+          "command": "brassAgent.refreshHistory",
+          "when": "view == brassAgent.runs",
+          "group": "navigation@2"
+        },
+        {
+          "command": "brassAgent.showOutput",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@0"
+        },
+        {
+          "command": "brassAgent.init",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@1"
+        },
+        {
+          "command": "brassAgent.doctor",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@2"
+        },
+        {
+          "command": "brassAgent.runConfiguredBatch",
+          "when": "view == brassAgent.runs",
+          "group": "2_batch@0"
+        },
+        {
+          "command": "brassAgent.runBatchFile",
+          "when": "view == brassAgent.runs",
+          "group": "2_batch@1"
+        },
+        {
+          "command": "brassAgent.showLastPatchPreview",
+          "when": "view == brassAgent.runs",
+          "group": "3_patches@0"
+        },
+        {
+          "command": "brassAgent.clearHistory",
+          "when": "view == brassAgent.runs",
+          "group": "9_destructive@0"
+        },
+        {
+          "command": "brassAgent.openChat",
+          "when": "view == brassAgent.chat",
+          "group": "navigation@0"
+        },
+        {
+          "command": "brassAgent.configureCli",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@3"
+        },
+        {
+          "command": "brassAgent.configureCli",
+          "when": "view == brassAgent.chat",
+          "group": "1_common@0"
+        },
+        {
+          "command": "brassAgent.configureLlm",
+          "when": "view == brassAgent.chat",
+          "group": "1_common@1"
+        },
+        {
+          "command": "brassAgent.configureLlm",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@4"
+        },
+        {
+          "command": "brassAgent.configureWorkspace",
+          "when": "view == brassAgent.chat",
+          "group": "1_common@2"
+        },
+        {
+          "command": "brassAgent.configureWorkspace",
+          "when": "view == brassAgent.runs",
+          "group": "1_common@5"
+        },
+        {
+          "command": "brassAgent.refreshProjectDashboard",
+          "when": "view == brassAgent.project",
+          "group": "navigation@0"
+        },
+        {
+          "command": "brassAgent.openChat",
+          "when": "view == brassAgent.project",
+          "group": "navigation@2"
+        },
+        {
+          "command": "brassAgent.configureWorkspace",
+          "when": "view == brassAgent.project",
+          "group": "1_common@0"
+        },
+        {
+          "command": "brassAgent.configureLlm",
+          "when": "view == brassAgent.project",
+          "group": "1_common@1"
+        },
+        {
+          "command": "brassAgent.doctor",
+          "when": "view == brassAgent.project",
+          "group": "1_common@2"
+        },
+        {
+          "command": "brassAgent.showOutput",
+          "when": "view == brassAgent.project",
+          "group": "1_common@3"
+        },
+        {
+          "command": "brassAgent.openChatInEditor",
+          "when": "view == brassAgent.chat",
+          "group": "navigation@1"
+        },
+        {
+          "command": "brassAgent.openProjectDashboardInEditor",
+          "when": "view == brassAgent.project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "brassAgent.focusChatLayout",
+          "when": "view == brassAgent.chat",
+          "group": "1_common@0"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "brassAgent.openHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentRun",
+          "group": "inline"
+        },
+        {
+          "command": "brassAgent.openHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentRunWithPatch",
+          "group": "inline"
+        },
+        {
+          "command": "brassAgent.showHistoryPatch",
+          "when": "view == brassAgent.runs && viewItem == brassAgentRunWithPatch",
+          "group": "inline"
+        },
+        {
+          "command": "brassAgent.rerunHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentRun",
+          "group": "navigation"
+        },
+        {
+          "command": "brassAgent.rerunHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentRunWithPatch",
+          "group": "navigation"
+        },
+        {
+          "command": "brassAgent.rerunHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentBatch",
+          "group": "navigation"
+        },
+        {
+          "command": "brassAgent.openHistoryRun",
+          "when": "view == brassAgent.runs && viewItem == brassAgentBatch",
+          "group": "inline"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "brassAgent.openHistoryRun",
+          "when": "false"
+        },
+        {
+          "command": "brassAgent.rerunHistoryRun",
+          "when": "false"
+        },
+        {
+          "command": "brassAgent.showHistoryPatch",
+          "when": "false"
+        },
+        {
+          "command": "brassAgent.explainProblem",
+          "when": "false"
+        },
+        {
+          "command": "brassAgent.fixProblem",
+          "when": "false"
+        },
+        {
+          "command": "brassAgent.refreshProjectDashboard",
+          "when": "false"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "brassAgent.inlineAssist",
+          "when": "editorTextFocus",
+          "group": "brassAgent@-1"
+        },
+        {
+          "command": "brassAgent.askSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "brassAgent@0"
+        },
+        {
+          "command": "brassAgent.explainSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "brassAgent@1"
+        },
+        {
+          "command": "brassAgent.fixSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "brassAgent@2"
+        },
+        {
+          "command": "brassAgent.refactorSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "brassAgent@3"
+        },
+        {
+          "command": "brassAgent.generateTestForSelection",
+          "when": "editorTextFocus && editorHasSelection",
+          "group": "brassAgent@4"
+        },
+        {
+          "command": "brassAgent.fixCurrentFileProblems",
+          "when": "editorTextFocus",
+          "group": "brassAgent@5"
+        },
+        {
+          "command": "brassAgent.explainProblems",
+          "when": "editorTextFocus",
+          "group": "brassAgent@6"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "brassAgent.project",
+        "contents": "See what Brass Agent knows about this workspace: model, language, validation command, CLI, and project profile.\n\n[Refresh](command:brassAgent.refreshProjectDashboard), [Configure Model](command:brassAgent.configureLlm), [Configure Workspace](command:brassAgent.configureWorkspace), or [Open Chat](command:brassAgent.openChat).\n\nUse [Open Project Dashboard in Editor](command:brassAgent.openProjectDashboardInEditor) for a larger dashboard."
+      },
+      {
+        "view": "brassAgent.chat",
+        "contents": "Ask Brass Agent about this workspace, selected code, failing tests, type errors, or refactors. Chat sessions remember the last run and support slash commands like `/inspect`, `/fix-tests`, `/explain-last`, and `/fix-problems`, `/fix-current-file`, and `/clear`.\n\n[Start a chat](command:brassAgent.openChat), [configure CLI auto-discovery](command:brassAgent.configureCli), or select code and use **Ask About Selection** from the editor context menu.\n\n[Configure Model](command:brassAgent.configureLlm) stores provider keys safely in VS Code Secret Storage.\n\n[Configure Workspace](command:brassAgent.configureWorkspace) creates or updates `.brass-agent.json` with language and validation-command settings.\n\nFor longer sessions, use [Open Chat in Editor](command:brassAgent.openChatInEditor)."
+      },
+      {
+        "view": "brassAgent.runs",
+        "contents": "No Brass Agent runs yet.\n\n[New Run](command:brassAgent.quickRun) starts a guided flow for inspect, propose, apply, batch, doctor, and init.\n\n[Initialize Workspace](command:brassAgent.init) creates `.brass-agent.json`, batch defaults, and safe examples.\n\n[Configure Workspace](command:brassAgent.configureWorkspace) opens a guided setup for language and validation commands.\n\n[Doctor](command:brassAgent.doctor) checks CLI, workspace, model, and VS Code setup.\n\n[Configure CLI](command:brassAgent.configureCli) switches between bundled, global, and selected CLI entrypoints.\n\n[Configure Model](command:brassAgent.configureLlm) sets up Gemini, OpenAI-compatible, or fake/offline mode."
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package:vsix": "vsce package",
+    "vscode:prepublish": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^2.25.0",
+    "typescript": "^5.9.3"
+  }
+}
