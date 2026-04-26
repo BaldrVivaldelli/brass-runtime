@@ -51,8 +51,8 @@ export function makeForkPolicy<R>(env: R, hooks: RuntimeHooks) {
 
 function resolveForkServices(env?: BrassEnv): ForkServices {
     const defaultTracer: Tracer = {
-        newTraceId: () => crypto.randomUUID(),
-        newSpanId: () => crypto.randomUUID(),
+        newTraceId: () => randomRuntimeId("trace"),
+        newSpanId: () => randomRuntimeId("span"),
     };
 
     const brass = env?.brass;
@@ -63,6 +63,18 @@ function resolveForkServices(env?: BrassEnv): ForkServices {
     const childName = brass?.childName ?? ((p?: string) => (p ? `${p}/child` : undefined));
 
     return { tracer, seed, childName };
+}
+
+function randomRuntimeId(prefix: string): string {
+    const cryptoLike = (globalThis as any).crypto;
+
+    if (typeof cryptoLike?.randomUUID === "function") {
+        return cryptoLike.randomUUID();
+    }
+
+    // Runtime trace/span ids are observability metadata, not secrets.
+    // This fallback keeps Node versions without global WebCrypto working.
+    return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function forkTrace(svc: ForkServices, parentTrace: TraceContext | null): TraceContext | null {

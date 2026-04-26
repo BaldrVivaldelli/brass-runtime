@@ -1,6 +1,6 @@
 // src/core/runtime/scope.ts
 import { Fiber, getCurrentFiber } from "./fiber";
-import { Exit } from "../types/effect";
+import { Cause, Exit } from "../types/effect";
 import { async, Async, asyncFlatMap, asyncFold, unit } from "../types/asyncEffect";
 import { Runtime } from "./runtime";
 
@@ -96,6 +96,14 @@ class Scope<R> {
                 const children = Array.from(this.children);
                 const subScopes = Array.from(this.subScopes);
 
+                // Closing a scope is the structured-concurrency boundary:
+                // all fibers owned by the scope must be interrupted before
+                // we await them, otherwise closeAsync can hang forever on
+                // long-running child work.
+                for (const child of children) {
+                    child.interrupt();
+                }
+
                 // 1) close subscopes
                 const closeSubs = subScopes.reduceRight(
                     (acc, s) => asyncFlatMap(acc, () => s.closeAsync(exit, opts)),
@@ -147,13 +155,26 @@ export function withScopeAsync<R, E, A>(
     runtime: Runtime<R>,
     f: (scope: Scope<R>) => Async<R, E, A>
 ): Async<R, E, A> {
-    return async((env, cb) => {
+    return async((_env, cb) => {
         const scope = new Scope<R>(runtime);
-        runtime.fork(f(scope)).join((exit: any) => {
-            // close scope siempre
-            runtime.fork(scope.closeAsync(exit));
-            cb(exit);
-        });
+        let done = false;
+
+        const completeAfterClose = (exit: Exit<E, A>) => {
+            runtime.fork(scope.closeAsync(exit)).join(() => {
+                if (done) return;
+                done = true;
+                cb(exit);
+            });
+        };
+
+        const fiber = runtime.fork(f(scope));
+        fiber.join(completeAfterClose as any);
+
+        return () => {
+            if (done) return;
+            fiber.interrupt();
+            runtime.fork(scope.closeAsync(Exit.failCause(Cause.interrupt())));
+        };
     });
 }
 

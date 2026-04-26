@@ -1,0 +1,9 @@
+{
+  "stopOnFailure": false,
+  "goals": [
+    {
+      "preset": "inspect",
+      "mode": "read-only"
+    }
+  ]
+}

@@ -45,8 +45,7 @@ npm i brass-runtime
 ### Run an effect
 
 ```ts
-import { succeed } from "brass-runtime";
-import { Runtime, toPromise } from "brass-runtime/runtime";
+import { Runtime, succeed, toPromise } from "brass-runtime";
 
 const runtime = new Runtime({ env: {} });
 
@@ -57,8 +56,7 @@ console.log(value); // 123
 ### Structured concurrency with Scope
 
 ```ts
-import { withScope } from "brass-runtime/scope";
-import { Runtime } from "brass-runtime/runtime";
+import { Runtime, withScope } from "brass-runtime";
 
 const runtime = new Runtime({ env: {} });
 
@@ -91,8 +89,8 @@ A ZIO-style HTTP client built on top of fibers and `Async`.
 Example:
 
 ```ts
+import { Runtime, toPromise } from "brass-runtime";
 import { httpClientStream } from "brass-runtime/http";
-import { toPromise, Runtime } from "brass-runtime/runtime";
 
 type Post = { id: number; title: string; body: string };
 
@@ -102,6 +100,36 @@ const client = httpClientStream({ baseUrl: "https://jsonplaceholder.typicode.com
 
 const res = await toPromise(client.getJson<Post>("/posts/1"), runtime.env);
 console.log(res.status, res.value.title);
+```
+
+---
+
+### 🤖 Brass Agent (experimental)
+
+A CLI-first coding agent built on top of the runtime. Brass Agent is currently experimental: it can inspect a workspace, discover validation commands, gather bounded context, ask an LLM for a patch, apply/rollback patches through explicit policies, and expose a thin VS Code extension over the CLI protocol.
+
+Start here:
+
+- [Install and configure Brass Agent](./docs/agent-install-and-configure.md)
+- [Declarative optimized planning roadmap](./docs/agent-declarative-optimized-planning.md)
+- [Brass Agent CLI](./docs/agent-cli.md)
+- [Project intelligence](./docs/agent-project-intelligence.md)
+- [Global usage and workspace discovery](./docs/agent-global-usage.md)
+- [VS Code local install](./docs/agent-vscode-install.md)
+- [VS Code auto-discovery](./docs/agent-vscode-auto-discovery.md)
+- [VS Code model setup](./docs/agent-vscode-model-setup.md)
+- [VS Code chat layout / focus mode](./docs/agent-vscode-chat-layout.md)
+
+```bash
+npm run agent:vscode:install
+# then open any repo in VS Code and use Brass Agent -> Chat
+
+npm run build
+npm run agent:link
+brass-agent --where
+brass-agent --doctor
+brass-agent --init
+brass-agent --preset inspect
 ```
 
 ---
@@ -129,6 +157,8 @@ Examples:
 - [Observability: Hooks & Tracing](./docs/observability.md)
 - [HTTP module](./docs/http.md)
 - [Modules overview](./docs/modules.md)
+- [Install and configure Brass Agent](./docs/agent-install-and-configure.md)
+- [Declarative optimized planning roadmap](./docs/agent-declarative-optimized-planning.md)
 
 ---
 
@@ -186,3 +216,16 @@ Examples:
 ## License
 
 MIT License © 2025
+
+
+## Brass Agent local smoke tests
+
+Run local smoke tests without CI or a real LLM provider:
+
+```bash
+npm run agent:test:local
+```
+
+This builds the project and runs a fake-LLM smoke test against the `brass-agent` CLI.
+
+See also: [Agent language and workspace setup UX](docs/agent-language-workspace-ux.md).

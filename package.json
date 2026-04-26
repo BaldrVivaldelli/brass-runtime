@@ -18,6 +18,11 @@
       "import": "./dist/http/index.js",
       "require": "./dist/http/index.cjs"
     },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js",
+      "require": "./dist/agent/index.cjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -50,7 +55,25 @@
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "agent:dev": "tsx src/agent/cli/main.ts",
+    "agent:doctor": "tsx src/agent/cli/main.ts --doctor",
+    "agent:vscode:package": "node scripts/install-vscode-extension.mjs --no-code-install --no-settings",
+    "agent:vscode:install": "node scripts/install-vscode-extension.mjs",
+    "agent:vscode:uninstall": "node scripts/clean-vscode-extension.mjs --yes --no-vsix --no-settings --no-global-storage",
+    "agent:vscode:clean": "node scripts/clean-vscode-extension.mjs --yes",
+    "agent:vscode:reinstall": "npm run agent:vscode:clean && npm run agent:vscode:install",
+    "agent:local-install": "npm run agent:vscode:install",
+    "agent:init": "tsx src/agent/cli/main.ts --init",
+    "agent:init:dry-run": "tsx src/agent/cli/main.ts --init --init-dry-run",
+    "agent:test:smoke": "node scripts/agent-local-smoke.mjs",
+    "agent:test:local": "npm run build && npm run agent:test:smoke",
+    "agent:link": "npm run build && npm link",
+    "agent:unlink": "node scripts/unlink-agent-cli.mjs",
+    "agent:vscode:install:global": "npm run agent:link && node scripts/install-vscode-extension.mjs --use-global-command --no-root-build",
+    "agent:vscode:bundle": "npm run build && node scripts/prepare-vscode-bundle.mjs",
+    "agent:vscode:uninstall:global": "npm run agent:vscode:clean && npm run agent:unlink",
+    "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global"
   },
   "devDependencies": {
     "@semantic-release/changelog": "^6.0.0",
@@ -74,5 +97,8 @@
   "bugs": {
     "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
   },
-  "homepage": "https://github.com/BaldrVivaldelli/brass-runtime#readme"
+  "homepage": "https://github.com/BaldrVivaldelli/brass-runtime#readme",
+  "bin": {
+    "brass-agent": "./dist/agent/cli/main.cjs"
+  }
 }
