@@ -4,7 +4,21 @@ import type { AgentError } from "../core/types";
 export const isAbsoluteLike = (path: string): boolean =>
     path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path);
 
-export const trimTrailingSlash = (path: string): string => path.replace(/[\\/]+$/, "");
+export const trimTrailingSlash = (path: string): string => {
+    let end = path.length;
+
+    while (end > 0) {
+        const char = path.charCodeAt(end - 1);
+
+        if (char !== 47 && char !== 92) {
+            break;
+        }
+
+        end -= 1;
+    }
+
+    return end === path.length ? path : path.slice(0, end);
+};
 export const trimLeadingDotSlash = (path: string): string => path.replace(/^(?:\.[\\/])+/, "");
 
 export const normalizeWorkspaceRelativePath = (inputPath: string): string | undefined => {

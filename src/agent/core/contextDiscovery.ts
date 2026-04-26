@@ -173,10 +173,23 @@ const trimLeadingDotSlash = (value: string): string => value.replace(/^(?:\.\/)+
 const stripLocationSuffix = (value: string): string =>
     value.replace(/(?:\d+){1,2}$/, "");
 
-const stripWrappingPunctuation = (value: string): string =>
-    value
-        .replace(/^[\s('"`<[]+/, "")
-        .replace(/[\s)'">,\]]+$/, "");
+const LEADING_WRAPPING_CHARS = new Set([" ", "\t", "\n", "\r", "(", "'", '"', "`", "<", "["]);
+const TRAILING_WRAPPING_CHARS = new Set([" ", "\t", "\n", "\r", ")", "'", '"', ">", ",", "]"]);
+
+const stripWrappingPunctuation = (value: string): string => {
+    let start = 0;
+    let end = value.length;
+
+    while (start < end && LEADING_WRAPPING_CHARS.has(value[start])) {
+        start += 1;
+    }
+
+    while (end > start && TRAILING_WRAPPING_CHARS.has(value[end - 1])) {
+        end -= 1;
+    }
+
+    return value.slice(start, end);
+};
 
 const PROSE_FILE_LIKE_WORDS = new Set([
     "Node.js",
