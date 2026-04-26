@@ -506,7 +506,7 @@ const cliFromSetting = async (value: string, source: string): Promise<ResolvedCl
 const findUpPackage = async (start: string, packageName: string): Promise<string | undefined> => {
     let current = path.resolve(start);
 
-    for (;;) {
+    for (; ;) {
         const packageJson = path.join(current, "package.json");
         try {
             const json = JSON.parse(await fs.readFile(packageJson, "utf8")) as { readonly name?: string };
@@ -1252,6 +1252,11 @@ document.addEventListener('click', (event) => {
 };
 
 const markdownFence = (value: string, language = ""): string => `\`\`\`${language}\n${value.replace(/\`\`\`/g, "``\\`")}\n\`\`\``;
+const escapeMarkdownTableCell = (value: unknown): string =>
+    String(value ?? "")
+        .replace(/\\/g, "\\\\")
+        .replace(/\|/g, "\\|")
+        .replace(/\r?\n/g, " ");
 
 const runDetailsMarkdown = (entry: RunHistoryEntry): string => {
     const stats = entry.patchStats;
@@ -1262,8 +1267,8 @@ const runDetailsMarkdown = (entry: RunHistoryEntry): string => {
         `| --- | --- |`,
         `| Status | ${entry.status} |`,
         `| Mode | ${entry.mode} |`,
-        `| Goal | ${entry.goal.replace(/\|/g, "\\|")} |`,
-        `| Workspace | ${entry.cwd.replace(/\|/g, "\\|")} |`,
+        `| Goal | ${escapeMarkdownTableCell(entry.goal)} |`,
+        `| Workspace | ${escapeMarkdownTableCell(entry.cwd)} |`,
         `| Started | ${humanDate(entry.startedAt)} |`,
         `| Completed | ${humanDate(entry.completedAt)} |`,
         `| Duration | ${entry.durationMs}ms |`,
@@ -1319,7 +1324,7 @@ class RunHistoryProvider implements vscode.TreeDataProvider<HistoryNode>, vscode
     private readonly onDidChangeTreeDataEmitter = new vscode.EventEmitter<HistoryNode | undefined | void>();
     readonly onDidChangeTreeData = this.onDidChangeTreeDataEmitter.event;
 
-    constructor(private readonly context: vscode.ExtensionContext) {}
+    constructor(private readonly context: vscode.ExtensionContext) { }
 
     dispose(): void {
         this.onDidChangeTreeDataEmitter.dispose();
@@ -3188,7 +3193,7 @@ class ProjectDashboardProvider implements vscode.WebviewViewProvider, vscode.Dis
     private readonly clients = new Set<vscode.Webview>();
     private readonly disposables: vscode.Disposable[] = [];
 
-    constructor(private readonly context: vscode.ExtensionContext) {}
+    constructor(private readonly context: vscode.ExtensionContext) { }
 
     dispose(): void {
         for (const disposable of this.disposables) disposable.dispose();

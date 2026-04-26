@@ -48,7 +48,15 @@ const DEFAULT_MODEL = "gemini-2.5-flash";
 const DEFAULT_API_VERSION = "v1beta";
 const DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
 
-const withoutTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+const withoutTrailingSlash = (value: string): string => {
+    let end = value.length;
+
+    while (end > 0 && value.charCodeAt(end - 1) === 47) {
+        end -= 1;
+    }
+
+    return end === value.length ? value : value.slice(0, end);
+};
 
 const normalizeModelName = (model: string): string => (model.startsWith("models/") ? model : `models/${model}`);
 
@@ -88,8 +96,8 @@ const makeRequestBody = (request: { readonly prompt: string }, config: GoogleGen
         ],
         systemInstruction: config.systemInstruction
             ? {
-                  parts: [{ text: config.systemInstruction }],
-              }
+                parts: [{ text: config.systemInstruction }],
+            }
             : undefined,
         generationConfig: Object.keys(generationConfig).length > 0 ? generationConfig : undefined,
     });

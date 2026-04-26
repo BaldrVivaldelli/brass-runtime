@@ -712,9 +712,8 @@
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
-    "@types/node": "^22.0.0",
     "@types/vscode": "^1.95.0",
-    "typescript": "^5.9.3",
-    "@vscode/vsce": "^3.6.2"
+    "@vscode/vsce": "^2.25.0",
+    "typescript": "^5.9.3"
   }
 }

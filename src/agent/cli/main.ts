@@ -1046,7 +1046,10 @@ const createProtocolEventSink = (options: CompactOptions = {}): AgentEventSink =
 const safeFilePart = (value: string): string =>
     value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "run";
 
-const markdownEscape = (value: string): string => value.replace(/`/g, "\`");
+const markdownEscape = (value: string): string =>
+    value
+        .replace(/\\/g, "\\\\")
+        .replace(/`/g, "\\`");
 
 const writeRunArtifacts = async (state: AgentState, outputDir: string, options: CompactOptions): Promise<void> => {
     const nodePath = await dynamicImport("node:path");

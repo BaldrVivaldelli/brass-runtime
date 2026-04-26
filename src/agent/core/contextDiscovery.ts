@@ -170,10 +170,13 @@ const normalizeSlashes = (value: string): string => value.replace(/\\/g, "/");
 
 const trimLeadingDotSlash = (value: string): string => value.replace(/^(?:\.\/)+/, "");
 
-const stripLocationSuffix = (value: string): string => value.replace(/(?::\d+){1,2}$/, "");
+const stripLocationSuffix = (value: string): string =>
+    value.replace(/(?:\d+){1,2}$/, "");
 
 const stripWrappingPunctuation = (value: string): string =>
-    value.replace(/^[\s('"`<\[]+/, "").replace(/[\s)'"`>,\]]+$/, "");
+    value
+        .replace(/^[\s('"`<[]+/, "")
+        .replace(/[\s)'">,\]]+$/, "");
 
 const PROSE_FILE_LIKE_WORDS = new Set([
     "Node.js",
