@@ -88,6 +88,7 @@
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
     "test:coverage:html": "vitest run --coverage --reporter=default",
     "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg"
+
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
