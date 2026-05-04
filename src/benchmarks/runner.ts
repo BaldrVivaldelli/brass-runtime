@@ -11,12 +11,17 @@
  */
 
 import { readdirSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runtimeCapabilities } from "../core/runtime/capabilities";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 
 export interface BenchmarkResult {
   /** Human-readable name of the benchmark. */
@@ -163,7 +168,8 @@ async function main() {
   const jsonOnly = args.includes("--json");
   const pattern = args.find((a) => !a.startsWith("--"));
 
-  const dir = new URL(".", import.meta.url).pathname;
+  const __dirname = dirname(__filename);
+  const dir = __dirname
   const files = readdirSync(dir)
     .filter((f) => f.endsWith(".bench.ts"))
     .filter((f) => (pattern ? f.includes(pattern) : true))

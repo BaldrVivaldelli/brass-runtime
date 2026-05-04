@@ -8,27 +8,10 @@ let cachedWasmModule: WasmRuntimeModule | null | undefined;
 let cachedWasmModuleErrors: string[] = [];
 
 export type ResolveWasmModuleOptions = {
-  /** Explicit module path for tests or custom package layouts. */
   modulePath?: string;
-  /** Disable the cache, mostly useful in tests. */
   fresh?: boolean;
 };
 
-/**
- * Resolves the wasm-pack generated CommonJS module in Node-friendly runtimes.
- *
- * This intentionally avoids a static import of wasm/pkg because many consumers
- * bundle brass-runtime with webpack. Static imports make webpack try to inline
- * the wasm-pack artifact; that is usually the wrong behavior for Node services,
- * because wasm-pack's nodejs target expects the .wasm file to live next to the
- * generated JS file on disk.
- *
- * Supported cases:
- * - Node 18 CommonJS consumers.
- * - Node 18 ESM consumers via createRequire(import.meta.url).
- * - webpack for Node via __non_webpack_require__ when available.
- * - Local source/test execution before packaging.
- */
 export function resolveWasmModule(options: ResolveWasmModuleOptions = {}): WasmRuntimeModule | null {
   if (!options.fresh && options.modulePath == null && cachedWasmModule !== undefined) {
     return cachedWasmModule;
@@ -67,15 +50,10 @@ export function wasmModuleCandidates(modulePath?: string): string[] {
   if (modulePath) return [modulePath];
 
   return [
-    // Installed package path. Useful when brass-runtime is bundled by webpack
-    // but the package still exists in node_modules at runtime.
     "brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js",
-    // Bundled package path: dist/index.(js|cjs) -> ../wasm/pkg/...
     "../wasm/pkg/brass_runtime_wasm_engine.js",
-    // Source/test paths used by tsx/vitest before publishing.
     "../../../wasm/pkg/brass_runtime_wasm_engine.js",
     "../../../../../wasm/pkg/brass_runtime_wasm_engine.js",
-    // Local workspace fallback.
     `${getCwd()}/wasm/pkg/brass_runtime_wasm_engine.js`,
   ];
 }
@@ -89,6 +67,7 @@ function remember(
     cachedWasmModule = value;
     cachedWasmModuleErrors = errors;
   }
+
   return value;
 }
 
@@ -98,7 +77,9 @@ function getBestRequire(): RuntimeRequire | undefined {
 
 function getNonWebpackRequire(): RuntimeRequire | undefined {
   try {
-    return (0, eval)("typeof __non_webpack_require__ === 'function' ? __non_webpack_require__ : undefined") as RuntimeRequire | undefined;
+    return (0, eval)(
+      "typeof __non_webpack_require__ === 'function' ? __non_webpack_require__ : undefined",
+    ) as RuntimeRequire | undefined;
   } catch {
     return undefined;
   }
@@ -106,7 +87,9 @@ function getNonWebpackRequire(): RuntimeRequire | undefined {
 
 function getRuntimeRequire(): RuntimeRequire | undefined {
   try {
-    return (0, eval)("typeof require === 'function' ? require : undefined") as RuntimeRequire | undefined;
+    return (0, eval)(
+      "typeof require === 'function' ? require : undefined",
+    ) as RuntimeRequire | undefined;
   } catch {
     return undefined;
   }
@@ -114,7 +97,7 @@ function getRuntimeRequire(): RuntimeRequire | undefined {
 
 function getCreateRequire(): RuntimeRequire | undefined {
   try {
-    return createRequire(import.meta.url) as RuntimeRequire;
+    return createRequire(`${getCwd()}/package.json`) as RuntimeRequire;
   } catch {
     return undefined;
   }
@@ -122,7 +105,9 @@ function getCreateRequire(): RuntimeRequire | undefined {
 
 function getCwd(): string {
   try {
-    return (0, eval)("typeof process !== 'undefined' ? process.cwd() : ''") as string;
+    return (0, eval)(
+      "typeof process !== 'undefined' ? process.cwd() : ''",
+    ) as string;
   } catch {
     return "";
   }
