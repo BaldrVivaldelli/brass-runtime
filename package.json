@@ -52,20 +52,17 @@
   ],
   "scripts": {
     "dev": "tsx src/examples/index.ts",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist wasm/pkg",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:types": "tsc -p tsconfig.json --noEmit",
     "check": "npm run test:types && npm run test && npm run test:coverage",
     "check:full": "npm run clean && npm run build && npm run test",
-    "build": "tsup",
     "build:legacy": "npm run clean && npm run build:types && npm run build:esm && npm run build:cjs",
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "prepack": "npm run build:wasm && npm run build",
-    "prepublishOnly": "npm run build:wasm && npm run build",
     "agent:dev": "tsx src/agent/cli/main.ts",
     "agent:doctor": "tsx src/agent/cli/main.ts --doctor",
     "agent:vscode:package": "node scripts/install-vscode-extension.mjs --no-code-install --no-settings",
@@ -87,7 +84,11 @@
     "benchmark": "tsx src/benchmarks/runner.ts",
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
     "test:coverage:html": "vitest run --coverage --reporter=default",
-    "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg"
+    "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg && rm -f ../../wasm/pkg/.gitignore",
+    "build:ts": "tsup",
+    "build": "npm run build:wasm && npm run build:ts",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run build"
 
   },
   "devDependencies": {
