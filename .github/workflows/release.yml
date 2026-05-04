@@ -41,7 +41,13 @@ jobs:
       - run: npm run build:wasm
       - run: npm run build
       - run: npm test --if-present
-      - run: npm pack --dry-run
+
+      - name: Verify WASM files are packed
+        run: |
+          ls -la wasm/pkg
+          test -f wasm/pkg/brass_runtime_wasm_engine.js
+          test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
+          npm pack --dry-run
 
   node18-smoke:
     runs-on: ubuntu-latest
@@ -63,7 +69,13 @@ jobs:
       - run: npm ci
       - run: npm run build:wasm
       - run: npm run build
-      - run: npm pack --dry-run
+
+      - name: Verify WASM files are packed
+        run: |
+          ls -la wasm/pkg
+          test -f wasm/pkg/brass_runtime_wasm_engine.js
+          test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
+          npm pack --dry-run
 
   release:
     runs-on: ubuntu-latest
@@ -89,7 +101,13 @@ jobs:
       - run: npm ci
       - run: npm run build:wasm
       - run: npm run build
-      - run: npm pack --dry-run
+
+      - name: Verify WASM files are packed
+        run: |
+          ls -la wasm/pkg
+          test -f wasm/pkg/brass_runtime_wasm_engine.js
+          test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
+          npm pack --dry-run
 
       - name: Semantic Release
         env:
