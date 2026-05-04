@@ -5,22 +5,22 @@
   "license": "MIT",
   "author": "Augusto Vivaldelli",
   "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
+  "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
+      "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
     "./http": {
       "types": "./dist/http/index.d.ts",
-      "import": "./dist/http/index.js",
+      "import": "./dist/http/index.mjs",
       "require": "./dist/http/index.cjs"
     },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
-      "import": "./dist/agent/index.js",
+      "import": "./dist/agent/index.mjs",
       "require": "./dist/agent/index.cjs"
     },
     "./package.json": "./package.json",
