@@ -99,19 +99,8 @@ jobs:
         run: cargo install wasm-pack
 
       - run: npm ci
-      - run: npm run build:wasm
-      - run: rm -f wasm/pkg/.gitignore
       - run: npm run build
-
-      # - name: Verify WASM files are packed
-      #   run: |
-      #     ls -la wasm/pkg
-      #     test -f wasm/pkg/brass_runtime_wasm_engine.js
-      #     test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
-      #     npm pack --json > pack.json
-      #     cat pack.json
-      #     grep -q "wasm/pkg/brass_runtime_wasm_engine.js" pack.json
-      #     grep -q "wasm/pkg/brass_runtime_wasm_engine_bg.wasm" pack.json
+      - run: rm -f wasm/pkg/.gitignore
 
       - name: Semantic Release
         env:
