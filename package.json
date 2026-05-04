@@ -59,7 +59,7 @@
     "test:types": "tsc -p tsconfig.json --noEmit",
     "check": "npm run test:types && npm run test && npm run test:coverage",
     "check:full": "npm run clean && npm run build && npm run test",
-    "build": "tsup",
+    "build": "tsup && npm run build:wasm",
     "build:legacy": "npm run clean && npm run build:types && npm run build:esm && npm run build:cjs",
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
