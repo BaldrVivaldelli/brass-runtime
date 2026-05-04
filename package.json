@@ -86,7 +86,8 @@
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
     "test:coverage:html": "vitest run --coverage --reporter=default",
     "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg",
-    "build:ts": "tsup"
+    "build:ts": "tsup",
+    "validate:cjs": "node scripts/validate-cjs.mjs"
 
   },
   "devDependencies": {
