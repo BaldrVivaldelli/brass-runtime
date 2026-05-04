@@ -52,7 +52,7 @@
   ],
   "scripts": {
     "dev": "tsx src/examples/index.ts",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist wasm/pkg",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -64,8 +64,6 @@
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "prepack": "npm run build:wasm && npm run build",
-    "prepublishOnly": "npm run build:wasm && npm run build",
     "agent:dev": "tsx src/agent/cli/main.ts",
     "agent:doctor": "tsx src/agent/cli/main.ts --doctor",
     "agent:vscode:package": "node scripts/install-vscode-extension.mjs --no-code-install --no-settings",

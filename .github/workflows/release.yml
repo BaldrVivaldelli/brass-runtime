@@ -102,7 +102,16 @@ jobs:
       - run: npm run build
       - run: npm run build:wasm
       - run: rm -f wasm/pkg/.gitignore
-
+      - name: Verify WASM files are packed
+        run: |
+          ls -la wasm/pkg
+          test -f wasm/pkg/brass_runtime_wasm_engine.js
+          test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
+          npm pack --json > pack.json
+          cat pack.json
+          tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine.js"
+          tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine_bg.wasm"
+          
       - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
