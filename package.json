@@ -29,7 +29,10 @@
   },
   "files": [
     "dist",
-    "wasm/pkg",
+    "wasm/pkg/brass_runtime_wasm_engine.js",
+    "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
+    "wasm/pkg/package.json",
+    "wasm/pkg/*.d.ts",
     "README.md",
     "LICENSE",
     "package.json"
