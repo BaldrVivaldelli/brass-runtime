@@ -89,7 +89,7 @@
     "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg"
   },
   "devDependencies": {
-    "@types/node": "^18.19.0",
+    "@types/node": "^22.15.0",
     "@vitest/coverage-v8": "^4.1.5",
     "conventional-changelog-conventionalcommits": "^9.3.1",
     "fast-check": "^4.7.0",
