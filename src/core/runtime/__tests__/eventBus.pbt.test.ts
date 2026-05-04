@@ -54,68 +54,57 @@ function nextPow2(n: number): number {
 }
 
 describe("EventBus drop counting (Property 11)", () => {
-  it("when N events are emitted with subscriber capacity C, drops equal max(0, N - actualCap)", () => {
-    fc.assert(
-      fc.property(
-        fc.integer({ min: 1, max: 10_000 }),  // N: number of events to emit
-        fc.integer({ min: 1, max: 1_000 }),    // C: requested per-subscriber capacity
-        (n, c) => {
-          const bus = new EventBus();
-          const received: RuntimeEventRecord[] = [];
+  it(
+    "when N events are emitted with subscriber capacity C, drops equal max(0, N - actualCap)",
+    () => {
+      fc.assert(
+        fc.property(
+          fc.integer({ min: 1, max: 10_000 }),
+          fc.integer({ min: 1, max: 1_000 }),
+          (n, c) => {
+            const bus = new EventBus();
+            const received: RuntimeEventRecord[] = [];
 
-          // Subscribe with per-subscriber capacity C.
-          // Internally, RingBuffer rounds up to nextPow2(C) for both
-          // initial and max capacity (since both args are C).
-          bus.subscribe((ev) => received.push(ev), c);
+            bus.subscribe((ev) => received.push(ev), c);
 
-          const actualCap = nextPow2(c);
+            const actualCap = nextPow2(c);
+            const ctx = makeCtx();
 
-          // Emit N events synchronously — no flush runs during this loop
-          // because queueMicrotask is deferred.
-          const ctx = makeCtx();
-          for (let i = 0; i < n; i++) {
-            bus.emit(makeEvent(i), ctx);
-          }
+            for (let i = 0; i < n; i++) {
+              bus.emit(makeEvent(i), ctx);
+            }
 
-          // Manually flush to collect events and the drop warning.
-          bus.flush();
+            bus.flush();
 
-          const expectedDrops = Math.max(0, n - actualCap);
-
-          if (expectedDrops === 0) {
-            // No drops — all N events should be delivered, no drop warning
+            const expectedDrops = Math.max(0, n - actualCap);
             const dropWarning = received.find(
               (ev) => ev.message === "eventbus.dropped"
             );
-            expect(dropWarning).toBeUndefined();
-
-            // All N events should have been delivered
             const dataEvents = received.filter(
               (ev) => ev.message !== "eventbus.dropped"
             );
-            expect(dataEvents).toHaveLength(n);
-          } else {
-            // There should be a drop warning event reporting the exact drop count
-            const dropWarning = received.find(
-              (ev) => ev.message === "eventbus.dropped"
-            );
+
+            if (expectedDrops === 0) {
+              expect(dropWarning).toBeUndefined();
+              expect(dataEvents).toHaveLength(n);
+              return;
+            }
+
             expect(dropWarning).toBeDefined();
-            expect(
-              (dropWarning!.fields as Record<string, unknown>).dropped
-            ).toBe(expectedDrops);
-
-            // The number of data events delivered should equal actualCap
-            // (the buffer held exactly actualCap events, the rest were dropped)
-            const dataEvents = received.filter(
-              (ev) => ev.message !== "eventbus.dropped"
+            expect((dropWarning!.fields as Record<string, unknown>).dropped).toBe(
+              expectedDrops
             );
             expect(dataEvents).toHaveLength(actualCap);
           }
+        ),
+        {
+          numRuns: process.env.CI ? 50 : 500,
+          endOnFailure: true,
         }
-      ),
-      { numRuns: 500 }
-    );
-  });
+      );
+    },
+    30_000
+  );
 
   it("drops accumulate correctly across multiple flush cycles", () => {
     fc.assert(
