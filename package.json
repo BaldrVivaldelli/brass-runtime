@@ -23,10 +23,13 @@
       "import": "./dist/agent/index.js",
       "require": "./dist/agent/index.cjs"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./wasm/pkg/brass_runtime_wasm_engine.js": "./wasm/pkg/brass_runtime_wasm_engine.js",
+    "./wasm/pkg/brass_runtime_wasm_engine_bg.wasm": "./wasm/pkg/brass_runtime_wasm_engine_bg.wasm"
   },
   "files": [
     "dist",
+    "wasm/pkg",
     "README.md",
     "LICENSE",
     "package.json"
@@ -50,12 +53,18 @@
   "scripts": {
     "dev": "tsx src/examples/index.ts",
     "clean": "rimraf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:types": "tsc -p tsconfig.json --noEmit",
+    "check": "npm run test:types && npm run test && npm run test:coverage",
+    "check:full": "npm run clean && npm run build && npm run test",
     "build": "tsup",
     "build:legacy": "npm run clean && npm run build:types && npm run build:esm && npm run build:cjs",
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
-    "prepublishOnly": "npm run build",
+    "prepublishOnly": "npm run build:wasm && npm run build",
     "agent:dev": "tsx src/agent/cli/main.ts",
     "agent:doctor": "tsx src/agent/cli/main.ts --doctor",
     "agent:vscode:package": "node scripts/install-vscode-extension.mjs --no-code-install --no-settings",
@@ -73,23 +82,22 @@
     "agent:vscode:install:global": "npm run agent:link && node scripts/install-vscode-extension.mjs --use-global-command --no-root-build",
     "agent:vscode:bundle": "npm run build && node scripts/prepare-vscode-bundle.mjs",
     "agent:vscode:uninstall:global": "npm run agent:vscode:clean && npm run agent:unlink",
-    "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global"
+    "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global",
+    "benchmark": "tsx src/benchmarks/runner.ts",
+    "benchmark:json": "tsx src/benchmarks/runner.ts --json",
+    "test:coverage:html": "vitest run --coverage --reporter=default",
+    "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg"
   },
   "devDependencies": {
-    "@semantic-release/changelog": "^6.0.0",
-    "@semantic-release/commit-analyzer": "^13.0.0",
-    "@semantic-release/git": "^10.0.0",
-    "@semantic-release/github": "^11.0.0",
-    "@semantic-release/npm": "^13.1.3",
-    "@semantic-release/release-notes-generator": "^14.0.0",
-    "@types/node": "^25.6.0",
-    "conventional-changelog-conventionalcommits": "^7.x.x",
+    "@types/node": "^18.19.0",
+    "@vitest/coverage-v8": "^4.1.5",
+    "conventional-changelog-conventionalcommits": "^9.3.1",
+    "fast-check": "^4.7.0",
     "rimraf": "^6.1.2",
-    "semantic-release": "^25.0.2",
-    "ts-node-dev": "^2.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.21.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.5"
   },
   "repository": {
     "type": "git",

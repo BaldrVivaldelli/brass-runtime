@@ -1,0 +1,234 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import {
+  decorate,
+  makeHttp,
+  makeHttpStream,
+  normalizeHeadersInit,
+  withMiddleware,
+} from "../client";
+import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse, HttpWireResponseStream } from "../client";
+import { httpClient, httpClientStream, httpClientWithMeta } from "../httpClient";
+import { Lens } from "../optics/lens";
+import { atKey } from "../optics/record";
+import {
+  mergeHeaders,
+  mergeHeadersUnder,
+  removeHeader,
+  Request,
+  setHeader,
+  setHeaderIfMissing,
+} from "../optics/request";
+import { withRetry } from "../retry/retry";
+import { sleepMs } from "../sleep";
+import { Runtime } from "../../core/runtime/runtime";
+import { collectStream } from "../../core/stream/stream";
+import { asyncFail, asyncSucceed } from "../../core/types/asyncEffect";
+
+const rt = Runtime.make({});
+const run = <A>(eff: any) => rt.toPromise(eff) as Promise<A>;
+
+const jsonResponse = (body: unknown, init?: ResponseInit) =>
+  new Response(JSON.stringify(body), {
+    status: init?.status ?? 200,
+    statusText: init?.statusText ?? "OK",
+    headers: { "content-type": "application/json", ...(init?.headers as Record<string, string> | undefined) },
+  });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("HTTP optics and header normalization", () => {
+  it("normalizes Headers, tuples, records and empty values", () => {
+    expect(normalizeHeadersInit(undefined)).toBeUndefined();
+    expect(normalizeHeadersInit(null)).toBeUndefined();
+    expect(normalizeHeadersInit("bad")).toBeUndefined();
+    expect(normalizeHeadersInit(new Headers({ a: "1" }))).toEqual({ a: "1" });
+    expect(normalizeHeadersInit([["b", "2"]])).toEqual({ b: "2" });
+    expect(normalizeHeadersInit({ c: "3" })).toEqual({ c: "3" });
+  });
+
+  it("updates request headers through lenses", () => {
+    const req: HttpRequest = { method: "GET", url: "/x", headers: { keep: "1" } };
+
+    expect(Request.headers.get({ method: "GET", url: "/x" })).toEqual({});
+    expect(setHeader("a", "b")(req).headers).toEqual({ keep: "1", a: "b" });
+    expect(removeHeader("keep")(req).headers).toEqual({});
+    expect(mergeHeaders({ a: "2" })(req).headers).toEqual({ keep: "1", a: "2" });
+    expect(mergeHeadersUnder({ keep: "0", under: "u" })(req).headers).toEqual({ keep: "1", under: "u" });
+    expect(setHeaderIfMissing("keep", "9")(req).headers).toEqual({ keep: "1" });
+    expect(setHeaderIfMissing("missing", "9")(req).headers).toEqual({ keep: "1", missing: "9" });
+  });
+
+  it("record and generic lenses get, set and over", () => {
+    const lens = atKey("n");
+    expect(lens.get({ n: "1" })).toBe("1");
+    expect(lens.set("2")({ n: "1", x: "3" })).toEqual({ n: "2", x: "3" });
+    expect(Lens.over(lens, (n) => `${n ?? "0"}!`)({})).toEqual({ n: "0!" });
+  });
+});
+
+describe("makeHttp and decorators", () => {
+  it("performs a request with baseUrl, defaults, init headers and explicit headers", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse({ ok: true }, { headers: { server: "test" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeHttp({ baseUrl: "https://example.test/api/", headers: { token: "default", keep: "default" } });
+    const res = await run<HttpWireResponse>(client({
+      method: "POST",
+      url: "users",
+      headers: { token: "explicit" },
+      body: "payload",
+      init: { headers: new Headers({ initOnly: "yes", keep: "init" }) } as any,
+    }));
+
+    expect(res.status).toBe(200);
+    expect(res.bodyText).toBe(JSON.stringify({ ok: true }));
+    expect(res.headers).toMatchObject({ server: "test" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    const [input, init] = fetchMock.mock.calls[0];
+    expect(String(input)).toBe("https://example.test/api/users");
+    expect(init).toMatchObject({ method: "POST", body: "payload" });
+    // Headers normalizes names to lowercase. HTTP header names are
+    // case-insensitive, so the wire shape intentionally preserves that
+    // normalized representation instead of the original camelCase key.
+    expect(init?.headers).toMatchObject({ token: "explicit", keep: "default", initonly: "yes" });
+  });
+
+  it("maps invalid urls and fetch errors into HttpError", async () => {
+    const client = makeHttp({ baseUrl: "%%%" });
+    await expect(run(client({ method: "GET", url: "%%%" }))).rejects.toMatchObject({ _tag: "BadUrl" });
+
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network"); }));
+    const client2 = makeHttp({ baseUrl: "https://example.test" });
+    await expect(run(client2({ method: "GET", url: "/x" }))).rejects.toMatchObject({ _tag: "FetchError", message: "Error: network" });
+  });
+
+  it("decorates clients and composes middleware", async () => {
+    const base: HttpClientFn = (req) => asyncSucceed({ status: 200, statusText: "OK", headers: {}, bodyText: req.url, ms: 1 });
+    const client = decorate(base);
+    const mw = (next: HttpClientFn): HttpClientFn => (req) => next({ ...req, url: `${req.url}?mw=1` });
+
+    await expect(run(client.with(mw)({ method: "GET", url: "/a" }))).resolves.toMatchObject({ bodyText: "/a?mw=1" });
+    await expect(run(withMiddleware(mw)(client)({ method: "GET", url: "/b" }))).resolves.toMatchObject({ bodyText: "/b?mw=1" });
+  });
+});
+
+describe("retry middleware", () => {
+  it("retries retryable status codes and then succeeds", async () => {
+    const calls: number[] = [];
+    const next: HttpClientFn = () => {
+      calls.push(Date.now());
+      return asyncSucceed(calls.length === 1
+        ? { status: 503, statusText: "Unavailable", headers: {}, bodyText: "no", ms: 1 }
+        : { status: 200, statusText: "OK", headers: {}, bodyText: "ok", ms: 1 });
+    };
+
+    const retried = withRetry({ maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0 })(next);
+    await expect(run(retried({ method: "GET", url: "/retry" }))).resolves.toMatchObject({ status: 200, bodyText: "ok" });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not retry non-retryable methods, Abort or BadUrl", async () => {
+    const nextStatus: HttpClientFn = vi.fn(() => asyncSucceed({ status: 503, statusText: "Unavailable", headers: {}, bodyText: "no", ms: 1 }));
+    const retriedStatus = withRetry({ maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0 })(nextStatus);
+    await expect(run(retriedStatus({ method: "POST", url: "/no" }))).resolves.toMatchObject({ status: 503 });
+    expect(nextStatus).toHaveBeenCalledTimes(1);
+
+    const nextAbort: HttpClientFn = vi.fn(() => asyncFail({ _tag: "Abort" } satisfies HttpError));
+    const retriedAbort = withRetry({ maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0 })(nextAbort);
+    await expect(run(retriedAbort({ method: "GET", url: "/abort" }))).rejects.toEqual({ _tag: "Abort" });
+    expect(nextAbort).toHaveBeenCalledTimes(1);
+  });
+
+  it("respects retry-after headers", async () => {
+    const next: HttpClientFn = vi.fn(() => asyncSucceed({ status: 429, statusText: "Too Many", headers: { "Retry-After": "0" }, bodyText: "wait", ms: 1 }));
+    const retried = withRetry({ maxRetries: 1, baseDelayMs: 10, maxDelayMs: 10 })(next);
+    await expect(run(retried({ method: "GET", url: "/ra" }))).resolves.toMatchObject({ status: 429 });
+    expect(next).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("DX http clients", () => {
+  it("httpClient parses text/json and applies JSON headers", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "POST") return jsonResponse({ created: true });
+      return new Response(String(_input).endsWith("/text") ? "hello" : JSON.stringify({ value: 1 }), { status: 200, statusText: "OK" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = httpClient({ baseUrl: "https://example.test" });
+
+    await expect(client.getText("/text").unsafeRunPromise()).resolves.toMatchObject({ body: "hello", status: 200 });
+    await expect(client.getJson<{ value: number }>("/json").unsafeRunPromise()).resolves.toMatchObject({ body: { value: 1 } });
+    await expect(client.postJson<{ created: boolean }>("/json", { x: 1 }).unsafeRunPromise()).resolves.toMatchObject({ body: { created: true } });
+
+    const postCall = fetchMock.mock.calls.find((call: any[]) => call[1]?.method === "POST");
+    expect(postCall?.[1]?.headers).toMatchObject({ accept: "application/json", "content-type": "application/json" });
+  });
+
+  it("httpClient with middleware and retry keeps the fluent API", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200, statusText: "OK" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = httpClient({ baseUrl: "https://example.test" })
+      .with((next) => (req) => next(setHeader("x-mw", "1")(req)))
+      .withRetry({ maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0 });
+
+    await expect(client.get("/x").unsafeRunPromise()).resolves.toMatchObject({ status: 200 });
+    expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ "x-mw": "1" });
+  });
+
+  it("httpClientWithMeta returns metadata and resolved final url", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
+    const client = httpClientWithMeta({ baseUrl: "https://example.test/root/" });
+
+    const text = await client.getText("child").unsafeRunPromise();
+    expect(text.response.body).toBe(JSON.stringify({ ok: true }));
+    expect(text.meta.urlFinal).toBe("https://example.test/root/child");
+    expect(text.meta.durationMs).toBeTypeOf("number");
+
+    const json = await client.getJson<{ ok: boolean }>("child").unsafeRunPromise();
+    expect(json.response.body).toEqual({ ok: true });
+
+    const post = await client.postJson<{ ok: boolean }>("child", { x: 1 }).unsafeRunPromise();
+    expect(post.response.body).toEqual({ ok: true });
+  });
+});
+
+describe("HTTP streaming and sleep", () => {
+  it("makeHttpStream exposes the response body as a stream", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([1, 2, 3]), { status: 201, statusText: "Created" })));
+    const streamClient = makeHttpStream({ baseUrl: "https://example.test" });
+    const response = await run<HttpWireResponseStream>(streamClient({ method: "GET", url: "/bytes" }));
+    const chunks = await run<Uint8Array[]>(collectStream(response.body));
+
+    expect(response.status).toBe(201);
+    expect(Array.from(chunks[0])).toEqual([1, 2, 3]);
+  });
+
+  it("httpClientStream supports middleware, retry and default get alias", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([4]), { status: 200, statusText: "OK" })));
+    const client = httpClientStream({ baseUrl: "https://example.test" })
+      .with((next) => (req) => next(setHeader("x-stream", "1")(req)))
+      .withRetry({ maxRetries: 0, baseDelayMs: 0, maxDelayMs: 0 });
+
+    const response = await client.get("/s").unsafeRunPromise();
+    const chunks = await run<Uint8Array[]>(collectStream(response.body));
+    expect(Array.from(chunks[0])).toEqual([4]);
+  });
+
+  it("sleepMs resolves and maps interruption to Abort", async () => {
+    await expect(run(sleepMs(0))).resolves.toBeUndefined();
+
+    const fiber = rt.fork(sleepMs(50));
+    fiber.interrupt();
+    await new Promise<void>((resolve) => fiber.join((exit) => {
+      expect(exit._tag).toBe("Failure");
+      expect(exit._tag === "Failure" ? exit.cause._tag : "").toBe("Interrupt");
+      resolve();
+    }));
+  });
+});

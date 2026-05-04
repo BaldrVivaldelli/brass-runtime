@@ -55,4 +55,14 @@ export type RuntimeEventRecord = RuntimeEvent &
     seq: number;
     wallTs: number; // Date.now()
     ts: number; // performance.now() si querés monotónico
+
+    /**
+     * Convenience fields for generic event consumers. They are present for
+     * log events and absent for fiber/scope events, but keeping them optional
+     * lets subscribers inspect records without narrowing the RuntimeEvent
+     * union first.
+     */
+    level?: "debug" | "info" | "warn" | "error";
+    message?: string;
+    fields?: Record<string, unknown>;
   };

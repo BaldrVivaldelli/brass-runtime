@@ -1,4 +1,5 @@
-import { PushStatus, RingBuffer } from "./ringBuffer";
+import { PushStatus } from "./ringBuffer";
+import { makeBoundedRingBuffer, type BoundedRingBuffer, type RingBufferOptions } from "./boundedRingBuffer";
 import type { RuntimeEmitContext, RuntimeEvent, RuntimeEventRecord, RuntimeHooks } from "./events";
 
 export type EventHandler = (ev: RuntimeEventRecord) => void;
@@ -6,16 +7,25 @@ export type EventHandler = (ev: RuntimeEventRecord) => void;
 type Subscriber = {
   handler: EventHandler;
   // cola por subscriber (para aislar sinks lentos)
-  q: RingBuffer<RuntimeEventRecord>;
+  q: BoundedRingBuffer<RuntimeEventRecord>;
   dropped: number;
 };
+
+export type EventBusOptions = RingBufferOptions;
 
 export class EventBus implements RuntimeHooks {
   private seq = 1;
   private subs: Subscriber[] = [];
   private flushScheduled = false;
+  private readonly boundFlush = () => this.flush();
+
+  constructor(private readonly options: EventBusOptions = {}) {}
 
   emit(ev: RuntimeEvent, ctx: RuntimeEmitContext) {
+    // 2.2.1: early return — zero-cost cuando no hay suscriptores
+    if (this.subs.length === 0) return;
+
+    // 2.2.2: construir RuntimeEventRecord solo si hay suscriptores
     const full: RuntimeEventRecord = {
       ...ev,
       ...ctx,
@@ -29,17 +39,17 @@ export class EventBus implements RuntimeHooks {
       if (st & PushStatus.Dropped) s.dropped++;
     }
 
-    // drenar asap (microtask) sin bloquear emit
+    // 2.2.3: usar boundFlush cacheado en lugar de crear closure nuevo
     if (!this.flushScheduled) {
       this.flushScheduled = true;
-      queueMicrotask(() => this.flush());
+      queueMicrotask(this.boundFlush);
     }
   }
 
   subscribe(handler: EventHandler, perSubscriberCapacity = 2048) {
     this.subs.push({
       handler,
-      q: new RingBuffer<RuntimeEventRecord>(perSubscriberCapacity, perSubscriberCapacity),
+      q: makeBoundedRingBuffer<RuntimeEventRecord>(perSubscriberCapacity, perSubscriberCapacity, this.options),
       dropped: 0,
     });
 

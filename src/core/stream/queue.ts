@@ -2,7 +2,7 @@
 import { async, Async, asyncSync } from "../types/asyncEffect";
 import { Exit } from "../types/effect";
 import { Canceler } from "../types/cancel";
-import {RingBuffer} from "../runtime/ringBuffer";
+import { makeBoundedRingBuffer, RingBufferOptions } from "../runtime/boundedRingBuffer";
 import {LinkedQueue} from "../runtime/linkedQueue";
 
 export type Strategy = "backpressure" | "dropping" | "sliding";
@@ -16,15 +16,18 @@ export type Queue<A> = {
     shutdown: () => void;
 };
 
+export type QueueOptions = RingBufferOptions;
+
 export function bounded<A>(
     capacity: number,
-    strategy: Strategy = "backpressure"
+    strategy: Strategy = "backpressure",
+    options: QueueOptions = {}
 ): Async<unknown, unknown, Queue<A>> {
-    return asyncSync(() => makeQueue<A>(capacity, strategy));
+    return asyncSync(() => makeQueue<A>(capacity, strategy, options));
 }
 
-function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
-    const items = new RingBuffer<A>(capacity);
+function makeQueue<A>(capacity: number, strategy: Strategy, options: QueueOptions): Queue<A> {
+    const items = makeBoundedRingBuffer<A>(capacity, capacity, options);
     let closed = false;
 
     const QueueClosedErr: QueueClosed = { _tag: "QueueClosed" };
@@ -34,30 +37,6 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
 
     const offerWaiters = new LinkedQueue<OfferWaiter>();
     const takers = new LinkedQueue<Taker>();
-
-    const flush = () => {
-        // 1) entregar items a takers
-        while (takers.length > 0 && items.length > 0) {
-            const t = takers.shift()!;
-            const a = items.shift()!;
-            t({ _tag: "Success", value: a });
-        }
-
-        // 2) si hay espacio, meter offers esperando (solo si no hay takers esperando)
-        while (offerWaiters.length > 0 && items.length < capacity && takers.length === 0) {
-            const w = offerWaiters.shift()!;
-            items.push(w.a);
-            w.cb(true);
-        }
-
-        // 3) emparejar takers con offerWaiters directo (sin tocar items)
-        while (takers.length > 0 && offerWaiters.length > 0) {
-            const t = takers.shift()!;
-            const w = offerWaiters.shift()!;
-            w.cb(true);
-            t({ _tag: "Success", value: w.a });
-        }
-    };
 
     const shutdown = () => {
         if (closed) return;
@@ -102,7 +81,8 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
                 if (items.length < capacity) {
                     items.push(a);
                     cb({ _tag: "Success", value: true });
-                    flush();
+                    // No flush needed: takers.length === 0 (checked above),
+                    // so flush would be a no-op.
                     return;
                 }
 
@@ -117,7 +97,8 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
                     items.shift(); // O(1) amortizado en RingBuffer
                     items.push(a);
                     cb({ _tag: "Success", value: true });
-                    flush();
+                    // No flush needed: takers.length === 0 (checked above),
+                    // and buffer occupancy is unchanged (shift+push).
                     return;
                 }
 
@@ -138,7 +119,16 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
                 if (items.length > 0) {
                     const a = items.shift()!;
                     cb({ _tag: "Success", value: a });
-                    flush();
+                    // After shifting one item, at most one backpressure-suspended
+                    // offerer can fill the freed slot.  A full flush() is
+                    // unnecessary because takers.length === 0 at this point
+                    // (the current taker was already served via cb above),
+                    // making flush steps 1 and 3 no-ops.
+                    if (offerWaiters.length > 0 && items.length < capacity) {
+                        const w = offerWaiters.shift()!;
+                        items.push(w.a);
+                        w.cb(true);
+                    }
                     return;
                 }
 
@@ -155,9 +145,8 @@ function makeQueue<A>(capacity: number, strategy: Strategy): Queue<A> {
                     return;
                 }
 
-                // suspender taker
-                const taker: Taker = (exit) => cb(exit);
-                const node = takers.push(taker);
+                // suspender taker — use cb directly to avoid an extra closure allocation
+                const node = takers.push(cb);
 
                 const canceler: Canceler = () => {
                     takers.remove(node);

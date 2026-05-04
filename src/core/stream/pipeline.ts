@@ -17,6 +17,7 @@ import {
 import { none, Option, some } from "../types/option";
 import {emptyStream, fromPull, uncons, widenOpt, ZStream} from "./stream";
 import { buffer as bufferStream } from "./buffer";
+import { chunks as chunksStream, mapChunksEffect, StreamChunkOptions } from "./chunks";
 
 /**
  * ZPipeline-style transformer.
@@ -62,13 +63,15 @@ export function identity<A>(): ZPipeline<unknown, never, A, A> {
 /** Map elements. */
 export function mapP<A, B>(f: (a: A) => B): ZPipeline<unknown, never, A, B> {
     return (<R, E>(input: ZStream<R, E, A>) => {
+        // Hoist both handlers outside the loop — reused across all pulls
+        // instead of creating new closures per element.
+        const onError = (opt: Option<E>) => asyncFail(opt);
+        const onSuccess = ([a, tail]: [A, ZStream<R, E, A>]) =>
+            asyncSucceed([f(a), loop(tail)] as const);
+
         const loop = (cur: ZStream<R, E, A>): ZStream<R, E, B> =>
             fromPull(
-                asyncFold(
-                    uncons(cur),
-                    (opt: Option<E>) => asyncFail(opt),
-                    ([a, tail]) => asyncSucceed([f(a), loop(tail)] as const)
-                ) as any
+                asyncFold(uncons(cur), onError, onSuccess) as any
             );
 
         return loop(input);
@@ -78,12 +81,14 @@ export function mapP<A, B>(f: (a: A) => B): ZPipeline<unknown, never, A, B> {
 /** Filter elements, preserving end/error. */
 export function filterP<A>(pred: (a: A) => boolean): ZPipeline<unknown, never, A, A> {
     return (<R, E>(input: ZStream<R, E, A>) => {
+        // Hoist both handlers outside the loop — reused across all pulls
+        // instead of creating new closures per element.
+        const onError = (opt: Option<E>) => asyncFail(opt);
+        const onSuccess = ([a, tail]: [A, ZStream<R, E, A>]) =>
+            pred(a) ? asyncSucceed([a, loop(tail)] as const) : next(tail);
+
         const next = (cur: ZStream<R, E, A>): Async<R, Option<E>, [A, ZStream<R, E, A>]> =>
-            asyncFold(
-                uncons(cur),
-                (opt: Option<E>) => asyncFail(opt),
-                ([a, tail]) => (pred(a) ? asyncSucceed([a, loop(tail)] as const) : next(tail))
-            ) as any;
+            asyncFold(uncons(cur), onError, onSuccess) as any;
 
         const loop = (cur: ZStream<R, E, A>): ZStream<R, E, A> => fromPull(next(cur) as any);
 
@@ -97,10 +102,14 @@ export function filterP<A>(pred: (a: A) => boolean): ZPipeline<unknown, never, A
  */
 export function filterMapP<A, B>(f: (a: A) => Option<B>): ZPipeline<unknown, never, A, B> {
     return (<R, E>(input: ZStream<R, E, A>) => {
+        // Hoist error handler outside the loop — reused across all pulls
+        // instead of creating a new closure per element.
+        const onError = (opt: Option<E>) => asyncFail(opt);
+
         const next = (cur: ZStream<R, E, A>): Async<R, Option<E>, [B, ZStream<R, E, B>]> =>
             asyncFold(
                 uncons(cur),
-                (opt: Option<E>) => asyncFail(opt),
+                onError,
                 ([a, tail]) => {
                     const ob = f(a);
                     return ob._tag === "Some"
@@ -204,6 +213,25 @@ export function tapEffectP<Rp, Ep, A>(
     f: (a: A) => Async<Rp, Ep, any>
 ): ZPipeline<Rp, Ep, A, A> {
     return mapEffectP<Rp, Ep, A, A>((a) => asyncFlatMap(f(a) as any, () => asyncSucceed(a)) as any);
+}
+
+
+
+/** Re-chunk a stream into arrays of up to `chunkSize` elements. */
+export function chunksP<A>(
+    chunkSize: number,
+    options: StreamChunkOptions = {}
+): ZPipeline<unknown, never, A, readonly A[]> {
+    return (<R, E>(input: ZStream<R, E, A>) => chunksStream(input, chunkSize, options)) as any;
+}
+
+/** Apply one effect per chunk and flatten the returned chunk back to elements. */
+export function mapChunksEffectP<Rp, Ep, A, B>(
+    chunkSize: number,
+    f: (chunk: readonly A[]) => Async<Rp, Ep, readonly B[]>,
+    options: StreamChunkOptions = {}
+): ZPipeline<Rp, Ep, A, B> {
+    return mapChunksEffect(chunkSize, f, options) as any;
 }
 
 /** Buffer upstream using your existing queue-based buffer implementation. */

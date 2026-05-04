@@ -117,9 +117,14 @@ export const mergeStream = <R, E, A>(
     flip,
 });
 
-export const emptyStream = <R, E, A>(): ZStream<R, E, A> => ({
-    _tag: "Empty",
-});
+/**
+ * Singleton empty stream — avoids creating a new `{ _tag: "Empty" }` object
+ * on every call to `emptyStream()` or `uncons` for the Emit case.
+ */
+const EMPTY_STREAM: ZStream<any, any, any> = { _tag: "Empty" };
+
+export const emptyStream = <R, E, A>(): ZStream<R, E, A> =>
+    EMPTY_STREAM as ZStream<R, E, A>;
 
 export const emitStream = <R, E, A>(value: ZIO<R, E, A>): ZStream<R, E, A> => ({
     _tag: "Emit",
@@ -200,25 +205,35 @@ function streamToRaceWithHandler<R, E, A>(
     };
 }
 
+/**
+ * makeMergePull — creates a pull that races left and right streams.
+ *
+ * Scope reuse note: each raceWith call needs its own sub-scope because the
+ * losing fiber must be interrupted via scope.close(). The next iteration
+ * creates a fresh scope for its new pair of fibers. Reusing a closed scope
+ * would break structured concurrency semantics (LIFO finalizer ordering,
+ * child interruption guarantees). Instead we apply micro-optimizations:
+ * - Build handler functions once per pull (not per iteration)
+ * - Inline the scope.close + cb callback to avoid extra closure allocation
+ */
 function makeMergePull<R, E, A>(
     onLeft: ZStream<R, E, A>,
     onRight: ZStream<R, E, A>,
     flip: boolean,
     mergePullId: number
 ): Async<R, Option<E>, [A, ZStream<R, E, A>]> {
-    return async((env, cb) => {
-        const id = ++mergePullId;
-        const runtime = unsafeGetCurrentRuntime<R>()
+    // Build handlers once for this pull invocation
+    const id = ++mergePullId;
+    const onLeftHandler = streamToRaceWithHandler("L", onLeft, onRight, flip, id);
+    const onRightHandler = streamToRaceWithHandler("R", onLeft, onRight, flip, id);
+
+    return async((_env, cb) => {
+        const runtime = unsafeGetCurrentRuntime<R>();
         const scope = new Scope(runtime);
 
-        const leftPull = uncons(onLeft);
-        const rightPull = uncons(onRight);
-
-        const onLeftHandler = streamToRaceWithHandler("L", onLeft, onRight, flip, id);
-        const onRightHandler = streamToRaceWithHandler("R", onLeft, onRight, flip, id);
         const handler = raceWith(
-            leftPull,
-            rightPull,
+            uncons(onLeft),
+            uncons(onRight),
             scope,
             onLeftHandler,
             onRightHandler
@@ -250,7 +265,7 @@ export function uncons<R, E, A>(
         case "Emit":
             return map(
                 mapError<R, E, Option<E>, A>(self.value, (e) => some<E>(e)),
-                (a: A): [A, ZStream<R, E, A>] => [a, emptyStream<R, E, A>()]
+                (a: A): [A, ZStream<R, E, A>] => [a, EMPTY_STREAM as ZStream<R, E, A>]
             );
 
         case "FromPull":
