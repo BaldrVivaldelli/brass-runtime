@@ -29,10 +29,7 @@
   },
   "files": [
     "dist",
-    "wasm/pkg/brass_runtime_wasm_engine.js",
-    "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
-    "wasm/pkg/package.json",
-    "wasm/pkg/*.d.ts",
+    "wasm/pkg",
     "README.md",
     "LICENSE",
     "package.json"
@@ -67,6 +64,7 @@
     "build:types": "tsc -p tsconfig.types.json",
     "build:esm": "tsc -p tsconfig.esm.json",
     "build:cjs": "tsc -p tsconfig.cjs.json",
+    "prepack": "npm run build:wasm && npm run build",
     "prepublishOnly": "npm run build:wasm && npm run build",
     "agent:dev": "tsx src/agent/cli/main.ts",
     "agent:doctor": "tsx src/agent/cli/main.ts --doctor",
