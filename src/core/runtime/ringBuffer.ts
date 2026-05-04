@@ -15,10 +15,27 @@ export class RingBuffer<T> {
     private readonly maxCap: number;
 
     constructor(initialCapacity: number = 1024, maxCapacity: number = initialCapacity) {
-        const init = Math.max(2, this.nextPow2(initialCapacity));
-        const max = Math.max(init, this.nextPow2(maxCapacity));
-        this.buf = new Array<T | undefined>(init);
-        this.maxCap = max;
+        // Inline nextPow2: operaciones de bits directas en lugar de método separado
+        let initPow = Math.max(2, initialCapacity);
+        initPow--;
+        initPow |= initPow >>> 1;
+        initPow |= initPow >>> 2;
+        initPow |= initPow >>> 4;
+        initPow |= initPow >>> 8;
+        initPow |= initPow >>> 16;
+        initPow++;
+
+        let maxPow = Math.max(initPow, maxCapacity);
+        maxPow--;
+        maxPow |= maxPow >>> 1;
+        maxPow |= maxPow >>> 2;
+        maxPow |= maxPow >>> 4;
+        maxPow |= maxPow >>> 8;
+        maxPow |= maxPow >>> 16;
+        maxPow++;
+
+        this.buf = new Array<T | undefined>(initPow);
+        this.maxCap = maxPow;
     }
 
     get length(): number { return this.size_; }
@@ -55,7 +72,7 @@ export class RingBuffer<T> {
     }
 
     clear(): void {
-        this.buf.fill(undefined);
+        // No hacer buf.fill(undefined) - los valores se sobrescriben en push
         this.head = 0;
         this.tail = 0;
         this.size_ = 0;
@@ -73,11 +90,5 @@ export class RingBuffer<T> {
         this.buf = newBuf;
         this.head = 0;
         this.tail = this.size_;
-    }
-
-    private nextPow2(n: number): number {
-        let x = 1;
-        while (x < n) x <<= 1;
-        return x;
     }
 }

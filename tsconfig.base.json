@@ -4,7 +4,22 @@
     "strict": true,
     "skipLibCheck": true,
     "sourceMap": false,
-    "declarationMap": false
+    "declarationMap": false,
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
+    "types": ["node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "coverage",
+    "wasm/pkg",
+    "src/**/*.test.ts",
+    "src/**/*.pbt.test.ts",
+    "src/**/__tests__/**",
+    "src/benchmarks/**",
+    "src/**/bench/**",
+    "src/examples/**"
+  ]
 }

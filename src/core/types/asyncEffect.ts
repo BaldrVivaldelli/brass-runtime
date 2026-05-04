@@ -62,14 +62,22 @@ export function asyncMapError<R, E, E2, A>(
 }
 
 
-export const unit = <R>(): Async<R, never, void> =>
-    asyncSucceed<void>(undefined) as any;
+// Singletons for common Succeed values to reduce heap allocations
+const SUCCEED_UNDEFINED: Async<any, never, void> = { _tag: "Succeed", value: undefined };
+const SUCCEED_TRUE: Async<any, never, boolean> = { _tag: "Succeed", value: true };
+const SUCCEED_FALSE: Async<any, never, boolean> = { _tag: "Succeed", value: false };
+const SUCCEED_NULL: Async<any, never, null> = { _tag: "Succeed", value: null };
+
+export const unit = <R>(): Async<R, never, void> => SUCCEED_UNDEFINED as any;
 
 
-export const asyncSucceed = <A>(value: A): Async<unknown, never, A> => ({
-    _tag: "Succeed",
-    value,
-});
+export const asyncSucceed = <A>(value: A): Async<unknown, never, A> => {
+    if (value === undefined) return SUCCEED_UNDEFINED as any;
+    if (value === true) return SUCCEED_TRUE as any;
+    if (value === false) return SUCCEED_FALSE as any;
+    if (value === null) return SUCCEED_NULL as any;
+    return { _tag: "Succeed", value };
+};
 
 export const asyncFail = <E>(error: E): Async<unknown, E, never> => ({
     _tag: "Fail",

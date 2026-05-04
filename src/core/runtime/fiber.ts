@@ -42,7 +42,22 @@ export type Fiber<E, A> = {
 let nextId: FiberId = 1;
 
 // cuántos opcodes sync procesa
-const DEFAULT_BUDGET = 1024;
+const DEFAULT_BUDGET = 4096;
+
+/**
+ * Override for benchmarking purposes only.
+ * When set to a positive number, the fiber uses this value instead of DEFAULT_BUDGET.
+ * Call with `undefined` to reset after benchmarking.
+ */
+let __benchmarkBudget: number | undefined;
+
+export function setBenchmarkBudget(budget: number | undefined): void {
+  __benchmarkBudget = budget;
+}
+
+export function getBenchmarkBudget(): number | undefined {
+  return __benchmarkBudget;
+}
 
 // evita que un flatMap "left-associated" empuje N frames antes de correr
 function reassociateFlatMap<R, E, A>(cur: Async<R, E, A>): Async<R, E, A> {
@@ -100,10 +115,42 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     name?: string;
     scopeId?: number;
 
+    /**
+     * Cached closure for the scheduler callback — avoids creating a new
+     * closure on every `schedule()` call.  The tag parameter used by the
+     * scheduler is only part of the label string, not the callback logic,
+     * so a single cached closure is sufficient.
+     */
+    private readonly boundStep: () => void;
+
     constructor(runtime: Runtime<R>, effect: Async<R, E, A>) {
         this.id = nextId++;
         this.runtime = runtime;
         this.current = effect;
+
+        this.boundStep = () => {
+            withCurrentFiber(this, () => {
+                if (this.runState === RUN.DONE) return;
+                this.runState = RUN.RUNNING;
+
+                const decision = this.step();
+
+                switch (decision) {
+                    case STEP.CONTINUE:
+                        this.schedule("continue");
+                        return;
+
+                    case STEP.SUSPEND:
+                        this.runState = RUN.SUSPENDED;
+                        this.emit({ type: "fiber.suspend", fiberId: this.id });
+                        return;
+
+                    case STEP.DONE:
+                        this.runState = RUN.DONE;
+                        return;
+                }
+            });
+        };
     }
 
     // helpers para no tocar el resto del código
@@ -159,30 +206,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.runState = RUN.QUEUED;
 
         this.scheduler.schedule(
-            () => {
-                // 👇 CLAVE: setear current fiber mientras se ejecuta el step
-                withCurrentFiber(this, () => {
-                    if (this.runState === RUN.DONE) return;
-                    this.runState = RUN.RUNNING;
-
-                    const decision = this.step();
-
-                    switch (decision) {
-                        case STEP.CONTINUE:
-                            this.schedule("continue");
-                            return;
-
-                        case STEP.SUSPEND:
-                            this.runState = RUN.SUSPENDED;
-                            this.emit({ type: "fiber.suspend", fiberId: this.id });
-                            return;
-
-                        case STEP.DONE:
-                            this.runState = RUN.DONE;
-                            return;
-                    }
-                });
-            },
+            this.boundStep,
             `fiber#${this.id}.${tag}`
         );
     }
@@ -291,8 +315,8 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             return STEP.DONE;
         }
 
-        // budget cooperativo
-        this.budget = DEFAULT_BUDGET;
+        // budget cooperativo — use benchmark override if set
+        this.budget = __benchmarkBudget ?? DEFAULT_BUDGET;
 
         while (this.budget-- > 0) {
             this.current = reassociateFlatMap(this.current);
@@ -332,6 +356,9 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     }
 
                     let done = false;
+                    let asyncRegistered = false;
+                    let syncResolved = false;
+                    let syncExit: Exit<E, any> | null = null;
 
                     const cb = (exit: Exit<E, any>) => {
                         if (done) return;
@@ -339,6 +366,14 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
                         if (this.result != null || this.closing != null) return;
 
+                        // If we're still inside register(), mark as synchronous
+                        if (!asyncRegistered) {
+                            syncResolved = true;
+                            syncExit = exit;
+                            return;
+                        }
+
+                        // Async path (callback fired after register returned)
                         if (exit._tag === "Success") {
                             this.current = Async.succeed(exit.value);
                             this.schedule("async-resume");
@@ -363,7 +398,29 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     };
 
                     const canceler = current.register(this.env, cb);
+                    asyncRegistered = true;
 
+                    // Synchronous resolution: continue in the same step without re-enqueuing
+                    if (syncResolved && syncExit) {
+                        const resolvedExit = syncExit as Exit<E, any>;
+                        if (resolvedExit._tag === "Success") {
+                            this.onSuccess(resolvedExit.value);
+                        } else {
+                            const cause = resolvedExit.cause;
+
+                            if (cause._tag === "Interrupt") {
+                                this.notify(Exit.failCause(Cause.interrupt()));
+                            } else if (cause._tag === "Fail") {
+                                this.onFailure(cause.error);
+                            } else {
+                                // Die => defecto fatal
+                                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
+                            }
+                        }
+                        break; // continue the while loop
+                    }
+
+                    // Async path: register canceler as finalizer only when we actually suspend
                     if (typeof canceler === "function") {
                         this.addFinalizer(() => {
                             done = true;

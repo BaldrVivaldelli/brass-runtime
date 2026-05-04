@@ -42,14 +42,24 @@ export function makeHub<A>(
     const publish = (a: A): Async<unknown, never, boolean> => {
         if (closed) return asyncSucceed(false);
 
-        const snapshot = Array.from(queues);
+        const size = queues.size;
 
+        // Fast-path: no subscribers — nothing to do
+        if (size === 0) return asyncSucceed(true);
+
+        // Fast-path: single subscriber — avoid FlatMap chain entirely
+        if (size === 1) {
+            const q = queues.values().next().value!;
+            return q.offer(a);
+        }
+
+        // Multiple subscribers: iterate directly over the Set (no Array.from)
         let eff: Async<unknown, never, boolean> = asyncSucceed(true);
-        snapshot.forEach((q) => {
+        for (const q of queues) {
             eff = asyncFlatMap(eff, (okSoFar) =>
                 asyncFlatMap(q.offer(a), (ok) => asyncSucceed(okSoFar && ok))
             );
-        });
+        }
 
         return eff;
     };
@@ -104,7 +114,7 @@ export function makeHub<A>(
             if (closed) return;
             closed = true;
 
-            Array.from(queues).forEach((q) => q.shutdown());
+            for (const q of queues) q.shutdown();
 
             queues.clear();
         });

@@ -1,0 +1,152 @@
+{
+  "timestamp": "2026-05-01T01:30:11.764Z",
+  "platform": "linux-x64",
+  "nodeVersion": "v25.9.0",
+  "suites": [
+    {
+      "file": "flatmap-chain.bench.ts",
+      "results": [
+        {
+          "operation": "flatMap chain (1000 effects)",
+          "iterations": 1000,
+          "totalMs": 289.332,
+          "perOpMs": 0.289,
+          "percentiles": {
+            "p50": 0.237,
+            "p90": 0.43,
+            "p95": 0.541,
+            "p99": 0.704
+          }
+        }
+      ]
+    },
+    {
+      "file": "queue-throughput.bench.ts",
+      "results": [
+        {
+          "operation": "queue sequential offer+take (10,000 ops)",
+          "iterations": 100,
+          "totalMs": 1240.129,
+          "perOpMs": 12.401,
+          "percentiles": {
+            "p50": 11.632,
+            "p90": 15.915,
+            "p95": 16.861,
+            "p99": 20.037
+          }
+        },
+        {
+          "operation": "queue ping-pong offer/take (10,000 ops)",
+          "iterations": 100,
+          "totalMs": 1154.861,
+          "perOpMs": 11.549,
+          "percentiles": {
+            "p50": 11.081,
+            "p90": 13.458,
+            "p95": 14.183,
+            "p99": 15.377
+          }
+        },
+        {
+          "operation": "queue sliding (10,000 offers, capacity 64)",
+          "iterations": 100,
+          "totalMs": 592.203,
+          "perOpMs": 5.922,
+          "percentiles": {
+            "p50": 5.45,
+            "p90": 7.466,
+            "p95": 7.881,
+            "p99": 8.417
+          }
+        }
+      ]
+    },
+    {
+      "file": "scheduler-throughput.bench.ts",
+      "results": [
+        {
+          "operation": "scheduler sequential (100,000 tasks)",
+          "iterations": 50,
+          "totalMs": 64.738,
+          "perOpMs": 1.295,
+          "percentiles": {
+            "p50": 1.229,
+            "p90": 1.37,
+            "p95": 1.418,
+            "p99": 3.155
+          }
+        },
+        {
+          "operation": "scheduler fan-out (100 chains × 1,000 tasks)",
+          "iterations": 50,
+          "totalMs": 66.069,
+          "perOpMs": 1.321,
+          "percentiles": {
+            "p50": 1.311,
+            "p90": 1.358,
+            "p95": 1.405,
+            "p99": 1.503
+          }
+        }
+      ]
+    },
+    {
+      "file": "smoke.bench.ts",
+      "results": [
+        {
+          "operation": "smoke: 100 flatMap chain",
+          "iterations": 200,
+          "totalMs": 6.246,
+          "perOpMs": 0.031,
+          "percentiles": {
+            "p50": 0.029,
+            "p90": 0.043,
+            "p95": 0.045,
+            "p99": 0.055
+          }
+        }
+      ]
+    },
+    {
+      "file": "stream-pipeline.bench.ts",
+      "results": [
+        {
+          "operation": "stream map pipeline (10,000 elements)",
+          "iterations": 50,
+          "totalMs": 4521.202,
+          "perOpMs": 90.424,
+          "percentiles": {
+            "p50": 88.475,
+            "p90": 97.543,
+            "p95": 98.8,
+            "p99": 105.965
+          }
+        },
+        {
+          "operation": "stream filter pipeline (10,000 elements)",
+          "iterations": 50,
+          "totalMs": 1507.804,
+          "perOpMs": 30.156,
+          "percentiles": {
+            "p50": 29.977,
+            "p90": 32.025,
+            "p95": 32.875,
+            "p99": 33.478
+          }
+        },
+        {
+          "operation": "stream map+filter pipeline (10,000 elements)",
+          "iterations": 50,
+          "totalMs": 957.203,
+          "perOpMs": 19.144,
+          "percentiles": {
+            "p50": 18.816,
+            "p90": 20.334,
+            "p95": 23.279,
+            "p99": 25.026
+          }
+        }
+      ]
+    }
+  ]
+}

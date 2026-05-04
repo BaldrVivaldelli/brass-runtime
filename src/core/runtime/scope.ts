@@ -40,12 +40,14 @@ class Scope<R> {
 
         const inferredParent = this.parentScopeId ?? (getCurrentFiber() as any)?.scopeId;
 
-        // ✅ scope.open
-        this.runtime.emit({
-            type: "scope.open",
-            scopeId: this.id,
-            parentScopeId: inferredParent,
-        });
+        // ✅ scope.open — skip event object construction when no hooks are active
+        if (this.runtime.hasActiveHooks()) {
+            this.runtime.emit({
+                type: "scope.open",
+                scopeId: this.id,
+                parentScopeId: inferredParent,
+            });
+        }
     }
 
     /** registra un finalizer (LIFO) */
@@ -81,6 +83,72 @@ class Scope<R> {
         this.runtime.fork(this.closeAsync(exit));
     }
 
+    /** Emit the scope.close event if hooks are active. */
+    private emitCloseEvent(exit: Exit<any, any>): void {
+        if (this.runtime.hasActiveHooks()) {
+            const status =
+                exit._tag === "Success"
+                    ? "success"
+                    : exit.cause._tag === "Interrupt"
+                        ? "interrupted"
+                        : "failure";
+
+            this.runtime.emit({
+                type: "scope.close",
+                scopeId: this.id,
+                status,
+                error: exit._tag === "Failure" && exit.cause._tag === "Fail" ? (exit.cause as any).error : undefined,
+            });
+        }
+    }
+
+    /**
+     * Build an effect that executes finalizers in LIFO order.
+     *
+     * Optimization over the original: instead of wrapping every finalizer in
+     * `asyncFold(fin(exit), () => unit(), () => unit())` which creates 3 effect
+     * nodes per finalizer (Fold + 2 Succeed), we use a single Sync thunk per
+     * finalizer that catches errors inline.  When the finalizer returns a
+     * Succeed effect (like `unit()`), the Sync thunk completes without creating
+     * additional effect nodes.
+     */
+    private buildFinalizerEffect(exit: Exit<any, any>): Async<R, any, void> {
+        const fins = this.finalizers;
+        if (fins.length === 0) return unit<R>() as any;
+
+        // Build the chain in LIFO order (last added → first executed).
+        let chain: Async<R, any, void> = unit<R>() as any;
+
+        for (let i = fins.length - 1; i >= 0; i--) {
+            const fin = fins[i];
+
+            chain = asyncFlatMap(chain, () => {
+                let result: Async<R, any, any>;
+                try {
+                    result = fin(exit);
+                } catch {
+                    // best-effort: never crash the runtime because of a finalizer
+                    return unit<R>() as any;
+                }
+
+                // Fast-path: if the finalizer returned a Succeed effect (e.g. unit()),
+                // skip the asyncFold wrapper entirely — no Fold node needed.
+                if (result._tag === "Succeed") {
+                    return unit<R>() as any;
+                }
+
+                // Non-trivial effect: wrap with asyncFold to swallow errors
+                return asyncFold(
+                    result,
+                    () => unit<R>(),
+                    () => unit<R>()
+                );
+            });
+        }
+
+        return chain;
+    }
+
     closeAsync(
         exit: Exit<any, any> = { _tag: "Success", value: undefined },
         opts: CloseOptions = { awaitChildren: true }
@@ -110,40 +178,27 @@ class Scope<R> {
                     unit<R>() as any
                 );
 
-                // 2) run finalizers LIFO
-                const runFinalizers = this.finalizers.reduceRight(
-                    (acc, fin) =>
-                        asyncFlatMap(acc, () =>
-                            asyncFold(
-                                fin(exit),              // ✅ NO se llama con (env, cb)
-                                () => unit<R>(),
-                                () => unit<R>()
-                            )
-                        ),
-                    unit<R>() as any
-                );
+                // 2) run finalizers LIFO — optimized: sync finalizers skip Fold wrapping
+                const runFinalizers = this.buildFinalizerEffect(exit);
 
                 // 3) optionally await children
-                const awaitChildrenEff = opts.awaitChildren ? (awaitAll(children) as any) : (unit<R>() as any);
+                const needsAwait = opts.awaitChildren && children.length > 0;
+                const awaitChildrenEff = needsAwait ? (awaitAll(children) as any) : (unit<R>() as any);
+
+                // Fast-path: when there are no sub-scopes, no children to await,
+                // and no finalizers, we can complete immediately without forking.
+                const hasSubScopes = subScopes.length > 0;
+                const hasNoFinalizers = this.finalizers.length === 0;
+
+                if (!hasSubScopes && !needsAwait && hasNoFinalizers) {
+                    this.emitCloseEvent(exit);
+                    cb({ _tag: "Success", value: undefined });
+                    return;
+                }
 
                 const all = asyncFlatMap(closeSubs, () => asyncFlatMap(awaitChildrenEff, () => runFinalizers));
                 this.runtime.fork(all as any).join(() => {
-                    // ✅ scope.close al finalizar realmente
-                    const status =
-                        exit._tag === "Success"
-                            ? "success"
-                            : exit.cause._tag === "Interrupt"
-                                ? "interrupted"
-                                : "failure";
-
-
-                    this.runtime.emit({
-                        type: "scope.close",
-                        scopeId: this.id,
-                        status,
-                        error: exit._tag === "Failure" && exit.cause._tag === "Fail" ? (exit.cause as any).error : undefined,
-                    });
-
+                    this.emitCloseEvent(exit);
                     cb({ _tag: "Success", value: undefined });
                 });
             })
