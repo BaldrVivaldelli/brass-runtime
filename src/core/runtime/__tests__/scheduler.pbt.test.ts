@@ -34,6 +34,8 @@ function createLargeCapacityScheduler(capacity: number): Scheduler {
     engine: "js",
     initialCapacity: capacity,
     maxCapacity: capacity,
+    laneCapacity: capacity,
+    maxLanes: 1,
     flushBudget: FLUSH_BUDGET,
   });
 }
@@ -57,7 +59,7 @@ describe("Scheduler drena hasta FLUSH_BUDGET tareas por flush (Property 15)", ()
 
           // Enqueue all N tasks synchronously before any flush can run
           for (let i = 0; i < n; i++) {
-            scheduler.schedule(() => { executed++; }, `task-${i}`);
+            scheduler.schedule(() => { executed++; }, `lane:test|task-${i}`);
           }
 
           // At this point, no tasks have been executed yet because

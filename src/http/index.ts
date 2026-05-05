@@ -1,2 +1,3 @@
-export * from "./client";      // tu http.get/post, etc.
+export * from "./client";
 export * from "./httpClient";
+export * from "./pool";

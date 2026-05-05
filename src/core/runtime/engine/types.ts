@@ -32,7 +32,7 @@ export interface FiberEngine<R = unknown> {
 export type WasmEngineRuntime<R = unknown> = {
   readonly env: R;
   readonly hostExecutor: HostExecutor<R>;
-  readonly scheduler: { schedule(task: () => void, label?: string): void };
+  readonly scheduler: { schedule(task: () => void, label?: string): unknown };
   readonly hooks: { emit(ev: any, ctx: any): void };
   fork<E, A>(effect: Async<R, E, A>, scopeId?: number): Fiber<E, A>;
 };

@@ -199,3 +199,38 @@ console.log(wire.status);
 - Mejor modelado de errores: `StatusError`, `JsonDecodeError`
 - Bodies streaming para requests (upload)
 - Normalización de headers / case-insensitive
+
+---
+
+## Phase 2: timeout, pool y stats
+
+El wire client ahora puede cortar requests antes de que se transformen en `504` tardíos:
+
+```ts
+const http = httpClient({
+  baseUrl: "https://api.example.com",
+  timeoutMs: 2_000,
+  pool: {
+    concurrency: 32,
+    maxQueue: 128,
+    queueTimeoutMs: 100,
+    key: "origin",
+  },
+});
+```
+
+Errores nuevos:
+
+- `{ _tag: "Timeout" }`
+- `{ _tag: "PoolRejected" }`
+- `{ _tag: "PoolTimeout" }`
+
+`http.stats()` y `http.wire.stats()` exponen presión actual de transporte: `inFlight`, `timedOut`, `poolRejected`, `poolTimeouts` y métricas por key del pool.
+
+También podés mirar promesas abortables activas desde el runtime:
+
+```ts
+import { abortablePromiseStats } from "brass-runtime";
+
+console.log(abortablePromiseStats());
+```

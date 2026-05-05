@@ -161,3 +161,65 @@ type HttpClient = (req: HttpRequest) =>
 ## Status
 
 Experimental but stable enough to use and evolve.
+
+---
+
+## Timeout, pool y retry budget
+
+`makeHttp`, `httpClient` y `httpClientStream` aceptan controles de fase 2:
+
+```ts
+const http = httpClient({
+  baseUrl: "https://api.example.com",
+  timeoutMs: 2_000,
+  pool: {
+    concurrency: 32,
+    maxQueue: 128,
+    queueTimeoutMs: 100,
+    key: "origin",
+  },
+});
+```
+
+`timeoutMs` cubre espera de pool, `fetch` y lectura de body en respuestas no-streaming.
+
+El pool permite rechazar temprano en vez de dejar requests vivos hasta un `504`:
+
+```ts
+pool: { concurrency: 16, maxQueue: 0 } // fail-fast
+```
+
+Errores nuevos:
+
+```ts
+{ _tag: "Timeout", timeoutMs, phase: "request", message }
+{ _tag: "PoolRejected", key, limit, message }
+{ _tag: "PoolTimeout", key, timeoutMs, message }
+```
+
+Retry ahora puede tener budget total:
+
+```ts
+http.withRetry({
+  maxRetries: 2,
+  baseDelayMs: 25,
+  maxDelayMs: 250,
+  maxElapsedMs: 800,
+});
+```
+
+El retry default reintenta `FetchError`, `Timeout` y `PoolTimeout`, pero no reintenta `Abort`, `BadUrl` ni `PoolRejected`.
+
+Stats:
+
+```ts
+console.log(http.stats());
+console.log(http.wire.stats());
+```
+
+Y desde runtime:
+
+```ts
+import { abortablePromiseStats } from "../core/runtime/runtime";
+console.log(abortablePromiseStats());
+```

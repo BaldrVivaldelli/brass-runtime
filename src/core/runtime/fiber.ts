@@ -1,7 +1,7 @@
 // src/fiber.ts
 import { Cause, Exit } from "../types/effect";
 import { Async } from "../types/asyncEffect";
-import { globalScheduler, Scheduler } from "./scheduler";
+import { globalScheduler, laneTag, Scheduler } from "./scheduler";
 import { Runtime, unsafeRunAsync } from "./runtime";
 import { FiberContext } from "./contex";
 import type { RuntimeEvent } from "./events";
@@ -108,12 +108,13 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         }
     )[] = [];
 
-    private readonly fiberFinalizers: Array<(exit: Exit<E, A>) => any> = [];
+    private readonly fiberFinalizers: Array<{ run?: (exit: Exit<E, A>) => any }> = [];
     private finalizersDrained = false;
 
     fiberContext!: FiberContext;
     name?: string;
     scopeId?: number;
+    lane?: string;
 
     /**
      * Cached closure for the scheduler callback — avoids creating a new
@@ -172,7 +173,20 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     }
 
     addFinalizer(f: (exit: Exit<E, A>) => void): void {
-        this.fiberFinalizers.push(f);
+        this.fiberFinalizers.push({ run: f });
+    }
+
+    /**
+     * Internal finalizers used for suspend cancelers. They are detached as soon
+     * as the async operation completes, so completed HTTP/promises do not keep
+     * canceler closures alive until the fiber itself finishes.
+     */
+    private addTransientFinalizer(f: (exit: Exit<E, A>) => void): () => void {
+        const rec: { run?: (exit: Exit<E, A>) => any } = { run: f };
+        this.fiberFinalizers.push(rec);
+        return () => {
+            rec.run = undefined;
+        };
     }
 
     status(): FiberStatus {
@@ -205,10 +219,16 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         // encolamos
         this.runState = RUN.QUEUED;
 
-        this.scheduler.schedule(
+        const label = `fiber#${this.id}.${tag}`;
+        const result = this.scheduler.schedule(
             this.boundStep,
-            `fiber#${this.id}.${tag}`
+            this.lane ? laneTag(this.lane, label) : label
         );
+
+        if (result === "dropped") {
+            this.runState = RUN.DONE;
+            this.notify(Exit.failCause(Cause.die<E>(new Error(`Brass scheduler dropped ${label} because the lane queue is full`))));
+        }
     }
 
     private runFinalizersOnce(exit: Exit<E, A>): void {
@@ -217,8 +237,11 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
         while (this.fiberFinalizers.length > 0) {
             const fin = this.fiberFinalizers.pop()!;
+            const run = fin.run;
+            fin.run = undefined;
+            if (!run) continue;
             try {
-                const eff = fin(exit);
+                const eff = run(exit);
 
                 // Si devolvió un Async (tu ADT), lo ejecutamos.
                 if (eff && typeof eff === "object" && "_tag" in eff) {
@@ -360,9 +383,13 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     let syncResolved = false;
                     let syncExit: Exit<E, any> | null = null;
 
+                    let detachCanceler: (() => void) | undefined;
+
                     const cb = (exit: Exit<E, any>) => {
                         if (done) return;
                         done = true;
+                        detachCanceler?.();
+                        detachCanceler = undefined;
 
                         if (this.result != null || this.closing != null) return;
 
@@ -420,10 +447,14 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                         break; // continue the while loop
                     }
 
-                    // Async path: register canceler as finalizer only when we actually suspend
+                    // Async path: register canceler as finalizer only when we actually suspend.
+                    // Detach it on normal completion so long async chains do not retain old
+                    // canceler closures/fetch signals until the fiber finally ends.
                     if (typeof canceler === "function") {
-                        this.addFinalizer(() => {
+                        detachCanceler = this.addTransientFinalizer(() => {
+                            if (done) return;
                             done = true;
+                            detachCanceler = undefined;
                             try {
                                 canceler();
                             } catch {
