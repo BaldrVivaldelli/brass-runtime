@@ -2,6 +2,7 @@ import type { Async } from "../../types/asyncEffect";
 import { Cause, Exit, type Exit as ExitType } from "../../types/effect";
 import type { Fiber } from "../fiber";
 import { withCurrentFiber } from "../fiber";
+import { laneTag } from "../scheduler";
 import type { HostAction, HostActionResult } from "../hostAction";
 import { ProgramBuilder, type AsyncRegisterRef, type DecodeRef, type FiberId, type FlatMapRef, type FoldFailureRef, type FoldSuccessRef, type HostRegistry, type RefId, type SyncRef } from "./opcodes";
 import type { EngineEvent, FiberEngine, FiberEngineKind, FiberEngineStats, WasmBridge, WasmEngineRuntime } from "./types";
@@ -66,6 +67,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
       (id, reason) => this.interruptById(id, reason),
       (id) => this.fiberRegistry?.addJoiner(id),
       (id) => this.fiberRegistry?.markQueued(id),
+      (id, label) => this.schedulerDropped(id, label),
     );
     if (scopeId !== undefined) handle.scopeId = scopeId;
 
@@ -262,11 +264,16 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     let asyncRegistered = false;
     let syncExit: ExitType<any, any> | null = null;
 
+    let cancelCleanup: (() => void) | undefined;
+
     const cleanup = () => {
       done = true;
       state.pendingCleanups.delete(cleanup);
+      if (cancelCleanup) {
+        state.pendingCleanups.delete(cancelCleanup);
+        cancelCleanup = undefined;
+      }
     };
-    state.pendingCleanups.add(cleanup);
 
     const cb = (exitLike: unknown) => {
       if (done) return;
@@ -296,14 +303,16 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
       }
 
       if (typeof canceler === "function") {
-        const cancelCleanup = () => {
+        cancelCleanup = () => {
           if (done) return;
           done = true;
+          state.pendingCleanups.delete(cleanup);
+          if (cancelCleanup) state.pendingCleanups.delete(cancelCleanup);
+          cancelCleanup = undefined;
           try { canceler(); } catch { /* ignore */ }
-          state.pendingCleanups.delete(cancelCleanup);
         };
         state.pendingCleanups.add(cancelCleanup);
-        state.handle.addFinalizer(() => cancelCleanup());
+        state.handle.addFinalizer(() => cancelCleanup?.());
       }
     } catch (error) {
       cleanup();
@@ -380,12 +389,40 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
 
   private resumeWithValue(state: WasmFiberState<R, any, any>, value: unknown): void {
     const event = this.bridge.provideValue(state.fiberId, state.registry.register(value));
-    this.runtime.scheduler.schedule(() => withCurrentFiber(state.handle as any, () => this.drive(state, event)), `wasm-fiber#${state.fiberId}.resume`);
+    const label = `wasm-fiber#${state.fiberId}.resume`;
+    this.scheduleOrDrop(
+      state,
+      () => withCurrentFiber(state.handle as any, () => this.drive(state, event)),
+      label,
+    );
   }
 
   private resumeWithError(state: WasmFiberState<R, any, any>, error: unknown): void {
     const event = this.bridge.provideError(state.fiberId, state.registry.register(error));
-    this.runtime.scheduler.schedule(() => withCurrentFiber(state.handle as any, () => this.drive(state, event)), `wasm-fiber#${state.fiberId}.resume-error`);
+    const label = `wasm-fiber#${state.fiberId}.resume-error`;
+    this.scheduleOrDrop(
+      state,
+      () => withCurrentFiber(state.handle as any, () => this.drive(state, event)),
+      label,
+    );
+  }
+
+  private scheduleOrDrop(state: WasmFiberState<R, any, any>, task: () => void, label: string): void {
+    const result = this.runtime.scheduler.schedule(task, this.schedulerTag(state, label));
+    if (result === "dropped") {
+      this.completeDie(state, new Error(`Brass scheduler dropped ${label} because the lane queue is full`));
+    }
+  }
+
+  private schedulerTag(state: WasmFiberState<R, any, any>, label: string): string {
+    const lane = (state.handle as any).lane ?? this.runtime.lane;
+    return lane ? laneTag(lane, label) : label;
+  }
+
+  private schedulerDropped(fiberId: FiberId, label: string): void {
+    const state = this.states.get(fiberId);
+    if (!state || state.completed) return;
+    this.completeDie(state, new Error(`Brass scheduler dropped ${label} because the lane queue is full`));
   }
 
   private interruptById(fiberId: FiberId, reason: unknown): void {

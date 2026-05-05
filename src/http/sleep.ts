@@ -1,7 +1,7 @@
 // src/http/sleep.ts
 import { fromPromiseAbortable } from "../core/runtime/runtime";
 import type { Async } from "../core/types/asyncEffect";
-import { HttpError } from "./client";
+import type { HttpError } from "./client";
 
 const isHttpError = (e: unknown): e is HttpError =>
   typeof e === "object" && e !== null && "_tag" in (e as any);
@@ -22,14 +22,30 @@ export const sleepMs = (ms: number): Async<unknown, HttpError, void> =>
       new Promise<void>((resolve, reject) => {
         if (signal.aborted) return reject({ _tag: "Abort" } satisfies HttpError);
 
-        const id = setTimeout(resolve, ms);
+        const delay = Math.max(0, Math.floor(ms));
+        let done = false;
+        let id: ReturnType<typeof setTimeout> | undefined;
 
-        const onAbort = () => {
-          clearTimeout(id);
-          reject({ _tag: "Abort" } satisfies HttpError);
+        const cleanup = () => {
+          if (id !== undefined) {
+            clearTimeout(id);
+            id = undefined;
+          }
+          signal.removeEventListener("abort", onAbort);
         };
 
+        const finish = (f: () => void) => {
+          if (done) return;
+          done = true;
+          cleanup();
+          f();
+        };
+
+        const onAbort = () => finish(() => reject({ _tag: "Abort" } satisfies HttpError));
+
         signal.addEventListener("abort", onAbort, { once: true });
+        id = setTimeout(() => finish(resolve), delay);
       }),
-    normalizeHttpError
+    normalizeHttpError,
+    { label: "sleep" }
   );

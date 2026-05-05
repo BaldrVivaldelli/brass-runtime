@@ -317,6 +317,12 @@ impl BrassWasmChunkBuffer {
 
 const SCHEDULER_POLICY_MICRO: u32 = 0;
 const SCHEDULER_POLICY_MACRO: u32 = 1;
+const SCHEDULER_POLICY_NONE: u32 = 2;
+const SCHEDULER_POLICY_DROPPED: u32 = 3;
+
+const DEFAULT_LANE_CAPACITY: usize = 1024;
+const DEFAULT_LANE_BUDGET: usize = 64;
+const DEFAULT_MAX_LANES: usize = 256;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SchedulerPhase {
@@ -324,6 +330,17 @@ enum SchedulerPhase {
     ScheduledMicro,
     ScheduledMacro,
     Flushing,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LaneStats {
+    key: String,
+    len: usize,
+    capacity: usize,
+    enqueued_tasks: u64,
+    executed_tasks: u64,
+    dropped_tasks: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -338,18 +355,93 @@ struct SchedulerStats {
     executed_tasks: u64,
     dropped_tasks: u64,
     yielded_by_budget: u64,
+    lanes: Vec<LaneStats>,
 }
 
-#[wasm_bindgen]
-pub struct BrassWasmSchedulerStateMachine {
+#[derive(Debug, Clone)]
+struct LaneState {
+    key: String,
     queue: Vec<u32>,
     head: usize,
     tail: usize,
     len: usize,
-    max_cap: usize,
+    enqueued_tasks: u64,
+    executed_tasks: u64,
+    dropped_tasks: u64,
+}
+
+impl LaneState {
+    fn new(key: String, capacity: usize) -> LaneState {
+        let cap = next_pow2(capacity.max(2));
+        LaneState {
+            key,
+            queue: vec![0; cap],
+            head: 0,
+            tail: 0,
+            len: 0,
+            enqueued_tasks: 0,
+            executed_tasks: 0,
+            dropped_tasks: 0,
+        }
+    }
+
+    fn capacity(&self) -> usize {
+        self.queue.len()
+    }
+
+    fn push(&mut self, task_ref: u32) -> bool {
+        if self.len == self.queue.len() {
+            return false;
+        }
+        self.queue[self.tail] = task_ref;
+        self.tail = (self.tail + 1) & (self.queue.len() - 1);
+        self.len += 1;
+        true
+    }
+
+    fn shift(&mut self) -> Option<u32> {
+        if self.len == 0 {
+            return None;
+        }
+        let task_ref = self.queue[self.head];
+        self.queue[self.head] = 0;
+        self.head = (self.head + 1) & (self.queue.len() - 1);
+        self.len -= 1;
+        Some(task_ref)
+    }
+
+    fn clear(&mut self) {
+        self.queue.fill(0);
+        self.head = 0;
+        self.tail = 0;
+        self.len = 0;
+    }
+
+    fn stats(&self) -> LaneStats {
+        LaneStats {
+            key: self.key.clone(),
+            len: self.len,
+            capacity: self.capacity(),
+            enqueued_tasks: self.enqueued_tasks,
+            executed_tasks: self.executed_tasks,
+            dropped_tasks: self.dropped_tasks,
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct BrassWasmSchedulerStateMachine {
+    lanes: Vec<LaneState>,
+    lane_index: HashMap<String, usize>,
+    rr_index: usize,
+    rr_remaining: usize,
+    total_len: usize,
     phase: SchedulerPhase,
     flush_budget: usize,
     micro_threshold: usize,
+    lane_capacity: usize,
+    lane_budget: usize,
+    max_lanes: usize,
     scheduled_flushes: u64,
     completed_flushes: u64,
     enqueued_tasks: u64,
@@ -361,18 +453,27 @@ pub struct BrassWasmSchedulerStateMachine {
 #[wasm_bindgen]
 impl BrassWasmSchedulerStateMachine {
     #[wasm_bindgen(constructor)]
-    pub fn new(initial_capacity: usize, max_capacity: usize, flush_budget: usize, micro_threshold: usize) -> BrassWasmSchedulerStateMachine {
-        let init_pow = next_pow2(initial_capacity.max(2));
-        let max_pow = next_pow2(max_capacity.max(init_pow));
+    pub fn new(
+        _initial_capacity: usize,
+        max_capacity: usize,
+        flush_budget: usize,
+        micro_threshold: usize,
+        lane_capacity: usize,
+        lane_budget: usize,
+        max_lanes: usize,
+    ) -> BrassWasmSchedulerStateMachine {
         BrassWasmSchedulerStateMachine {
-            queue: vec![0; init_pow],
-            head: 0,
-            tail: 0,
-            len: 0,
-            max_cap: max_pow,
+            lanes: Vec::new(),
+            lane_index: HashMap::new(),
+            rr_index: 0,
+            rr_remaining: 0,
+            total_len: 0,
             phase: SchedulerPhase::Idle,
             flush_budget: flush_budget.max(1),
             micro_threshold: micro_threshold.max(1),
+            lane_capacity: if lane_capacity == 0 { max_capacity.max(DEFAULT_LANE_CAPACITY) } else { lane_capacity },
+            lane_budget: if lane_budget == 0 { DEFAULT_LANE_BUDGET } else { lane_budget },
+            max_lanes: if max_lanes == 0 { DEFAULT_MAX_LANES } else { max_lanes },
             scheduled_flushes: 0,
             completed_flushes: 0,
             enqueued_tasks: 0,
@@ -382,32 +483,40 @@ impl BrassWasmSchedulerStateMachine {
         }
     }
 
-    pub fn len(&self) -> usize { self.len }
-    pub fn capacity(&self) -> usize { self.queue.len() }
+    pub fn len(&self) -> usize { self.total_len }
+    pub fn capacity(&self) -> usize { self.lanes.iter().map(LaneState::capacity).sum() }
     pub fn is_flushing(&self) -> bool { self.phase == SchedulerPhase::Flushing }
     pub fn is_scheduled(&self) -> bool { matches!(self.phase, SchedulerPhase::ScheduledMicro | SchedulerPhase::ScheduledMacro) }
 
-    /// Enqueue a task ref and return the scheduling policy:
+    /// Enqueue a task ref into an inferred caller lane and return the scheduling policy:
     /// - 0 => schedule a micro flush
     /// - 1 => schedule a macro flush
     /// - 2 => no new flush needed
-    /// - 3 => queue full / task dropped
-    pub fn enqueue(&mut self, task_ref: u32) -> u32 {
-        if self.len == self.queue.len() {
-            if self.queue.len() >= self.max_cap {
-                self.dropped_tasks += 1;
-                return 3;
+    /// - 3 => lane full / task dropped
+    pub fn enqueue(&mut self, task_ref: u32, tag: &str) -> u32 {
+        let lane_key = infer_lane(tag);
+        let lane_idx = self.get_or_create_lane_idx(&lane_key);
+
+        self.enqueued_tasks += 1;
+        let accepted = {
+            let lane = &mut self.lanes[lane_idx];
+            lane.enqueued_tasks += 1;
+            let accepted = lane.push(task_ref);
+            if !accepted {
+                lane.dropped_tasks += 1;
             }
-            self.grow();
+            accepted
+        };
+
+        if !accepted {
+            self.dropped_tasks += 1;
+            return SCHEDULER_POLICY_DROPPED;
         }
 
-        self.queue[self.tail] = task_ref;
-        self.tail = (self.tail + 1) & (self.queue.len() - 1);
-        self.len += 1;
-        self.enqueued_tasks += 1;
+        self.total_len += 1;
 
         if self.phase != SchedulerPhase::Idle {
-            return 2;
+            return SCHEDULER_POLICY_NONE;
         }
 
         let policy = self.next_policy();
@@ -425,19 +534,23 @@ impl BrassWasmSchedulerStateMachine {
         if self.phase == SchedulerPhase::Flushing {
             return 0;
         }
+        if self.total_len == 0 {
+            self.phase = SchedulerPhase::Idle;
+            return 0;
+        }
         self.phase = SchedulerPhase::Flushing;
-        self.flush_budget.min(self.len)
+        self.flush_budget.min(self.total_len)
     }
 
     pub fn shift(&mut self) -> u32 {
-        if self.len == 0 {
-            return 0;
-        }
-        let task_ref = self.queue[self.head];
-        self.queue[self.head] = 0;
-        self.head = (self.head + 1) & (self.queue.len() - 1);
-        self.len -= 1;
+        let (lane_idx, task_ref) = match self.shift_from_next_lane() {
+            Some(next) => next,
+            None => return 0,
+        };
+
+        self.total_len -= 1;
         self.executed_tasks += 1;
+        self.lanes[lane_idx].executed_tasks += 1;
         task_ref
     }
 
@@ -448,9 +561,9 @@ impl BrassWasmSchedulerStateMachine {
     pub fn end_flush(&mut self, ran: usize) -> u32 {
         self.completed_flushes += 1;
 
-        if self.len == 0 {
+        if self.total_len == 0 {
             self.phase = SchedulerPhase::Idle;
-            return 2;
+            return SCHEDULER_POLICY_NONE;
         }
 
         let policy = if ran >= self.flush_budget {
@@ -470,10 +583,12 @@ impl BrassWasmSchedulerStateMachine {
     }
 
     pub fn clear(&mut self) {
-        self.queue.fill(0);
-        self.head = 0;
-        self.tail = 0;
-        self.len = 0;
+        for lane in &mut self.lanes {
+            lane.clear();
+        }
+        self.rr_index = 0;
+        self.rr_remaining = 0;
+        self.total_len = 0;
         self.phase = SchedulerPhase::Idle;
     }
 
@@ -485,35 +600,127 @@ impl BrassWasmSchedulerStateMachine {
                 SchedulerPhase::ScheduledMacro => "scheduledMacro",
                 SchedulerPhase::Flushing => "flushing",
             },
-            len: self.len,
-            capacity: self.queue.len(),
+            len: self.total_len,
+            capacity: self.capacity(),
             scheduled_flushes: self.scheduled_flushes,
             completed_flushes: self.completed_flushes,
             enqueued_tasks: self.enqueued_tasks,
             executed_tasks: self.executed_tasks,
             dropped_tasks: self.dropped_tasks,
             yielded_by_budget: self.yielded_by_budget,
+            lanes: self.lanes.iter().map(LaneState::stats).collect(),
         }).expect("scheduler stats json")
     }
 
     fn next_policy(&self) -> u32 {
-        if self.len > self.micro_threshold { SCHEDULER_POLICY_MACRO } else { SCHEDULER_POLICY_MICRO }
+        if self.total_len > self.micro_threshold { SCHEDULER_POLICY_MACRO } else { SCHEDULER_POLICY_MICRO }
     }
 
-    fn grow(&mut self) {
-        let old_cap = self.queue.len();
-        let next_cap = (old_cap * 2).min(self.max_cap);
-        let mut next_queue = vec![0; next_cap];
-        for i in 0..self.len {
-            let old_idx = (self.head + i) & (old_cap - 1);
-            next_queue[i] = self.queue[old_idx];
+    fn get_or_create_lane_idx(&mut self, requested_key: &str) -> usize {
+        if let Some(idx) = self.lane_index.get(requested_key) {
+            return *idx;
         }
-        self.queue = next_queue;
-        self.head = 0;
-        self.tail = self.len;
+
+        let key = if self.lane_index.len() >= self.max_lanes {
+            String::from("overflow")
+        } else {
+            requested_key.to_owned()
+        };
+
+        if let Some(idx) = self.lane_index.get(&key) {
+            return *idx;
+        }
+
+        let idx = self.lanes.len();
+        self.lanes.push(LaneState::new(key.clone(), self.lane_capacity));
+        self.lane_index.insert(key, idx);
+        idx
+    }
+
+    fn shift_from_next_lane(&mut self) -> Option<(usize, u32)> {
+        let n = self.lanes.len();
+        if n == 0 {
+            return None;
+        }
+
+        if self.rr_remaining > 0 {
+            let current_idx = (self.rr_index + n - 1) % n;
+            if let Some(task_ref) = self.lanes[current_idx].shift() {
+                self.rr_remaining -= 1;
+                return Some((current_idx, task_ref));
+            }
+            self.rr_remaining = 0;
+        }
+
+        for _ in 0..n {
+            let idx = self.rr_index % n;
+            self.rr_index = (idx + 1) % n;
+            if self.lanes[idx].len == 0 {
+                continue;
+            }
+            self.rr_remaining = self.lane_budget.saturating_sub(1);
+            if let Some(task_ref) = self.lanes[idx].shift() {
+                return Some((idx, task_ref));
+            }
+        }
+
+        None
     }
 }
 
+fn sanitize_lane_key(value: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_ws = false;
+
+    for ch in value.trim().chars() {
+        if ch.is_whitespace() {
+            if !last_was_ws && !out.is_empty() {
+                out.push(':');
+            }
+            last_was_ws = true;
+            continue;
+        }
+
+        last_was_ws = false;
+        if ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | ':' | '/' | '#' | '-') {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+
+        if out.len() >= 160 {
+            break;
+        }
+    }
+
+    if out.is_empty() { String::from("anonymous") } else { out }
+}
+
+fn infer_lane(tag: &str) -> String {
+    if let Some(rest) = tag.strip_prefix("lane:") {
+        if let Some(end) = rest.find('|') {
+            let explicit = &rest[..end];
+            if !explicit.is_empty() {
+                return sanitize_lane_key(explicit);
+            }
+        }
+    }
+
+    if let Some(rest) = tag.strip_prefix("caller:") {
+        if let Some(end) = rest.find('|') {
+            let caller = &rest[..end];
+            if !caller.is_empty() {
+                return sanitize_lane_key(caller);
+            }
+        }
+    }
+
+    let first = tag
+        .split(|ch| ch == '.' || ch == '#' || ch == '/')
+        .next()
+        .unwrap_or(tag);
+    sanitize_lane_key(first)
+}
 
 
 const FIBER_STATE_QUEUED: u32 = 0;

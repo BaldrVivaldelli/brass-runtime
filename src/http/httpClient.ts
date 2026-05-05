@@ -14,7 +14,7 @@ import { Async, AsyncWithPromise, mapTryAsync, withAsyncPromise } from "../core/
 import { mergeHeaders, setHeaderIfMissing } from "./optics/request";
 import {RetryPolicy, withRetry} from "./retry/retry";
 
-type InitNoMethodBody = Omit<RequestInit, "method" | "body">;
+type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & { timeoutMs?: number; poolKey?: string; headers?: any };
 
 
 // -------------------------------------------------------------------------------------------------
@@ -54,7 +54,7 @@ const resolveFinalUrl = (baseUrl: string | undefined, url: string): string => {
     }
 };
 
-type AnyInitWithHeaders = { headers?: any } & Record<string, any>;
+type AnyInitWithHeaders = { headers?: any; timeoutMs?: number; poolKey?: string } & Record<string, any>;
 
 const createHttpCore = (cfg: MakeHttpConfig = {}) => {
     const wire: HttpClient = makeHttp(cfg);
@@ -65,9 +65,11 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
     const requestRaw = (req: HttpRequest) => wire(req);
 
     const splitInit = (init?: AnyInitWithHeaders) => {
-        const { headers, ...rest } = (init ?? {}) as any;
+        const { headers, timeoutMs, poolKey, ...rest } = (init ?? {}) as any;
         return {
             headers: normalizeHeadersInit(headers),
+            timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
+            poolKey: typeof poolKey === "string" ? poolKey : undefined,
             init: rest as HttpInit,
         };
     };
@@ -83,6 +85,8 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
             method,
             url,
             ...(body && body.length > 0 ? { body } : {}),
+            ...(s.timeoutMs !== undefined ? { timeoutMs: s.timeoutMs } : {}),
+            ...(s.poolKey !== undefined ? { poolKey: s.poolKey } : {}),
             init: s.init,
         };
         return applyInitHeaders(s.headers)(req);
@@ -125,6 +129,7 @@ export type Dx = {
 
     // power users
     wire: HttpClient;
+    stats: () => ReturnType<HttpClient["stats"]>;
 };
 
 export function httpClient(cfg: MakeHttpConfig = {}) {
@@ -175,6 +180,7 @@ export function httpClient(cfg: MakeHttpConfig = {}) {
             withRetry: (p) => make(wire.with(withRetry(p))),
 
             wire,
+            stats: () => wire.stats(),
         };
     };
 
@@ -312,6 +318,7 @@ export function httpClientStream(cfg: MakeHttpConfig = {}) {
             with: (mw: (n: HttpClientStream) => HttpClientStream) => make(mw(w)),
             withRetry: (p: RetryPolicy) => make(withRetryStream(p)(w)),
             wire: w,
+            stats: () => w.stats(),
         };
     };
 
