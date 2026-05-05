@@ -112,7 +112,7 @@ class JsSchedulerState {
     droppedTasks = 0;
     yieldedByBudget = 0;
 
-    constructor(readonly options: SchedulerOptions) {}
+    constructor(readonly options: SchedulerOptions) { }
 
     get totalLength(): number {
         let n = 0;
@@ -167,7 +167,32 @@ class WasmSchedulerState {
 }
 
 export function sanitizeLaneKey(value: string): string {
-    const key = value.trim().replace(/\s+/g, ":").replace(/[^a-zA-Z0-9_.:/#-]/g, "_");
+    const trimmed = value.trim();
+    let key = "";
+    let inWhitespace = false;
+
+    for (let i = 0; i < trimmed.length; i++) {
+        const char = trimmed[i];
+        if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
+            if (!inWhitespace) {
+                key += ":";
+                inWhitespace = true;
+            }
+        } else {
+            inWhitespace = false;
+            if (
+                (char >= 'a' && char <= 'z') ||
+                (char >= 'A' && char <= 'Z') ||
+                (char >= '0' && char <= '9') ||
+                char === '_' || char === '.' || char === ':' || char === '/' || char === '#' || char === '-'
+            ) {
+                key += char;
+            } else {
+                key += "_";
+            }
+        }
+    }
+
     return key.length > 0 ? key.slice(0, 160) : "anonymous";
 }
 
@@ -175,45 +200,126 @@ export function laneTag(lane: string, tag: string = "task"): string {
     return `lane:${sanitizeLaneKey(lane)}|${tag}`;
 }
 
+function isDigits(str: string): boolean {
+    if (str.length === 0) return false;
+    for (let i = 0; i < str.length; i++) {
+        if (str[i] < '0' || str[i] > '9') return false;
+    }
+    return true;
+}
+
 function extractStackLocation(line: string): string | undefined {
-    const inParens = /\(([^)]+)\)/.exec(line)?.[1];
-    const raw = inParens ?? /at\s+(.+)$/.exec(line.trim())?.[1];
+    let raw: string | undefined;
+
+    const openParen = line.indexOf("(");
+    const closeParen = line.indexOf(")", openParen);
+
+    if (openParen !== -1 && closeParen !== -1) {
+        raw = line.slice(openParen + 1, closeParen);
+    } else {
+        const trimmed = line.trim();
+        const atIndex = trimmed.indexOf("at ");
+        if (atIndex !== -1) {
+            raw = trimmed.slice(atIndex + 3).trim();
+        }
+    }
+
     if (!raw) return undefined;
-    return raw.replace(/:\d+:\d+$/, "").replace(/:\d+$/, "");
+
+    const parts = raw.split(":");
+    if (parts.length > 1) {
+        const last = parts[parts.length - 1];
+        if (isDigits(last)) {
+            parts.pop();
+            if (parts.length > 1) {
+                const secondLast = parts[parts.length - 1];
+                if (isDigits(secondLast)) {
+                    parts.pop();
+                }
+            }
+        }
+        raw = parts.join(":");
+    }
+
+    return raw;
 }
 
 function isPseudoStackLocation(location: string): boolean {
-    const normalized = location.trim().replace(/\\/g, "/");
+    const normalized = location.trim().split("\\").join("/");
     return (
         normalized === "<anonymous>" ||
         normalized === "anonymous" ||
         normalized.startsWith("node:") ||
-        /(?:^|\/)node_modules\//.test(normalized)
+        normalized.startsWith("node_modules/") ||
+        normalized.includes("/node_modules/")
     );
 }
 
 function isInternalRuntimeFrame(location: string, line: string): boolean {
-    const normalized = location.replace(/\\/g, "/");
-    const frame = line.replace(/\\/g, "/");
-    return (
-        /(?:^|\/)src\/core\/runtime\/(?!__tests__(?:\/|$))/.test(normalized) ||
-        /(?:^|\/)dist\/(?:index|.*runtime.*)\.(?:mjs|cjs|js)$/.test(normalized) ||
-        /(?:^|\/)node_modules\/brass-runtime(?:\/|$)/.test(normalized) ||
-        /inferCallerLaneFromStack|Runtime\.|RuntimeFiber\.|EngineFiberHandle\.|WasmFiberEngine\.|JsFiberEngine\.|Scheduler\./.test(frame)
-    );
+    const normalized = location.split("\\").join("/");
+    const frame = line.split("\\").join("/");
+
+    const isSrcRuntime = normalized.startsWith("src/core/runtime/") || normalized.includes("/src/core/runtime/");
+    const isTest = normalized.includes("src/core/runtime/__tests__/") || normalized.endsWith("src/core/runtime/__tests__");
+    if (isSrcRuntime && !isTest) return true;
+
+    const isDistRuntime =
+        (normalized.startsWith("dist/") || normalized.includes("/dist/")) &&
+        (normalized.includes("index.") || normalized.includes("runtime."));
+
+    if (isDistRuntime) {
+        if (normalized.endsWith(".mjs") || normalized.endsWith(".cjs") || normalized.endsWith(".js")) {
+            return true;
+        }
+    }
+
+    const isBrassRuntime = normalized.startsWith("node_modules/brass-runtime/") ||
+        normalized.includes("/node_modules/brass-runtime/") ||
+        normalized === "node_modules/brass-runtime" ||
+        normalized.endsWith("/node_modules/brass-runtime");
+    if (isBrassRuntime) return true;
+
+    const internalMethods = [
+        "inferCallerLaneFromStack", "Runtime.", "RuntimeFiber.",
+        "EngineFiberHandle.", "WasmFiberEngine.", "JsFiberEngine.", "Scheduler."
+    ];
+    for (const method of internalMethods) {
+        if (frame.includes(method)) return true;
+    }
+
+    return false;
 }
 
 function normalizeCallerLocation(location: string): string {
-    let out = location.replace(/\\/g, "/");
-    out = out.replace(/^file:\/\//, "");
+    let out = location.split("\\").join("/");
+    if (out.startsWith("file://")) out = out.slice(7);
+
     const srcIdx = out.lastIndexOf("/src/");
-    if (srcIdx >= 0) out = out.slice(srcIdx + 5);
-    else {
-        const cwd = typeof process !== "undefined" ? process.cwd().replace(/\\/g, "/") : "";
-        if (cwd && out.startsWith(cwd + "/")) out = out.slice(cwd.length + 1);
-        out = out.replace(/^.*?([^/]+\/[^/]+)$/, "$1");
+    if (srcIdx >= 0) {
+        out = out.slice(srcIdx + 5);
+    } else {
+        let cwd = "";
+        if (typeof process !== "undefined" && process.cwd) {
+            cwd = process.cwd().split("\\").join("/");
+        }
+        if (cwd && out.startsWith(cwd + "/")) {
+            out = out.slice(cwd.length + 1);
+        }
+
+        const parts = out.split("/");
+        if (parts.length > 2) {
+            out = parts.slice(-2).join("/");
+        }
     }
-    out = out.replace(/\.(?:ts|tsx|mts|cts|js|jsx|mjs|cjs)$/, "");
+
+    const extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+    for (const ext of extensions) {
+        if (out.endsWith(ext)) {
+            out = out.slice(0, -ext.length);
+            break;
+        }
+    }
+
     return out;
 }
 
@@ -235,11 +341,27 @@ export function inferCallerLaneFromStack(stack: string | undefined = new Error()
 }
 
 function inferLane(tag: string): string {
-    const explicit = /^lane:([^|]+)\|/.exec(tag);
-    if (explicit?.[1]) return sanitizeLaneKey(explicit[1]);
-    const caller = /^caller:([^|]+)\|/.exec(tag);
-    if (caller?.[1]) return sanitizeLaneKey(caller[1]);
-    const first = tag.split(/[.#/]/, 1)[0] || tag;
+    if (tag.startsWith("lane:")) {
+        const pipeIdx = tag.indexOf("|");
+        if (pipeIdx !== -1) return sanitizeLaneKey(tag.slice(5, pipeIdx));
+    }
+    if (tag.startsWith("caller:")) {
+        const pipeIdx = tag.indexOf("|");
+        if (pipeIdx !== -1) return sanitizeLaneKey(tag.slice(7, pipeIdx));
+    }
+
+    let first = tag;
+    let earliestIdx = tag.length;
+    const separators = ['.', '#', '/'];
+
+    for (const sep of separators) {
+        const idx = tag.indexOf(sep);
+        if (idx !== -1 && idx < earliestIdx) {
+            earliestIdx = idx;
+        }
+    }
+
+    first = tag.slice(0, earliestIdx);
     return sanitizeLaneKey(first || "anonymous");
 }
 
