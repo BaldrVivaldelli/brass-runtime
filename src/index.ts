@@ -17,6 +17,7 @@ export * from "./core/stream/buffer";
 export * from "./core/stream/structuredConcurrency";
 export * from "./core/stream/hub";
 export * from "./core/stream/pipeline";
+export * from "./core/stream/fusion";
 export * from "./core/stream/chunks";
 export * from "./core/stream/queue";
 export * from "./core/runtime/engineStats";

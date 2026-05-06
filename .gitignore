@@ -1,3 +1,5 @@
+# .gitignore
+.kiro/
 .idea/
 # Logs
 logs

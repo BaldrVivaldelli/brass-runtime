@@ -832,6 +832,28 @@ impl BrassWasmSchedulerStateMachine {
         self.enqueue_lane(task_ref, lane_id)
     }
 
+    /// Enqueue multiple tasks in a single boundary crossing.
+    /// Returns a Uint32Array of policies (one per task):
+    /// - 0 = SCHEDULER_POLICY_MICRO
+    /// - 1 = SCHEDULER_POLICY_MACRO
+    /// - 2 = SCHEDULER_POLICY_NONE (already scheduled)
+    /// - 3 = SCHEDULER_POLICY_DROPPED
+    pub fn enqueue_batch(&mut self, task_refs: &[u32], tags: Array) -> Uint32Array {
+        let mut policies = Vec::with_capacity(task_refs.len());
+        for (i, &task_ref) in task_refs.iter().enumerate() {
+            let tag: String = tags
+                .get(i as u32)
+                .as_string()
+                .unwrap_or_else(|| String::from("anonymous"));
+            policies.push(self.enqueue(task_ref, &tag));
+        }
+        let out = Uint32Array::new_with_length(policies.len() as u32);
+        for (idx, &policy) in policies.iter().enumerate() {
+            out.set_index(idx as u32, policy);
+        }
+        out
+    }
+
     pub fn enqueue_lane(&mut self, task_ref: u32, lane_id: LaneId) -> u32 {
         let lane_idx = self.lane_idx_or_overflow(lane_id);
         self.enqueued_tasks += 1;

@@ -12,6 +12,10 @@ export type QueueClosed = { _tag: "QueueClosed" };
 export type Queue<A> = {
     offer: (a: A) => Async<unknown, never, boolean>;
     take: () => Async<unknown, QueueClosed, A>;
+    /** Offer multiple values in a single effect. Returns array of success flags. */
+    offerBatch: (values: readonly A[]) => Async<unknown, never, boolean[]>;
+    /** Take up to N values in a single effect. Returns available values (may be fewer than N). */
+    takeBatch: (n: number) => Async<unknown, QueueClosed, A[]>;
     size: () => number;
     shutdown: () => void;
 };
@@ -153,5 +157,76 @@ function makeQueue<A>(capacity: number, strategy: Strategy, options: QueueOption
                 };
                 return canceler;
             }),
+
+        offerBatch: (values: readonly A[]) =>
+            asyncSync(() => {
+                const results: boolean[] = [];
+                for (let i = 0; i < values.length; i++) {
+                    if (closed) {
+                        results.push(false);
+                        continue;
+                    }
+
+                    const a = values[i]!;
+
+                    // Direct delivery to waiting taker
+                    if (takers.length > 0) {
+                        const t = takers.shift()!;
+                        t({ _tag: "Success", value: a });
+                        results.push(true);
+                        continue;
+                    }
+
+                    // Buffer has space
+                    if (items.length < capacity) {
+                        items.push(a);
+                        results.push(true);
+                        continue;
+                    }
+
+                    // Full: apply strategy
+                    if (strategy === "dropping") {
+                        results.push(false);
+                    } else if (strategy === "sliding") {
+                        items.shift();
+                        items.push(a);
+                        results.push(true);
+                    } else {
+                        // backpressure: can't batch-offer when full (would need to suspend)
+                        // Just push what we can and stop
+                        results.push(false);
+                    }
+                }
+                return results;
+            }) as Async<unknown, never, boolean[]>,
+
+        takeBatch: (n: number) =>
+            asyncSync(() => {
+                const results: A[] = [];
+                const count = Math.min(n, items.length + offerWaiters.length);
+
+                for (let i = 0; i < count; i++) {
+                    if (items.length > 0) {
+                        results.push(items.shift()!);
+                        // Admit a waiting offerer if there's one
+                        if (offerWaiters.length > 0 && items.length < capacity) {
+                            const w = offerWaiters.shift()!;
+                            items.push(w.a);
+                            w.cb(true);
+                        }
+                    } else if (offerWaiters.length > 0) {
+                        const w = offerWaiters.shift()!;
+                        w.cb(true);
+                        results.push(w.a);
+                    } else {
+                        break;
+                    }
+                }
+
+                if (results.length === 0 && closed) {
+                    throw QueueClosedErr;
+                }
+                return results;
+            }) as Async<unknown, QueueClosed, A[]>,
     };
 }
