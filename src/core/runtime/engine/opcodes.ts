@@ -33,37 +33,127 @@ export type FoldFailureRef<R = unknown> = (error: unknown) => Async<R, unknown, 
 export type FoldSuccessRef<R = unknown> = (value: unknown) => Async<R, unknown, unknown>;
 export type DecodeRef = (result: HostActionResult) => unknown;
 
+export type HostRegistryStats = {
+  readonly live: number;
+  readonly capacity: number;
+  readonly allocated: number;
+  readonly released: number;
+  readonly reused: number;
+  readonly staleReads: number;
+};
+
+type HostSlot = {
+  value: unknown;
+  generation: number;
+  occupied: boolean;
+};
+
+const REF_INDEX_BITS = 20;
+const REF_INDEX_MASK = (1 << REF_INDEX_BITS) - 1;
+const REF_GENERATION_SHIFT = REF_INDEX_BITS;
+const REF_GENERATION_MASK = (1 << (32 - REF_INDEX_BITS)) - 1;
+
+function encodeRef(index: number, generation: number): RefId {
+  return (((generation & REF_GENERATION_MASK) << REF_GENERATION_SHIFT) | (index & REF_INDEX_MASK)) >>> 0;
+}
+
+function decodeRef(ref: RefId): { index: number; generation: number } {
+  return {
+    index: ref & REF_INDEX_MASK,
+    generation: (ref >>> REF_GENERATION_SHIFT) & REF_GENERATION_MASK,
+  };
+}
+
+/**
+ * Slab-backed registry for JS values referenced by the WASM VM.
+ *
+ * Refs are generational u32 handles: stale refs fail fast after a slot is
+ * released/reused. clear() releases all live slots, which is called when a
+ * fiber completes so callbacks, errors, decoders and intermediate values do not
+ * stay retained by the engine.
+ */
 export class HostRegistry {
-  private nextRef = 1;
-  private readonly refs = new Map<RefId, unknown>();
+  private readonly slots: HostSlot[] = [{ value: undefined, generation: 0, occupied: false }];
+  private readonly free: number[] = [];
+  private live = 0;
+  private allocated = 0;
+  private released = 0;
+  private reused = 0;
+  private staleReads = 0;
 
   register<T>(value: T): RefId {
-    const ref = this.nextRef++;
-    this.refs.set(ref, value);
-    return ref;
+    const index = this.free.pop() ?? this.slots.length;
+    let slot = this.slots[index];
+    if (slot) {
+      this.reused += 1;
+      slot.value = value;
+      slot.occupied = true;
+      slot.generation = ((slot.generation + 1) & REF_GENERATION_MASK) || 1;
+    } else {
+      slot = { value, generation: 1, occupied: true };
+      this.slots[index] = slot;
+    }
+    this.live += 1;
+    this.allocated += 1;
+    return encodeRef(index, slot.generation);
   }
 
   get<T>(ref: RefId): T {
-    if (!this.refs.has(ref)) {
-      throw new Error(`Missing host registry ref ${ref}`);
+    const { index, generation } = decodeRef(ref);
+    const slot = this.slots[index];
+    if (!slot || !slot.occupied || slot.generation !== generation) {
+      this.staleReads += 1;
+      throw new Error(`Missing or stale host registry ref ${ref}`);
     }
-    return this.refs.get(ref) as T;
+    return slot.value as T;
   }
 
   set(ref: RefId, value: unknown): void {
-    this.refs.set(ref, value);
+    const { index, generation } = decodeRef(ref);
+    const slot = this.slots[index];
+    if (!slot || !slot.occupied || slot.generation !== generation) {
+      this.staleReads += 1;
+      throw new Error(`Missing or stale host registry ref ${ref}`);
+    }
+    slot.value = value;
   }
 
   delete(ref: RefId): void {
-    this.refs.delete(ref);
+    const { index, generation } = decodeRef(ref);
+    const slot = this.slots[index];
+    if (!slot || !slot.occupied || slot.generation !== generation) return;
+    slot.value = undefined;
+    slot.occupied = false;
+    this.live = Math.max(0, this.live - 1);
+    this.released += 1;
+    this.free.push(index);
   }
 
   clear(): void {
-    this.refs.clear();
+    for (let index = 1; index < this.slots.length; index++) {
+      const slot = this.slots[index];
+      if (!slot?.occupied) continue;
+      slot.value = undefined;
+      slot.occupied = false;
+      this.free.push(index);
+      this.released += 1;
+    }
+    this.live = 0;
   }
 
   size(): number {
-    return this.refs.size;
+    return this.live;
+  }
+
+  stats(): HostRegistryStats {
+    return {
+      live: this.live,
+      capacity: Math.max(0, this.slots.length - 1),
+      allocated: this.allocated,
+      released: this.released,
+      reused: this.reused,
+      staleReads: this.staleReads,
+    };
   }
 }
 

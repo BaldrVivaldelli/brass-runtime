@@ -14,7 +14,7 @@ type RingBufferStatsData = {
 type RingLike<T> = {
   readonly length: number;
   readonly capacity: number;
-  readonly engine: "js" | "wasm";
+  readonly engine: "ts" | "wasm";
   readonly fallbackUsed: boolean;
   isEmpty(): boolean;
   push(value: T): PushStatus;
@@ -23,7 +23,7 @@ type RingLike<T> = {
   stats(): EngineStats<RingBufferStatsData>;
 };
 
-export type RingBufferEngine = "auto" | "js" | "wasm";
+export type RingBufferEngine = "ts" | "wasm";
 
 export type RingBufferOptions = {
   engine?: RingBufferEngine;
@@ -111,14 +111,15 @@ class WasmRingBuffer<T> implements RingLike<T> {
   }
 }
 
-class JsBoundedRingBuffer<T> implements RingLike<T> {
-  readonly engine = "js" as const;
+class TsBoundedRingBuffer<T> implements RingLike<T> {
+  readonly engine = "ts" as const;
+  readonly fallbackUsed = false;
   private pushes = 0;
   private shifts = 0;
   private clears = 0;
   private dropped = 0;
 
-  constructor(private readonly inner: RingBuffer<T>, readonly fallbackUsed: boolean) {}
+  constructor(private readonly inner: RingBuffer<T>) {}
 
   get length(): number { return this.inner.length; }
   get capacity(): number { return this.inner.capacity; }
@@ -144,8 +145,8 @@ class JsBoundedRingBuffer<T> implements RingLike<T> {
 
   stats(): EngineStats<RingBufferStatsData> {
     return {
-      engine: "js",
-      fallbackUsed: this.fallbackUsed,
+      engine: "ts",
+      fallbackUsed: false,
       data: {
         len: this.length,
         capacity: this.capacity,
@@ -163,22 +164,17 @@ export function makeBoundedRingBuffer<T>(
   maxCapacity: number = initialCapacity,
   options: RingBufferOptions = {}
 ): RingLike<T> {
-  const engine = options.engine ?? "auto";
+  const engine = options.engine ?? "ts";
 
-  if (engine === "js") {
-    return new JsBoundedRingBuffer<T>(new RingBuffer<T>(initialCapacity, maxCapacity), false);
+  if (engine === "ts") {
+    return new TsBoundedRingBuffer<T>(new RingBuffer<T>(initialCapacity, maxCapacity));
   }
 
   if (engine === "wasm") {
     return new WasmRingBuffer<T>(initialCapacity, maxCapacity);
   }
 
-  const Ctor = resolveWasmRingBuffer();
-  if (Ctor) {
-    return new WasmRingBuffer<T>(initialCapacity, maxCapacity);
-  }
-
-  return new JsBoundedRingBuffer<T>(new RingBuffer<T>(initialCapacity, maxCapacity), true);
+  throw new Error(`brass-runtime ring buffer engine must be 'ts' or 'wasm'; received '${String(engine)}'`);
 }
 
 export type { RingLike as BoundedRingBuffer, RingBufferStatsData };

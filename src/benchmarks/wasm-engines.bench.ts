@@ -7,7 +7,7 @@ const OPS = 100_000;
 const CHUNK_OPS = 50_000;
 const CHUNK_SIZE = 256;
 
-type Engine = "js" | "wasm" | "auto";
+type Engine = "ts" | "wasm";
 
 function ringBufferBench(engine: Engine): void {
   const q = makeBoundedRingBuffer<number>(1024, 1024, { engine });
@@ -44,13 +44,10 @@ function schedulerBench(engine: Engine): Promise<void> {
 }
 
 export const benchmarks: BenchmarkDef[] = [
-  { name: `ring buffer js (${OPS.toLocaleString()} push/shift)`, iterations: 50, warmup: 10, fn: () => ringBufferBench("js") },
-  { name: `ring buffer auto (${OPS.toLocaleString()} push/shift)`, iterations: 50, warmup: 10, fn: () => ringBufferBench("auto") },
+  { name: `ring buffer ts (${OPS.toLocaleString()} push/shift)`, iterations: 50, warmup: 10, fn: () => ringBufferBench("ts") },
   { name: `ring buffer wasm (${OPS.toLocaleString()} push/shift)`, iterations: 50, warmup: 10, fn: () => ringBufferBench("wasm") },
-  { name: `chunker js (${CHUNK_OPS.toLocaleString()} items / ${CHUNK_SIZE})`, iterations: 50, warmup: 10, fn: () => chunkBench("js") },
-  { name: `chunker auto (${CHUNK_OPS.toLocaleString()} items / ${CHUNK_SIZE})`, iterations: 50, warmup: 10, fn: () => chunkBench("auto") },
+  { name: `chunker ts (${CHUNK_OPS.toLocaleString()} items / ${CHUNK_SIZE})`, iterations: 50, warmup: 10, fn: () => chunkBench("ts") },
   { name: `chunker wasm (${CHUNK_OPS.toLocaleString()} items / ${CHUNK_SIZE})`, iterations: 50, warmup: 10, fn: () => chunkBench("wasm") },
-  { name: `scheduler js (${OPS.toLocaleString()} tasks)`, iterations: 20, warmup: 5, fn: () => schedulerBench("js") },
-  { name: `scheduler auto (${OPS.toLocaleString()} tasks)`, iterations: 20, warmup: 5, fn: () => schedulerBench("auto") },
+  { name: `scheduler ts (${OPS.toLocaleString()} tasks)`, iterations: 20, warmup: 5, fn: () => schedulerBench("ts") },
   { name: `scheduler wasm (${OPS.toLocaleString()} tasks)`, iterations: 20, warmup: 5, fn: () => schedulerBench("wasm") },
 ];

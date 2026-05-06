@@ -4,8 +4,8 @@ import type { Fiber } from "../fiber";
 import type { HostExecutor } from "../hostAction";
 import type { FiberId, NodeId, OpcodeNode, OpcodeProgram, RefId } from "./opcodes";
 
-export type FiberEngineKind = "js" | "wasm" | "wasm-reference";
-export type RuntimeEngineMode = FiberEngineKind | "auto";
+export type FiberEngineKind = "ts" | "wasm";
+export type RuntimeEngineMode = FiberEngineKind;
 
 export type FiberEngineStats = {
   readonly engine: string;
@@ -18,8 +18,11 @@ export type FiberEngineStats = {
   readonly interruptedFibers: number;
   readonly pendingHostEffects: number;
   readonly hostRegistryRefs?: number;
+  readonly hostRegistryStats?: unknown;
   readonly wasm?: unknown;
   readonly fiberRegistry?: unknown;
+  readonly readyQueue?: unknown;
+  readonly timerWheel?: unknown;
 };
 
 export interface FiberEngine<R = unknown> {
@@ -51,13 +54,21 @@ export type EngineEvent =
   | { readonly kind: "InvokeHostAction"; readonly fiberId: FiberId; readonly actionRef: RefId; readonly decodeRef?: RefId };
 
 export interface WasmBridge {
-  readonly kind: "wasm" | "wasm-reference";
+  readonly kind: "wasm";
+  readonly supportsBinary?: boolean;
+  readonly supportsZeroCopy?: boolean;
+  readonly supportsNoJsonMetrics?: boolean;
   createFiber(program: OpcodeProgram): FiberId;
   poll(fiberId: FiberId): EngineEvent;
+  driveBatch?(fiberId: FiberId, budget: number): readonly EngineEvent[];
   provideValue(fiberId: FiberId, valueRef: RefId): EngineEvent;
+  provideValueBatch?(fiberId: FiberId, valueRef: RefId, budget: number): readonly EngineEvent[];
   provideError(fiberId: FiberId, errorRef: RefId): EngineEvent;
+  provideErrorBatch?(fiberId: FiberId, errorRef: RefId, budget: number): readonly EngineEvent[];
   provideEffect(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[]): EngineEvent;
+  provideEffectBatch?(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[], budget: number): readonly EngineEvent[];
   interrupt(fiberId: FiberId, reasonRef: RefId): EngineEvent;
+  interruptBatch?(fiberId: FiberId, reasonRef: RefId, budget: number): readonly EngineEvent[];
   dropFiber(fiberId: FiberId): void;
   stats(): unknown;
 }

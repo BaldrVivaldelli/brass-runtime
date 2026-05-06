@@ -9,6 +9,7 @@ import type {
 import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../../core/types/asyncEffect";
 import type { Async } from "../../core/types/asyncEffect";
 import { sleepMs } from "../sleep";
+import { makeWasmRetryPlanner } from "./wasmRetryPlanner";
 
 export type RetryPolicy = {
     maxRetries: number;
@@ -23,6 +24,11 @@ export type RetryPolicy = {
     retryOnMethods?: HttpMethod[];
     retryOnStatus?: (status: number) => boolean;
     retryOnError?: (e: HttpError) => boolean;
+
+    /** Strict engine selector for retry planning. Defaults to ts. */
+    engine?: "ts" | "wasm";
+    /** Back-compat knob: wasm=true maps to engine="wasm", wasm=false maps to engine="ts". */
+    wasm?: boolean;
 };
 
 const defaultRetryableMethods: HttpMethod[] = ["GET", "HEAD", "OPTIONS"];
@@ -68,6 +74,16 @@ const normalizeBudget = (ms: number | undefined): number | undefined => {
     return Math.max(0, Math.floor(ms));
 };
 
+const resolveRetryEngine = (p: RetryPolicy): "ts" | "wasm" => {
+    if (p.engine !== undefined) {
+        if (p.engine === "ts" || p.engine === "wasm") return p.engine;
+        throw new Error(`brass-runtime retry engine must be 'ts' or 'wasm'; received '${String(p.engine)}'`);
+    }
+    if (p.wasm === true) return "wasm";
+    if (p.wasm === false) return "ts";
+    return "ts";
+};
+
 export const withRetry =
     (p: RetryPolicy): HttpMiddleware =>
         (next: HttpClientFn): HttpClientFn => {
@@ -75,40 +91,77 @@ export const withRetry =
             const retryOnStatus = p.retryOnStatus ?? defaultRetryOnStatus;
             const retryOnError = p.retryOnError ?? defaultRetryOnError;
             const maxElapsedMs = normalizeBudget(p.maxElapsedMs);
+            const retryEngine = resolveRetryEngine(p);
+            const wasmPlanner = retryEngine === "wasm" ? makeWasmRetryPlanner() : undefined;
 
             const isMethodRetryable = (req: HttpRequest) => retryOnMethods.includes(req.method);
 
-            const loop = (req: HttpRequest, attempt: number, startedAt: number): Async<unknown, HttpError, HttpWireResponse> => {
+            const nextDelay = (retryId: number | undefined, attempt: number, startedAt: number, retryable: boolean, retryAfter?: number): number | undefined => {
+                if (!retryable) return undefined;
+                if (wasmPlanner && retryId !== undefined) {
+                    return wasmPlanner.nextDelayMs(retryId, {
+                        nowMs: performance.now(),
+                        retryable,
+                        retryAfterMs: retryAfter,
+                    });
+                }
+                const remainingBudget = maxElapsedMs === undefined ? Number.POSITIVE_INFINITY : maxElapsedMs - (performance.now() - startedAt);
+                if (remainingBudget <= 0) return undefined;
+                const rawDelay = retryAfter === undefined
+                    ? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs)
+                    : Math.min(retryAfter, p.maxDelayMs);
+                return Math.max(0, Math.min(rawDelay, remainingBudget));
+            };
+
+            const dropPlanner = (retryId: number | undefined) => {
+                if (retryId !== undefined) wasmPlanner?.drop(retryId);
+            };
+
+            const loop = (req: HttpRequest, attempt: number, startedAt: number, retryId: number | undefined): Async<unknown, HttpError, HttpWireResponse> => {
                 if (!isMethodRetryable(req)) return next(req);
 
                 const remainingBudget = () =>
                     maxElapsedMs === undefined ? Number.POSITIVE_INFINITY : maxElapsedMs - (performance.now() - startedAt);
-                const delayWithinBudget = (delayMs: number) => Math.max(0, Math.min(delayMs, remainingBudget()));
 
                 return asyncFold(
                     next(req),
                     (e) => {
-                        if (e._tag === "Abort" || e._tag === "BadUrl" || e._tag === "PoolRejected") return asyncFail(e);
+                        if (e._tag === "Abort" || e._tag === "BadUrl" || e._tag === "PoolRejected") {
+                            dropPlanner(retryId);
+                            return asyncFail(e);
+                        }
 
-                        const canRetry = attempt < p.maxRetries && retryOnError(e) && remainingBudget() > 0;
-                        if (!canRetry) return asyncFail(e);
-
-                        const d = delayWithinBudget(backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs));
-                        if (d <= 0 && maxElapsedMs !== undefined) return asyncFail(e);
-                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt));
+                        const retryable = attempt < p.maxRetries && retryOnError(e) && remainingBudget() > 0;
+                        const d = nextDelay(retryId, attempt, startedAt, retryable);
+                        if (d === undefined || (d <= 0 && maxElapsedMs !== undefined)) {
+                            dropPlanner(retryId);
+                            return asyncFail(e);
+                        }
+                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt, retryId));
                     },
                     (w) => {
-                        const canRetry = attempt < p.maxRetries && retryOnStatus(w.status) && remainingBudget() > 0;
-                        if (!canRetry) return asyncSucceed(w);
-
+                        const retryable = attempt < p.maxRetries && retryOnStatus(w.status) && remainingBudget() > 0;
                         const ra = p.respectRetryAfter === false ? undefined : retryAfterMs(w.headers);
-                        const rawDelay = ra === undefined ? backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs) : Math.min(ra, p.maxDelayMs);
-                        const d = delayWithinBudget(rawDelay);
-                        if (d <= 0 && maxElapsedMs !== undefined) return asyncSucceed(w);
-                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt));
+                        const d = nextDelay(retryId, attempt, startedAt, retryable, ra);
+                        if (d === undefined || (d <= 0 && maxElapsedMs !== undefined)) {
+                            dropPlanner(retryId);
+                            return asyncSucceed(w);
+                        }
+                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt, retryId));
                     }
                 );
             };
 
-            return (req) => loop(req, 0, performance.now());
+            return (req) => {
+                if (!isMethodRetryable(req)) return next(req);
+                const startedAt = performance.now();
+                const retryId = wasmPlanner?.start({
+                    nowMs: startedAt,
+                    maxRetries: p.maxRetries,
+                    baseDelayMs: p.baseDelayMs,
+                    maxDelayMs: p.maxDelayMs,
+                    maxElapsedMs,
+                });
+                return loop(req, 0, startedAt, retryId);
+            };
         };

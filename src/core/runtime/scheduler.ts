@@ -25,7 +25,7 @@ const scheduleMacro = (() => {
     return (f: () => void) => setTimeout(f, 0);
 })();
 
-export type SchedulerEngine = "auto" | "js" | "wasm";
+export type SchedulerEngine = "ts" | "wasm";
 export type LaneStatsData = {
     key: string;
     len: number;
@@ -94,7 +94,7 @@ class LaneState {
     droppedTasks = 0;
 
     constructor(readonly key: string, initial: number, max: number) {
-        this.queue = makeBoundedRingBuffer<QueuedTask>(initial, max, { engine: "js" });
+        this.queue = makeBoundedRingBuffer<QueuedTask>(initial, max, { engine: "ts" });
     }
 }
 
@@ -112,7 +112,7 @@ class JsSchedulerState {
     droppedTasks = 0;
     yieldedByBudget = 0;
 
-    constructor(readonly options: SchedulerOptions) { }
+    constructor(readonly options: SchedulerOptions) {}
 
     get totalLength(): number {
         let n = 0;
@@ -167,160 +167,187 @@ class WasmSchedulerState {
 }
 
 export function sanitizeLaneKey(value: string): string {
-    const trimmed = value.trim();
     let key = "";
-    let inWhitespace = false;
+    let previousWasColon = false;
 
-    for (let i = 0; i < trimmed.length; i++) {
-        const char = trimmed[i];
-        if (char === ' ' || char === '\t' || char === '\n' || char === '\r') {
-            if (!inWhitespace) {
-                key += ":";
-                inWhitespace = true;
-            }
-        } else {
-            inWhitespace = false;
-            if (
-                (char >= 'a' && char <= 'z') ||
-                (char >= 'A' && char <= 'Z') ||
-                (char >= '0' && char <= '9') ||
-                char === '_' || char === '.' || char === ':' || char === '/' || char === '#' || char === '-'
-            ) {
-                key += char;
-            } else {
-                key += "_";
-            }
+    for (const ch of value.trim()) {
+        if (isLaneWhitespace(ch)) {
+            if (!previousWasColon && key.length > 0) key += ":";
+            previousWasColon = true;
+            continue;
         }
+
+        if (isAsciiAlphaNumeric(ch) || ch === "_" || ch === "." || ch === ":" || ch === "/" || ch === "#" || ch === "-") {
+            key += ch;
+            previousWasColon = ch === ":";
+        } else {
+            key += "_";
+            previousWasColon = false;
+        }
+
+        if (key.length >= 160) break;
     }
 
-    return key.length > 0 ? key.slice(0, 160) : "anonymous";
+    return key.length > 0 ? key : "anonymous";
+}
+
+function isLaneWhitespace(ch: string): boolean {
+    return ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
+}
+
+function isAsciiAlphaNumeric(ch: string): boolean {
+    if (ch.length !== 1) return false;
+    const code = ch.charCodeAt(0);
+    return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
 export function laneTag(lane: string, tag: string = "task"): string {
     return `lane:${sanitizeLaneKey(lane)}|${tag}`;
 }
 
-function isDigits(str: string): boolean {
-    if (str.length === 0) return false;
-    for (let i = 0; i < str.length; i++) {
-        if (str[i] < '0' || str[i] > '9') return false;
-    }
-    return true;
+function extractStackLocation(line: string): string | undefined {
+    const raw = extractParenthesizedLocation(line) ?? extractAtLocation(line);
+    if (!raw) return undefined;
+    return stripLineAndColumn(raw);
 }
 
-function extractStackLocation(line: string): string | undefined {
-    let raw: string | undefined;
+function extractParenthesizedLocation(line: string): string | undefined {
+    const closeIdx = line.lastIndexOf(")");
+    if (closeIdx <= 0) return undefined;
 
-    const openParen = line.indexOf("(");
-    const closeParen = line.indexOf(")", openParen);
+    const openIdx = line.lastIndexOf("(", closeIdx - 1);
+    if (openIdx < 0 || openIdx + 1 >= closeIdx) return undefined;
 
-    if (openParen !== -1 && closeParen !== -1) {
-        raw = line.slice(openParen + 1, closeParen);
-    } else {
-        const trimmed = line.trim();
-        const atIndex = trimmed.indexOf("at ");
-        if (atIndex !== -1) {
-            raw = trimmed.slice(atIndex + 3).trim();
-        }
+    return line.slice(openIdx + 1, closeIdx).trim();
+}
+
+function extractAtLocation(line: string): string | undefined {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("at ")) return undefined;
+
+    const afterAt = trimmed.slice(3).trimStart();
+    if (!afterAt) return undefined;
+
+    const lastSpace = afterAt.lastIndexOf(" ");
+    return (lastSpace >= 0 ? afterAt.slice(lastSpace + 1) : afterAt).trim();
+}
+
+function stripLineAndColumn(location: string): string {
+    let out = location.trim();
+    out = stripTrailingNumericSegment(out);
+    out = stripTrailingNumericSegment(out);
+    return out;
+}
+
+function stripTrailingNumericSegment(value: string): string {
+    const colon = value.lastIndexOf(":");
+    if (colon < 0 || colon + 1 >= value.length) return value;
+    for (let i = colon + 1; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        if (code < 48 || code > 57) return value;
     }
+    return value.slice(0, colon);
+}
 
-    if (!raw) return undefined;
-
-    const parts = raw.split(":");
-    if (parts.length > 1) {
-        const last = parts[parts.length - 1];
-        if (isDigits(last)) {
-            parts.pop();
-            if (parts.length > 1) {
-                const secondLast = parts[parts.length - 1];
-                if (isDigits(secondLast)) {
-                    parts.pop();
-                }
-            }
-        }
-        raw = parts.join(":");
-    }
-
-    return raw;
+function normalizeSlashes(value: string): string {
+    return value.replaceAll("\\", "/").trim();
 }
 
 function isPseudoStackLocation(location: string): boolean {
-    const normalized = location.trim().split("\\").join("/");
+    const normalized = normalizeSlashes(location);
     return (
         normalized === "<anonymous>" ||
         normalized === "anonymous" ||
         normalized.startsWith("node:") ||
-        normalized.startsWith("node_modules/") ||
-        normalized.includes("/node_modules/")
+        normalized.includes("/node_modules/") ||
+        normalized.startsWith("node_modules/")
     );
 }
 
 function isInternalRuntimeFrame(location: string, line: string): boolean {
-    const normalized = location.split("\\").join("/");
-    const frame = line.split("\\").join("/");
+    const normalized = normalizeSlashes(location);
+    const frame = normalizeSlashes(line);
 
-    const isSrcRuntime = normalized.startsWith("src/core/runtime/") || normalized.includes("/src/core/runtime/");
-    const isTest = normalized.includes("src/core/runtime/__tests__/") || normalized.endsWith("src/core/runtime/__tests__");
-    if (isSrcRuntime && !isTest) return true;
-
-    const isDistRuntime =
-        (normalized.startsWith("dist/") || normalized.includes("/dist/")) &&
-        (normalized.includes("index.") || normalized.includes("runtime."));
-
-    if (isDistRuntime) {
-        if (normalized.endsWith(".mjs") || normalized.endsWith(".cjs") || normalized.endsWith(".js")) {
-            return true;
-        }
-    }
-
-    const isBrassRuntime = normalized.startsWith("node_modules/brass-runtime/") ||
+    return (
+        isRuntimeSourcePath(normalized) ||
+        isRuntimeDistFile(normalized) ||
         normalized.includes("/node_modules/brass-runtime/") ||
-        normalized === "node_modules/brass-runtime" ||
-        normalized.endsWith("/node_modules/brass-runtime");
-    if (isBrassRuntime) return true;
+        normalized.endsWith("/node_modules/brass-runtime") ||
+        INTERNAL_FRAME_TOKENS.some((token) => frame.includes(token))
+    );
+}
 
-    const internalMethods = [
-        "inferCallerLaneFromStack", "Runtime.", "RuntimeFiber.",
-        "EngineFiberHandle.", "WasmFiberEngine.", "JsFiberEngine.", "Scheduler."
-    ];
-    for (const method of internalMethods) {
-        if (frame.includes(method)) return true;
-    }
+const INTERNAL_FRAME_TOKENS = [
+    "inferCallerLaneFromStack",
+    "Runtime.",
+    "RuntimeFiber.",
+    "EngineFiberHandle.",
+    "WasmFiberEngine.",
+    "JsFiberEngine.",
+    "Scheduler.",
+];
 
-    return false;
+function isRuntimeSourcePath(path: string): boolean {
+    const marker = "src/core/runtime/";
+    const idx = path.startsWith(marker) ? 0 : path.indexOf(`/${marker}`);
+    if (idx < 0) return false;
+
+    const offset = idx === 0 ? marker.length : idx + marker.length + 1;
+    const rest = path.slice(offset);
+
+    return rest !== "__tests__" && !rest.startsWith("__tests__/");
+}
+
+function isRuntimeDistFile(path: string): boolean {
+    if (!hasPathSegment(path, "dist")) return false;
+
+    const file = basename(path);
+    const stem = dropKnownExtension(file);
+
+    if (stem === file) return false;
+    return stem === "index" || stem.includes("runtime");
+}
+
+function hasPathSegment(path: string, segment: string): boolean {
+    return normalizeSlashes(path).split("/").includes(segment);
+}
+
+function basename(path: string): string {
+    const normalized = normalizeSlashes(path);
+    const slash = normalized.lastIndexOf("/");
+    return slash < 0 ? normalized : normalized.slice(slash + 1);
 }
 
 function normalizeCallerLocation(location: string): string {
-    let out = location.split("\\").join("/");
-    if (out.startsWith("file://")) out = out.slice(7);
+    let out = normalizeSlashes(location);
+    if (out.startsWith("file://")) out = out.slice("file://".length);
 
     const srcIdx = out.lastIndexOf("/src/");
     if (srcIdx >= 0) {
         out = out.slice(srcIdx + 5);
     } else {
-        let cwd = "";
-        if (typeof process !== "undefined" && process.cwd) {
-            cwd = process.cwd().split("\\").join("/");
-        }
-        if (cwd && out.startsWith(cwd + "/")) {
-            out = out.slice(cwd.length + 1);
-        }
-
-        const parts = out.split("/");
-        if (parts.length > 2) {
-            out = parts.slice(-2).join("/");
-        }
+        const cwd = typeof process !== "undefined" ? normalizeSlashes(process.cwd()) : "";
+        if (cwd && out.startsWith(cwd + "/")) out = out.slice(cwd.length + 1);
+        out = lastPathSegments(out, 2);
     }
 
-    const extensions = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
+    return dropKnownExtension(out);
+}
+
+function lastPathSegments(path: string, count: number): string {
+    const parts = normalizeSlashes(path).split("/").filter((part) => part.length > 0);
+    if (parts.length <= count) return path;
+    return parts.slice(parts.length - count).join("/");
+}
+
+function dropKnownExtension(path: string): string {
+    const extensions = [".tsx", ".mts", ".cts", ".jsx", ".mjs", ".cjs", ".ts", ".js"];
+
     for (const ext of extensions) {
-        if (out.endsWith(ext)) {
-            out = out.slice(0, -ext.length);
-            break;
-        }
+        if (path.endsWith(ext)) return path.slice(0, -ext.length);
     }
 
-    return out;
+    return path;
 }
 
 /**
@@ -341,32 +368,35 @@ export function inferCallerLaneFromStack(stack: string | undefined = new Error()
 }
 
 function inferLane(tag: string): string {
-    if (tag.startsWith("lane:")) {
-        const pipeIdx = tag.indexOf("|");
-        if (pipeIdx !== -1) return sanitizeLaneKey(tag.slice(5, pipeIdx));
-    }
-    if (tag.startsWith("caller:")) {
-        const pipeIdx = tag.indexOf("|");
-        if (pipeIdx !== -1) return sanitizeLaneKey(tag.slice(7, pipeIdx));
-    }
+    const explicit = extractTaggedLane(tag, "lane:");
+    if (explicit) return sanitizeLaneKey(explicit);
+    const caller = extractTaggedLane(tag, "caller:");
+    if (caller) return sanitizeLaneKey(caller);
 
-    let first = tag;
-    let earliestIdx = tag.length;
-    const separators = ['.', '#', '/'];
-
-    for (const sep of separators) {
-        const idx = tag.indexOf(sep);
-        if (idx !== -1 && idx < earliestIdx) {
-            earliestIdx = idx;
-        }
-    }
-
-    first = tag.slice(0, earliestIdx);
+    const firstSep = firstSeparatorIndex(tag);
+    const first = firstSep < 0 ? tag : tag.slice(0, firstSep);
     return sanitizeLaneKey(first || "anonymous");
 }
 
+function extractTaggedLane(tag: string, prefix: string): string | undefined {
+    if (!tag.startsWith(prefix)) return undefined;
+    const end = tag.indexOf("|", prefix.length);
+    if (end < 0) return undefined;
+    const value = tag.slice(prefix.length, end);
+    return value.length > 0 ? value : undefined;
+}
+
+function firstSeparatorIndex(value: string): number {
+    let best = -1;
+    for (const sep of [".", "#", "/"] as const) {
+        const idx = value.indexOf(sep);
+        if (idx >= 0 && (best < 0 || idx < best)) best = idx;
+    }
+    return best;
+}
+
 export class Scheduler {
-    private readonly engine: "js" | "wasm";
+    private readonly engine: "ts" | "wasm";
     private readonly js?: JsSchedulerState;
     private readonly wasm?: WasmSchedulerState;
     private readonly flushBudget: number;
@@ -383,7 +413,7 @@ export class Scheduler {
         this.laneCapacity = options.laneCapacity ?? DEFAULT_LANE_CAPACITY;
         this.laneBudget = options.laneBudget ?? DEFAULT_LANE_BUDGET;
         this.maxLanes = options.maxLanes ?? DEFAULT_MAX_LANES;
-        const requested = options.engine ?? "js";
+        const requested = options.engine ?? "ts";
 
         if (requested === "wasm") {
             this.wasm = new WasmSchedulerState(options);
@@ -391,15 +421,13 @@ export class Scheduler {
             this.fallbackUsed = false;
             return;
         }
-        if (requested === "auto" && resolveWasmScheduler()) {
-            this.wasm = new WasmSchedulerState(options);
-            this.engine = "wasm";
+        if (requested === "ts") {
+            this.js = new JsSchedulerState({ ...options, engine: "ts" });
+            this.engine = "ts";
             this.fallbackUsed = false;
             return;
         }
-        this.js = new JsSchedulerState({ ...options, engine: "js" });
-        this.engine = "js";
-        this.fallbackUsed = requested === "auto";
+        throw new Error(`brass-runtime scheduler engine must be 'ts' or 'wasm'; received '${String(requested)}'`);
     }
 
     schedule(task: Task, tag: string = "anonymous"): ScheduleResult {
@@ -412,7 +440,7 @@ export class Scheduler {
         if (this.wasm) return this.wasm.stats();
         const js = this.js!;
         const lanes = Array.from(js.lanes.values()).map((lane) => ({ key: lane.key, len: lane.queue.length, capacity: lane.queue.capacity, enqueuedTasks: lane.enqueuedTasks, executedTasks: lane.executedTasks, droppedTasks: lane.droppedTasks }));
-        return { engine: "js", fallbackUsed: this.fallbackUsed, data: { len: js.totalLength, capacity: js.totalCapacity, phase: js.flushing ? "flushing" : js.scheduled ? "scheduled" : "idle", scheduledFlushes: js.scheduledFlushes, completedFlushes: js.completedFlushes, enqueuedTasks: js.enqueuedTasks, executedTasks: js.executedTasks, droppedTasks: js.droppedTasks, yieldedByBudget: js.yieldedByBudget, lanes } };
+        return { engine: "ts", fallbackUsed: false, data: { len: js.totalLength, capacity: js.totalCapacity, phase: js.flushing ? "flushing" : js.scheduled ? "scheduled" : "idle", scheduledFlushes: js.scheduledFlushes, completedFlushes: js.completedFlushes, enqueuedTasks: js.enqueuedTasks, executedTasks: js.executedTasks, droppedTasks: js.droppedTasks, yieldedByBudget: js.yieldedByBudget, lanes } };
     }
 
     private scheduleWasm(task: Task, tag: string): ScheduleResult {

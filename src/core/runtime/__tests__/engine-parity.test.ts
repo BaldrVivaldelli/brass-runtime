@@ -14,12 +14,12 @@ import { Runtime } from "../runtime";
 import { Scheduler } from "../scheduler";
 import type { RuntimeEngineMode } from "../engine/types";
 
-const candidateModes: RuntimeEngineMode[] = ["wasm-reference", "wasm", "auto"];
+const candidateModes: RuntimeEngineMode[] = ["wasm"];
 
 function supportedParityModes(): RuntimeEngineMode[] {
   return candidateModes.filter((engine) => {
     try {
-      const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "js" }) });
+      const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "ts" }) });
       void rt.stats();
       rt.shutdown();
       return true;
@@ -31,7 +31,7 @@ function supportedParityModes(): RuntimeEngineMode[] {
 
 function runToExit<A>(engine: RuntimeEngineMode, effect: Async<unknown, unknown, A>): Promise<Exit<unknown, A>> {
   return new Promise((resolve) => {
-    const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "js" }) });
+    const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "ts" }) });
     rt.unsafeRunAsync(effect, (exit) => {
       rt.shutdown();
       resolve(exit);
@@ -117,10 +117,10 @@ const cases: Case[] = [
 
 describe("Runtime engine parity", () => {
   for (const engine of supportedParityModes()) {
-    describe(`${engine} vs js`, () => {
+    describe(`${engine} vs ts`, () => {
       for (const testCase of cases) {
         it(`matches JS exit for ${testCase.name}`, async () => {
-          const expected = await runToExit("js", testCase.effect);
+          const expected = await runToExit("ts", testCase.effect);
           const actual = await runToExit(engine, testCase.effect);
           expectSameExit(actual, expected);
         });
@@ -128,10 +128,17 @@ describe("Runtime engine parity", () => {
     });
   }
 
-  it("auto remains transparent for default TS consumers", async () => {
+  it("default runtime uses strict TS mode", async () => {
     const rt = Runtime.make({});
     await expect(rt.toPromise(asyncSucceed("ok"))).resolves.toBe("ok");
-    expect(rt.engineMode).toBe("auto");
+    expect(rt.engineMode).toBe("ts");
+    expect(rt.stats().fallbackUsed).toBe(false);
     rt.shutdown();
+  });
+
+  it("rejects unsupported engine modes at startup", () => {
+    expect(() => new Runtime({ env: {}, engine: "auto" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
+    expect(() => new Runtime({ env: {}, engine: "wasm-reference" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
+    expect(() => new Runtime({ env: {}, engine: "js" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
   });
 });

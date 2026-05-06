@@ -1,4 +1,4 @@
-import type { EngineEvent, WasmBridge } from "../types";
+import type { EngineEvent } from "../types";
 import type { FiberId, NodeId, OpcodeNode, OpcodeProgram, RefId } from "../opcodes";
 
 type Frame =
@@ -14,7 +14,7 @@ type FiberVm = {
   lastEvent: EngineEvent | undefined;
 };
 
-export class ReferenceWasmBridge implements WasmBridge {
+export class ReferenceWasmBridge {
   readonly kind = "wasm-reference" as const;
 
   private nextFiberId = 1;
@@ -23,6 +23,9 @@ export class ReferenceWasmBridge implements WasmBridge {
   private completed = 0;
   private failed = 0;
   private interrupted = 0;
+  private eventCalls = 0;
+  private eventsReceived = 0;
+  private maxEventsPerCall = 0;
 
   createFiber(program: OpcodeProgram): FiberId {
     const id = this.nextFiberId++;
@@ -39,35 +42,62 @@ export class ReferenceWasmBridge implements WasmBridge {
   }
 
   poll(fiberId: FiberId): EngineEvent {
+    return this.driveBatch(fiberId, 1)[0] ?? { kind: "Continue", fiberId };
+  }
+
+  driveBatch(fiberId: FiberId, _budget: number): readonly EngineEvent[] {
     const fiber = this.mustFiber(fiberId);
-    if (fiber.status === "suspended" && fiber.lastEvent) return fiber.lastEvent;
-    return this.step(fiber);
+    const event = fiber.status === "suspended" && fiber.lastEvent ? fiber.lastEvent : this.step(fiber);
+    this.accountBatch(1);
+    return [event];
   }
 
   provideValue(fiberId: FiberId, valueRef: RefId): EngineEvent {
+    return this.provideValueBatch(fiberId, valueRef, 1)[0] ?? { kind: "Continue", fiberId };
+  }
+
+  provideValueBatch(fiberId: FiberId, valueRef: RefId, _budget: number): readonly EngineEvent[] {
     const fiber = this.mustFiber(fiberId);
     fiber.status = "running";
     fiber.lastEvent = undefined;
-    return this.success(fiber, valueRef);
+    const event = this.success(fiber, valueRef);
+    this.accountBatch(1);
+    return [event];
   }
 
   provideError(fiberId: FiberId, errorRef: RefId): EngineEvent {
+    return this.provideErrorBatch(fiberId, errorRef, 1)[0] ?? { kind: "Continue", fiberId };
+  }
+
+  provideErrorBatch(fiberId: FiberId, errorRef: RefId, _budget: number): readonly EngineEvent[] {
     const fiber = this.mustFiber(fiberId);
     fiber.status = "running";
     fiber.lastEvent = undefined;
-    return this.failure(fiber, errorRef);
+    const event = this.failure(fiber, errorRef);
+    this.accountBatch(1);
+    return [event];
   }
 
   provideEffect(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[]): EngineEvent {
+    return this.provideEffectBatch(fiberId, root, nodes, 1)[0] ?? { kind: "Continue", fiberId };
+  }
+
+  provideEffectBatch(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[], _budget: number): readonly EngineEvent[] {
     const fiber = this.mustFiber(fiberId);
     fiber.status = "running";
     fiber.lastEvent = undefined;
     fiber.program.nodes.push(...nodes.map((node) => ({ ...node })) as OpcodeNode[]);
     fiber.current = root;
-    return this.step(fiber);
+    const event = this.step(fiber);
+    this.accountBatch(1);
+    return [event];
   }
 
   interrupt(fiberId: FiberId, reasonRef: RefId): EngineEvent {
+    return this.interruptBatch(fiberId, reasonRef, 1)[0] ?? { kind: "Interrupted", fiberId, reasonRef };
+  }
+
+  interruptBatch(fiberId: FiberId, reasonRef: RefId, _budget: number): readonly EngineEvent[] {
     const fiber = this.mustFiber(fiberId);
     fiber.status = "interrupted";
     fiber.current = undefined;
@@ -75,7 +105,8 @@ export class ReferenceWasmBridge implements WasmBridge {
     this.interrupted += 1;
     const event: EngineEvent = { kind: "Interrupted", fiberId, reasonRef };
     fiber.lastEvent = event;
-    return event;
+    this.accountBatch(1);
+    return [event];
   }
 
   dropFiber(fiberId: FiberId): void {
@@ -97,7 +128,20 @@ export class ReferenceWasmBridge implements WasmBridge {
       completed: this.completed,
       failed: this.failed,
       interrupted: this.interrupted,
+      bridge: {
+        supportsBinary: false,
+        eventCalls: this.eventCalls,
+        eventsReceived: this.eventsReceived,
+        eventsPerCall: this.eventCalls === 0 ? 0 : this.eventsReceived / this.eventCalls,
+        maxEventsPerCall: this.maxEventsPerCall,
+      },
     };
+  }
+
+  private accountBatch(count: number): void {
+    this.eventCalls += 1;
+    this.eventsReceived += count;
+    this.maxEventsPerCall = Math.max(this.maxEventsPerCall, count);
   }
 
   private mustFiber(fiberId: FiberId): FiberVm {

@@ -1,9 +1,10 @@
 export * from "./JsFiberEngine";
 export * from "./WasmFiberEngine";
 export * from "./FiberHandleImpl";
-export * from "./bridge/ReferenceWasmBridge";
 export * from "./bridge/WasmPackFiberBridge";
 export * from "./bridge/WasmFiberRegistryBridge";
+export * from "./bridge/WasmFiberReadyQueueBridge";
+export * from "./binaryAbi";
 
 export type {
   EngineEvent,
@@ -33,4 +34,5 @@ export type {
   ProgramPatch,
   RefId,
   SyncRef,
+  HostRegistryStats,
 } from "./opcodes";

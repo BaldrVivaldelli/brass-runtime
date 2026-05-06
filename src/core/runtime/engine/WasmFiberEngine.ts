@@ -7,9 +7,10 @@ import type { HostAction, HostActionResult } from "../hostAction";
 import { ProgramBuilder, type AsyncRegisterRef, type DecodeRef, type FiberId, type FlatMapRef, type FoldFailureRef, type FoldSuccessRef, type HostRegistry, type RefId, type SyncRef } from "./opcodes";
 import type { EngineEvent, FiberEngine, FiberEngineKind, FiberEngineStats, WasmBridge, WasmEngineRuntime } from "./types";
 import { EngineFiberHandle } from "./FiberHandleImpl";
-import { ReferenceWasmBridge } from "./bridge/ReferenceWasmBridge";
 import { WasmPackFiberBridge } from "./bridge/WasmPackFiberBridge";
 import { WasmFiberRegistryBridge } from "./bridge/WasmFiberRegistryBridge";
+import { makeFiberReadyQueue, type FiberReadyQueue } from "./bridge/WasmFiberReadyQueueBridge";
+import { makeWasmTimerWheel, type WasmTimerWheelBridge, type TimerEvent } from "./bridge/WasmTimerWheelBridge";
 
 type WasmFiberState<R, E = unknown, A = unknown> = {
   readonly fiberId: FiberId;
@@ -21,19 +22,26 @@ type WasmFiberState<R, E = unknown, A = unknown> = {
   completed: boolean;
   status: "running" | "suspended" | "done" | "failed" | "interrupted";
   readonly pendingCleanups: Set<() => void>;
+  deadlineTimerId?: number;
+  hostActionToken: number;
 };
+
+type PendingResume =
+  | { readonly kind: "value"; readonly ref: RefId }
+  | { readonly kind: "error"; readonly ref: RefId };
 
 export type WasmFiberEngineOptions = {
   readonly bridge?: WasmBridge;
   readonly modulePath?: string;
-  readonly reference?: boolean;
 };
 
 const DEFAULT_BUDGET = 4096;
+const TIMER_KIND_HOST_ACTION = 1;
 
 export class WasmFiberEngine<R> implements FiberEngine<R> {
   readonly kind: FiberEngineKind;
   private readonly bridge: WasmBridge;
+  private readonly readyQueue: FiberReadyQueue;
 
   private startedFibers = 0;
   private runningFibers = 0;
@@ -42,16 +50,25 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private failedFibers = 0;
   private interruptedFibers = 0;
   private pendingHostEffects = 0;
+  private readyDrainScheduled = false;
+  private readyDraining = false;
   private readonly states = new Map<FiberId, WasmFiberState<R, any, any>>();
+  private readonly pendingResumes = new Map<FiberId, PendingResume>();
   private readonly fiberRegistry?: WasmFiberRegistryBridge;
+  private readonly timerWheel?: WasmTimerWheelBridge;
 
   constructor(
     private readonly runtime: WasmEngineRuntime<R> & any,
     options: WasmFiberEngineOptions = {},
   ) {
-    this.bridge = options.bridge ?? (options.reference ? new ReferenceWasmBridge() : new WasmPackFiberBridge(options.modulePath));
+    this.bridge = options.bridge ?? new WasmPackFiberBridge(options.modulePath);
+    if (this.bridge.kind !== "wasm") {
+      throw new Error("brass-runtime strict mode requires a real WASM bridge; wasm-reference/TS fallback bridges are not allowed");
+    }
     this.kind = this.bridge.kind;
-    this.fiberRegistry = this.kind === "wasm" ? new WasmFiberRegistryBridge() : undefined;
+    this.fiberRegistry = new WasmFiberRegistryBridge();
+    this.readyQueue = makeFiberReadyQueue({ engine: "wasm" });
+    this.timerWheel = makeWasmTimerWheel({ onExpired: (events) => this.onTimerExpired(events) });
   }
 
   fork<E, A>(effect: Async<R, E, A>, scopeId?: number): Fiber<E, A> & { schedule?: (tag?: string) => void } {
@@ -63,11 +80,12 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     const handle = new EngineFiberHandle<R, E, A>(
       fiberId,
       this.runtime,
-      (id) => this.scheduleWakeup(id),
+      (id) => this.driveById(id),
       (id, reason) => this.interruptById(id, reason),
       (id) => this.fiberRegistry?.addJoiner(id),
       (id) => this.fiberRegistry?.markQueued(id),
       (id, label) => this.schedulerDropped(id, label),
+      (id, label) => this.enqueueFiberById(id, label),
     );
     if (scopeId !== undefined) handle.scopeId = scopeId;
 
@@ -81,6 +99,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
       completed: false,
       status: "running",
       pendingCleanups: new Set(),
+      hostActionToken: 0,
     };
 
     this.states.set(fiberId, state as WasmFiberState<R, any, any>);
@@ -92,20 +111,43 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
 
   stats(): FiberEngineStats {
     let hostRefs = 0;
-    for (const state of this.states.values()) hostRefs += state.registry.size();
+    let hostCapacity = 0;
+    let hostAllocated = 0;
+    let hostReleased = 0;
+    let hostReused = 0;
+    let hostStaleReads = 0;
+    for (const state of this.states.values()) {
+      const stats = state.registry.stats();
+      hostRefs += stats.live;
+      hostCapacity += stats.capacity;
+      hostAllocated += stats.allocated;
+      hostReleased += stats.released;
+      hostReused += stats.reused;
+      hostStaleReads += stats.staleReads;
+    }
     return {
       engine: this.kind,
       startedFibers: this.startedFibers,
       runningFibers: this.runningFibers,
       suspendedFibers: this.suspendedFibers,
-      queuedFibers: 0,
+      queuedFibers: this.readyQueue.len(),
       completedFibers: this.completedFibers,
       failedFibers: this.failedFibers,
       interruptedFibers: this.interruptedFibers,
       pendingHostEffects: this.pendingHostEffects,
       hostRegistryRefs: hostRefs,
+      hostRegistryStats: {
+        live: hostRefs,
+        capacity: hostCapacity,
+        allocated: hostAllocated,
+        released: hostReleased,
+        reused: hostReused,
+        staleReads: hostStaleReads,
+      },
       wasm: this.bridge.stats(),
       fiberRegistry: this.fiberRegistry?.stats(),
+      readyQueue: this.readyQueue.stats(),
+      timerWheel: this.timerWheel?.stats(),
     };
   }
 
@@ -113,16 +155,16 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     for (const state of Array.from(this.states.values())) {
       this.interruptState(state, Cause.interrupt());
     }
+    this.readyQueue.clear();
+    this.timerWheel?.dispose();
   }
 
   private scheduleWakeup(fiberId: FiberId): void {
     const state = this.states.get(fiberId);
     if (!state || state.completed) return;
 
-    // Rust keeps the compact wakeup queue and coalesces duplicate wakeups.
-    // If the registry is unavailable (reference bridge), fall back to the old direct drive.
     if (!this.fiberRegistry) {
-      this.driveById(fiberId);
+      this.enqueueFiber(state, "wakeup");
       return;
     }
 
@@ -133,30 +175,107 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private drainWakeups(): void {
     if (!this.fiberRegistry) return;
     for (const fiberId of this.fiberRegistry.drainWakeups()) {
-      this.driveById(fiberId);
+      this.enqueueFiberById(fiberId, `wasm-fiber#${fiberId}.wakeup`);
+    }
+  }
+
+  private enqueueFiber(state: WasmFiberState<R, any, any>, label: string): void {
+    const result = this.enqueueFiberById(state.fiberId, label);
+    if (result === "dropped") {
+      this.completeDie(state, new Error(`Brass WASM ready queue dropped ${label} because the lane queue is full`));
+    }
+  }
+
+  private enqueueFiberById(fiberId: FiberId, label: string): "accepted" | "dropped" {
+    const state = this.states.get(fiberId);
+    if (!state || state.completed) return "dropped";
+    const tag = this.schedulerTag(state, label);
+    const policy = this.readyQueue.enqueue(fiberId, tag);
+    if (policy === "dropped") return "dropped";
+    this.requestReadyDrain(tag);
+    return "accepted";
+  }
+
+  private requestReadyDrain(tag: string = laneTag("brass:wasm-ready", "drain")): void {
+    if (this.readyDrainScheduled || this.readyDraining) return;
+    this.readyDrainScheduled = true;
+    const result = this.runtime.scheduler.schedule(() => this.drainReadyQueue(), tag);
+    if (result === "dropped") {
+      this.readyDrainScheduled = false;
+      // Fail queued fibers rather than leaving joiners permanently suspended.
+      const dropped: FiberId[] = [];
+      while (this.readyQueue.len() > 0) {
+        const budget = this.readyQueue.beginFlush();
+        for (let i = 0; i < budget; i++) {
+          const id = this.readyQueue.shift();
+          if (id !== undefined) dropped.push(id);
+        }
+        this.readyQueue.endFlush(budget);
+      }
+      for (const id of dropped) this.schedulerDropped(id, `wasm-fiber#${id}.ready-drain`);
+    }
+  }
+
+  private drainReadyQueue(): void {
+    this.readyDrainScheduled = false;
+    if (this.readyDraining) return;
+    this.readyDraining = true;
+    const budget = this.readyQueue.beginFlush();
+    let ran = 0;
+    try {
+      while (ran < budget) {
+        const fiberId = this.readyQueue.shift();
+        if (fiberId === undefined) break;
+        ran += 1;
+        this.driveById(fiberId);
+      }
+    } finally {
+      this.readyDraining = false;
+      const policy = this.readyQueue.endFlush(ran);
+      if (policy === "micro" || policy === "macro") this.requestReadyDrain();
     }
   }
 
   private driveById(fiberId: FiberId): void {
     const state = this.states.get(fiberId);
     if (!state || state.completed) return;
+    state.handle.markDequeued();
     this.fiberRegistry?.markRunning(fiberId);
-    withCurrentFiber(state.handle as any, () => this.drive(state));
+    const initialEvents = this.consumePendingResume(state);
+    withCurrentFiber(state.handle as any, () => this.drive(state, initialEvents));
   }
 
-  private drive(state: WasmFiberState<R, any, any>, initialEvent?: EngineEvent): void {
+  private consumePendingResume(state: WasmFiberState<R, any, any>): readonly EngineEvent[] | undefined {
+    const pending = this.pendingResumes.get(state.fiberId);
+    if (!pending) return undefined;
+    this.pendingResumes.delete(state.fiberId);
+    if (pending.kind === "value") {
+      return this.bridge.provideValueBatch?.(state.fiberId, pending.ref, DEFAULT_BUDGET)
+        ?? [this.bridge.provideValue(state.fiberId, pending.ref)];
+    }
+    return this.bridge.provideErrorBatch?.(state.fiberId, pending.ref, DEFAULT_BUDGET)
+      ?? [this.bridge.provideError(state.fiberId, pending.ref)];
+  }
+
+  private drive(state: WasmFiberState<R, any, any>, initialEvents?: readonly EngineEvent[]): void {
     if (state.completed) return;
 
     let budget = DEFAULT_BUDGET;
-    let event = initialEvent ?? this.bridge.poll(state.fiberId);
+    const events: EngineEvent[] = initialEvents ? [...initialEvents] : [];
     state.status = "running";
     state.handle.setEngineStatus("running");
 
     while (!state.completed && budget-- > 0) {
       try {
+        if (events.length === 0) {
+          const next = this.bridge.driveBatch?.(state.fiberId, budget + 1) ?? [this.bridge.poll(state.fiberId)];
+          events.push(...next);
+          if (events.length === 0) events.push({ kind: "Continue", fiberId: state.fiberId });
+        }
+
+        const event = events.shift()!;
         switch (event.kind) {
           case "Continue":
-            event = this.bridge.poll(state.fiberId);
             continue;
 
           case "Done": {
@@ -180,9 +299,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
             const fn = state.registry.get<SyncRef<R>>(event.fnRef);
             try {
               const valueRef = state.registry.register(fn(this.runtime.env));
-              event = this.bridge.provideValue(state.fiberId, valueRef);
+              events.unshift(...(this.bridge.provideValueBatch?.(state.fiberId, valueRef, budget + 1) ?? [this.bridge.provideValue(state.fiberId, valueRef)]));
             } catch (error) {
-              event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+              events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
             }
             continue;
           }
@@ -193,9 +312,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
             try {
               const next = fn(value);
               const patch = state.builder.append(next as unknown as Async<unknown, unknown, unknown>);
-              event = this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes);
+              events.unshift(...(this.bridge.provideEffectBatch?.(state.fiberId, patch.root, patch.nodes, budget + 1) ?? [this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes)]));
             } catch (error) {
-              event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+              events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
             }
             continue;
           }
@@ -206,9 +325,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
             try {
               const next = fn(errorValue);
               const patch = state.builder.append(next as unknown as Async<unknown, unknown, unknown>);
-              event = this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes);
+              events.unshift(...(this.bridge.provideEffectBatch?.(state.fiberId, patch.root, patch.nodes, budget + 1) ?? [this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes)]));
             } catch (error) {
-              event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+              events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
             }
             continue;
           }
@@ -219,9 +338,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
             try {
               const next = fn(value);
               const patch = state.builder.append(next as unknown as Async<unknown, unknown, unknown>);
-              event = this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes);
+              events.unshift(...(this.bridge.provideEffectBatch?.(state.fiberId, patch.root, patch.nodes, budget + 1) ?? [this.bridge.provideEffect(state.fiberId, patch.root, patch.nodes)]));
             } catch (error) {
-              event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+              events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
             }
             continue;
           }
@@ -230,9 +349,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
             const effect = state.registry.get<Async<R, unknown, unknown>>(event.effectRef);
             try {
               const child = this.runtime.fork(effect as any, event.scopeId);
-              event = this.bridge.provideValue(state.fiberId, state.registry.register(child));
+              events.unshift(...(this.bridge.provideValueBatch?.(state.fiberId, state.registry.register(child), budget + 1) ?? [this.bridge.provideValue(state.fiberId, state.registry.register(child))]));
             } catch (error) {
-              event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+              events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
             }
             continue;
           }
@@ -248,11 +367,11 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
           }
         }
       } catch (error) {
-        event = this.bridge.provideError(state.fiberId, state.registry.register(error));
+        events.unshift(...(this.bridge.provideErrorBatch?.(state.fiberId, state.registry.register(error), budget + 1) ?? [this.bridge.provideError(state.fiberId, state.registry.register(error))]));
       }
     }
 
-    if (!state.completed) state.handle.schedule("budget-yield");
+    if (!state.completed) this.enqueueFiber(state, "budget-yield");
   }
 
   private scheduleAsync(state: WasmFiberState<R, any, any>, registerRef: RefId): void {
@@ -326,22 +445,29 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     this.markSuspended(state, "host-action");
     this.pendingHostEffects += 1;
     const action = state.registry.get<HostAction>(actionRef);
-    const startedAt = Date.now();
+    const token = ++state.hostActionToken;
+    const deadlineAt = action.timeoutMs === undefined ? undefined : Date.now() + action.timeoutMs;
 
     const cleanup = () => {
       state.pendingCleanups.delete(cleanup);
+      this.timerWheel?.cancel(state.deadlineTimerId);
+      if (state.hostActionToken === token) state.deadlineTimerId = undefined;
     };
     state.pendingCleanups.add(cleanup);
+
+    if (deadlineAt !== undefined && this.timerWheel) {
+      state.deadlineTimerId = this.timerWheel.schedule(state.fiberId, TIMER_KIND_HOST_ACTION, deadlineAt);
+    }
 
     this.runtime.hostExecutor.execute(action, {
       fiberId: state.fiberId,
       env: this.runtime.env,
       signal: state.controller.signal,
-      deadlineAt: action.timeoutMs === undefined ? undefined : Date.now() + action.timeoutMs,
+      deadlineAt,
     })
       .then((result: HostActionResult) => {
+        if (state.completed || state.hostActionToken !== token) return;
         cleanup();
-        if (state.completed) return;
         this.pendingHostEffects = Math.max(0, this.pendingHostEffects - 1);
         this.markRunning(state, "host-action");
 
@@ -361,12 +487,29 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
         }
       })
       .catch((error: unknown) => {
+        if (state.completed || state.hostActionToken !== token) return;
         cleanup();
-        if (state.completed) return;
         this.pendingHostEffects = Math.max(0, this.pendingHostEffects - 1);
         this.markRunning(state, "host-action-error");
         this.resumeWithError(state, error);
       });
+  }
+
+
+  private onTimerExpired(events: readonly TimerEvent[]): void {
+    for (const event of events) {
+      if (event.kind !== TIMER_KIND_HOST_ACTION) continue;
+      const state = this.states.get(event.subjectId as FiberId);
+      if (!state || state.completed || state.deadlineTimerId !== event.timerId) continue;
+      state.deadlineTimerId = undefined;
+      state.hostActionToken += 1;
+      if (!state.controller.signal.aborted) {
+        state.controller.abort(new Error(`Brass host action timed out at ${event.deadlineMs}ms deadline`));
+      }
+      this.pendingHostEffects = Math.max(0, this.pendingHostEffects - 1);
+      this.markRunning(state, "host-action-timeout");
+      this.resumeWithError(state, new Error(`Brass host action timed out at ${event.deadlineMs}ms deadline`));
+    }
   }
 
   private resumeWithExit(state: WasmFiberState<R, any, any>, exit: ExitType<any, any>): void {
@@ -388,30 +531,13 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   }
 
   private resumeWithValue(state: WasmFiberState<R, any, any>, value: unknown): void {
-    const event = this.bridge.provideValue(state.fiberId, state.registry.register(value));
-    const label = `wasm-fiber#${state.fiberId}.resume`;
-    this.scheduleOrDrop(
-      state,
-      () => withCurrentFiber(state.handle as any, () => this.drive(state, event)),
-      label,
-    );
+    this.pendingResumes.set(state.fiberId, { kind: "value", ref: state.registry.register(value) });
+    this.enqueueFiber(state, `wasm-fiber#${state.fiberId}.resume`);
   }
 
   private resumeWithError(state: WasmFiberState<R, any, any>, error: unknown): void {
-    const event = this.bridge.provideError(state.fiberId, state.registry.register(error));
-    const label = `wasm-fiber#${state.fiberId}.resume-error`;
-    this.scheduleOrDrop(
-      state,
-      () => withCurrentFiber(state.handle as any, () => this.drive(state, event)),
-      label,
-    );
-  }
-
-  private scheduleOrDrop(state: WasmFiberState<R, any, any>, task: () => void, label: string): void {
-    const result = this.runtime.scheduler.schedule(task, this.schedulerTag(state, label));
-    if (result === "dropped") {
-      this.completeDie(state, new Error(`Brass scheduler dropped ${label} because the lane queue is full`));
-    }
+    this.pendingResumes.set(state.fiberId, { kind: "error", ref: state.registry.register(error) });
+    this.enqueueFiber(state, `wasm-fiber#${state.fiberId}.resume-error`);
   }
 
   private schedulerTag(state: WasmFiberState<R, any, any>, label: string): string {
@@ -435,8 +561,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     if (state.completed) return;
     if (!state.controller.signal.aborted) state.controller.abort(reason);
     for (const cleanup of Array.from(state.pendingCleanups)) cleanup();
-    const event = this.bridge.interrupt(state.fiberId, state.registry.register(reason));
-    this.drive(state, event);
+    const events = this.bridge.interruptBatch?.(state.fiberId, state.registry.register(reason), DEFAULT_BUDGET)
+      ?? [this.bridge.interrupt(state.fiberId, state.registry.register(reason))];
+    this.drive(state, events);
   }
 
   private markSuspended(state: WasmFiberState<R, any, any>, reason: string): void {
@@ -502,8 +629,11 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private cleanupState(state: WasmFiberState<R, any, any>): void {
     this.runningFibers = Math.max(0, this.runningFibers - 1);
     if (state.status === "suspended") this.suspendedFibers = Math.max(0, this.suspendedFibers - 1);
+    this.timerWheel?.cancel(state.deadlineTimerId);
+    state.deadlineTimerId = undefined;
     for (const cleanup of Array.from(state.pendingCleanups)) cleanup();
     state.pendingCleanups.clear();
+    this.pendingResumes.delete(state.fiberId);
     this.bridge.dropFiber(state.fiberId);
     this.fiberRegistry?.dropFiber(state.fiberId);
     state.registry.clear();

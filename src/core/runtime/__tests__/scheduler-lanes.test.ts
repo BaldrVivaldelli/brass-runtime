@@ -8,7 +8,7 @@ function wait(): Promise<void> {
 }
 
 function availableEngines(): SchedulerEngine[] {
-  const engines: SchedulerEngine[] = ["js"];
+  const engines: SchedulerEngine[] = ["ts"];
   try {
     const scheduler = new Scheduler({ engine: "wasm", laneCapacity: 2, laneBudget: 1, flushBudget: 4 });
     void scheduler.stats();
@@ -21,9 +21,9 @@ function availableEngines(): SchedulerEngine[] {
 }
 
 describe("Scheduler lanes, bounded queues and budgets", () => {
-  it("runtime lane labels wasm-reference fiber schedules", async () => {
-    const scheduler = new Scheduler({ engine: "js", laneCapacity: 8 });
-    const runtime = Runtime.makeWithEngine({}, "wasm-reference", { scheduler }).withLane("bff-security/generate");
+  it("runtime lane labels TS fiber schedules", async () => {
+    const scheduler = new Scheduler({ engine: "ts", laneCapacity: 8 });
+    const runtime = Runtime.makeWithEngine({}, "ts", { scheduler }).withLane("bff-security/generate");
 
     await expect(runtime.toPromise(asyncSucceed("ok"))).resolves.toBe("ok");
 
@@ -31,9 +31,9 @@ describe("Scheduler lanes, bounded queues and budgets", () => {
     expect(lane?.executedTasks).toBeGreaterThan(0);
   });
 
-  it("runtime lane labels wasm-reference async resumes", async () => {
-    const scheduler = new Scheduler({ engine: "js", laneCapacity: 8 });
-    const runtime = Runtime.makeWithEngine({}, "wasm-reference", { scheduler }).withLane("bff-security/async");
+  it("runtime lane labels TS async resumes", async () => {
+    const scheduler = new Scheduler({ engine: "ts", laneCapacity: 8 });
+    const runtime = Runtime.makeWithEngine({}, "ts", { scheduler }).withLane("bff-security/async");
 
     await expect(runtime.toPromise(async((_env, cb) => {
       setTimeout(() => cb({ _tag: "Success", value: "later" }), 0);
@@ -44,7 +44,7 @@ describe("Scheduler lanes, bounded queues and budgets", () => {
   });
 
   it("infers a caller lane from the first top-level runtime task", async () => {
-    const scheduler = new Scheduler({ engine: "js", laneCapacity: 8 });
+    const scheduler = new Scheduler({ engine: "ts", laneCapacity: 8 });
     const runtime = Runtime.make({}, scheduler);
 
     await expect(runtime.toPromise(asyncSucceed("ok"))).resolves.toBe("ok");
@@ -55,7 +55,7 @@ describe("Scheduler lanes, bounded queues and budgets", () => {
   });
 
   it("rejects the dropped fiber instead of leaving its promise hanging", async () => {
-    const scheduler = new Scheduler({ engine: "js", laneCapacity: 2, laneBudget: 8, flushBudget: 8 });
+    const scheduler = new Scheduler({ engine: "ts", laneCapacity: 2, laneBudget: 8, flushBudget: 8 });
     const runtime = Runtime.make({}, scheduler).withLane("bounded-runtime");
 
     const p1 = runtime.toPromise(asyncSucceed(1));

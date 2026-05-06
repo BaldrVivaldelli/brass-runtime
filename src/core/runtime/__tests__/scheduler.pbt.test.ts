@@ -31,7 +31,7 @@ const FLUSH_BUDGET = 2048;
  */
 function createLargeCapacityScheduler(capacity: number): Scheduler {
   return new Scheduler({
-    engine: "js",
+    engine: "ts",
     initialCapacity: capacity,
     maxCapacity: capacity,
     laneCapacity: capacity,
