@@ -10,13 +10,14 @@ import { fromPull, uncons, widenOpt, ZStream } from "./stream";
 import { resolveWasmModule } from "../runtime/wasmModule";
 import type { EngineStats } from "../runtime/engineStats";
 
-export type StreamChunkEngine = "auto" | "js" | "wasm";
+export type StreamChunkEngine = "ts" | "wasm";
 
 export type StreamChunkOptions = {
   /**
-   * auto: use WASM when wasm/pkg is available, otherwise JS.
-   * js: always use the JS array chunker.
+   * ts: always use the TypeScript array chunker.
    * wasm: require BrassWasmChunkBuffer from wasm/pkg.
+   *
+   * Strict mode never falls back between engines.
    */
   engine?: StreamChunkEngine;
 };
@@ -60,14 +61,14 @@ function resolveWasmChunkBuffer(): WasmChunkBufferCtor | null {
   return cachedWasmChunkCtor;
 }
 
-class JsChunker<A> implements Chunker<A> {
-  readonly engine = "js" as const;
+class TsChunker<A> implements Chunker<A> {
+  readonly engine = "ts" as const;
   private values: A[] = [];
   private emittedChunks = 0;
   private emittedItems = 0;
   private flushes = 0;
 
-  constructor(readonly maxChunkSize: number, readonly fallbackUsed: boolean = false) {}
+  constructor(readonly maxChunkSize: number) {}
 
   get length(): number {
     return this.values.length;
@@ -104,8 +105,8 @@ class JsChunker<A> implements Chunker<A> {
 
   stats(): EngineStats<StreamChunkStats> {
     return {
-      engine: "js",
-      fallbackUsed: this.fallbackUsed,
+      engine: "ts",
+      fallbackUsed: false,
       data: {
         len: this.values.length,
         maxChunkSize: this.maxChunkSize,
@@ -168,12 +169,12 @@ export function makeStreamChunker<A>(
   options: StreamChunkOptions = {}
 ): Chunker<A> {
   const size = Math.max(1, chunkSize | 0);
-  const engine = options.engine ?? "auto";
+  const engine = options.engine ?? "ts";
 
-  if (engine === "js") return new JsChunker<A>(size, false);
+  if (engine === "ts") return new TsChunker<A>(size);
   if (engine === "wasm") return new WasmChunker<A>(size);
 
-  return resolveWasmChunkBuffer() ? new WasmChunker<A>(size) : new JsChunker<A>(size, true);
+  throw new Error(`brass-runtime stream chunk engine must be 'ts' or 'wasm'; received '${String(engine)}'`);
 }
 
 /**

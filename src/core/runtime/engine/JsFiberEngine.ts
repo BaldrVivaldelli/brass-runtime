@@ -3,7 +3,7 @@ import { RuntimeFiber } from "../fiber";
 import type { FiberEngine, FiberEngineStats, WasmEngineRuntime } from "./types";
 
 export class JsFiberEngine<R> implements FiberEngine<R> {
-  readonly kind = "js" as const;
+  readonly kind = "ts" as const;
   private startedFibers = 0;
 
   constructor(private readonly runtime: WasmEngineRuntime<R> & any) {}

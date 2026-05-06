@@ -31,6 +31,7 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
     private readonly onJoiner?: (fiberId: FiberId) => void,
     private readonly onQueued?: (fiberId: FiberId) => void,
     private readonly onScheduleDropped?: (fiberId: FiberId, label: string) => void,
+    private readonly onScheduleRequest?: (fiberId: FiberId, label: string) => "accepted" | "dropped",
   ) {
     this.id = id;
     this.runtime = runtime;
@@ -48,6 +49,13 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
 
   setEngineStatus(status: InternalFiberStatus): void {
     this.internalStatus = status;
+  }
+
+  markDequeued(): void {
+    this.queued = false;
+    if (this.result == null && this.internalStatus === "queued") {
+      this.internalStatus = "running";
+    }
   }
 
   join(cb: (exit: ExitType<E, A>) => void): void {
@@ -73,17 +81,23 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
     this.internalStatus = "queued";
     this.onQueued?.(this.id);
     const label = `wasm-fiber#${this.id}.${tag}`;
-    const lane = this.lane ?? this.runtime.lane;
-    const result = this.runtime.scheduler.schedule(() => {
-      this.queued = false;
-      if (this.result != null) return;
-      this.onScheduledStep(this.id);
-    }, lane ? laneTag(lane, label) : label);
+    const result = this.onScheduleRequest
+      ? this.onScheduleRequest(this.id, label)
+      : this.scheduleWithRuntime(label);
 
     if (result === "dropped") {
       this.queued = false;
       this.onScheduleDropped?.(this.id, label);
     }
+  }
+
+  private scheduleWithRuntime(label: string): "accepted" | "dropped" {
+    const lane = this.lane ?? this.runtime.lane;
+    return this.runtime.scheduler.schedule(() => {
+      this.markDequeued();
+      if (this.result != null) return;
+      this.onScheduledStep(this.id);
+    }, lane ? laneTag(lane, label) : label) as "accepted" | "dropped";
   }
 
   emit(ev: RuntimeEvent): void {

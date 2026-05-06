@@ -17,6 +17,15 @@ export const NoopHooks: RuntimeHooks = {
     emit() { },
 };
 
+function normalizeRuntimeEngineMode(value: unknown): RuntimeEngineMode {
+    if (value === "ts" || value === "wasm") return value;
+    throw new Error(`brass-runtime engine must be either 'ts' or 'wasm' in strict mode; received '${String(value)}'`);
+}
+
+function unreachableEngine(value: never): never {
+    throw new Error(`brass-runtime unsupported engine '${String(value)}'`);
+}
+
 /**
  * --- Runtime como objeto único (ZIO-style) ---
  * Un valor que representa "cómo" se ejecutan los efectos: scheduler + environment + hooks.
@@ -32,10 +41,11 @@ export type RuntimeOptions<R> = {
     /**
      * Selects the fiber interpreter used by fork().
      *
-     * - js: existing TypeScript RuntimeFiber interpreter.
+     * Strict mode only accepts:
+     * - ts: TypeScript RuntimeFiber interpreter.
      * - wasm: wasm-pack backed interpreter from wasm/pkg.
-     * - wasm-reference: JS reference bridge with the same host/engine protocol.
-     * - auto: try wasm first and fall back to js when the wasm package is not loadable.
+     *
+     * There is no auto mode and no TS fallback when wasm is requested.
      */
     engine?: RuntimeEngineMode;
     /** Executor used by HostAction opcodes when running on the WASM engine. */
@@ -67,31 +77,17 @@ export class Runtime<R> {
         this.inferLane = args.inferLane ?? true;
         this.hooks = args.hooks ?? NoopHooks;
         this.hostExecutor = args.hostExecutor ?? DefaultHostExecutor;
-        this.engineMode = args.engine ?? "auto";
+        this.engineMode = normalizeRuntimeEngineMode(args.engine ?? "ts");
         this.wasmOptions = args.wasm;
         this.forkPolicy = makeForkPolicy(this.env as any, this.hooks);
-        const selected = this.makeFiberEngine(this.engineMode, args.wasm);
-        this.fiberEngine = selected.engine;
-        this.fallbackUsed = selected.fallbackUsed;
+        this.fiberEngine = this.makeFiberEngine(this.engineMode, args.wasm);
+        this.fallbackUsed = false;
     }
 
-    private makeFiberEngine(mode: RuntimeEngineMode, wasm?: WasmFiberEngineOptions): { engine: FiberEngine<R>; fallbackUsed: boolean } {
-        if (mode === "js") return { engine: new JsFiberEngine(this as any), fallbackUsed: false };
-        if (mode === "wasm-reference") return { engine: new WasmFiberEngine(this as any, { ...wasm, reference: true }), fallbackUsed: false };
-        if (mode === "wasm") return { engine: new WasmFiberEngine(this as any, wasm), fallbackUsed: false };
-
-        // auto is explicit and observable: try the real WASM engine, but never
-        // make default TS consumers fail when the wasm artifact is missing, not
-        // copied by webpack, or missing one of the runtime exports.
-        try {
-            const capabilities = runtimeCapabilities();
-            if (capabilities.wasmFiberEngine) {
-                return { engine: new WasmFiberEngine(this as any, wasm), fallbackUsed: false };
-            }
-        } catch {
-            // Fall through to JS. Explicit engine='wasm' still throws above.
-        }
-        return { engine: new JsFiberEngine(this as any), fallbackUsed: true };
+    private makeFiberEngine(mode: RuntimeEngineMode, wasm?: WasmFiberEngineOptions): FiberEngine<R> {
+        if (mode === "ts") return new JsFiberEngine(this as any);
+        if (mode === "wasm") return new WasmFiberEngine(this as any, wasm);
+        return unreachableEngine(mode);
     }
 
     /** Returns true when the runtime has real hooks (not the no-op singleton). */
@@ -173,8 +169,7 @@ export class Runtime<R> {
 
     stats(): EngineStats<ReturnType<FiberEngine<R>["stats"]>> {
         const data = this.fiberEngine.stats();
-        const engine = this.fiberEngine.kind === "js" ? "js" : "wasm";
-        return { engine, fallbackUsed: this.fallbackUsed, data };
+        return { engine: this.fiberEngine.kind, fallbackUsed: false, data };
     }
 
     capabilities() {

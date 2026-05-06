@@ -4,7 +4,7 @@ import { fromHostAction } from "../hostAction";
 import type { HostExecutor } from "../hostAction";
 
 type Args = {
-  engine: "js" | "wasm" | "wasm-reference" | "auto";
+  engine: "ts" | "wasm";
   fibers: number;
   delayMs: number;
   mode: "closure" | "host-action";
@@ -99,7 +99,7 @@ function gcIfAvailable(): void {
 
 function parseArgs(argv: string[]): Args {
   const out: Args = {
-    engine: "wasm-reference",
+    engine: "wasm",
     fibers: 10_000,
     delayMs: 2_000,
     mode: "host-action",

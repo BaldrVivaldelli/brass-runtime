@@ -7,7 +7,7 @@ import type { RuntimeEngineMode } from "../engine/types";
 
 const wait = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const engines: RuntimeEngineMode[] = ["js", "wasm-reference"];
+const engines: RuntimeEngineMode[] = ["ts"];
 
 describe("RuntimeFiber transient async cancelers", () => {
   for (const engine of engines) {
@@ -31,7 +31,7 @@ describe("RuntimeFiber transient async cancelers", () => {
         };
       });
 
-      const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "js" }) });
+      const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "ts" }) });
       const fiber = rt.fork(asyncFlatMap(first, () => second));
 
       for (let i = 0; i < 50 && !secondRegistered; i++) await wait(1);
