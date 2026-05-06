@@ -75,6 +75,7 @@ type WasmSchedulerStateMachineCtor = new (
     is_flushing(): boolean;
     is_scheduled(): boolean;
     enqueue(taskRef: number, tag: string): number;
+    enqueue_batch(task_refs: Uint32Array, tags: string[]): Uint32Array;
     begin_flush(): number;
     shift(): number;
     end_flush(ran: number): number;
@@ -152,6 +153,26 @@ class WasmSchedulerState {
         const policy = this.machine.enqueue(ref, tag);
         if (policy === 3) { this.tasks.delete(ref); this.tags.delete(ref); }
         return policy;
+    }
+    enqueueBatch(tasks: Array<{ task: Task; tag: string }>): number[] {
+        const refs: number[] = [];
+        const tags: string[] = [];
+        for (const { task, tag } of tasks) {
+            const ref = this.nextRef++;
+            this.tasks.set(ref, task);
+            this.tags.set(ref, tag);
+            refs.push(ref);
+            tags.push(tag);
+        }
+        const policies = this.machine.enqueue_batch(new Uint32Array(refs), tags);
+        // Cleanup dropped tasks
+        for (let i = 0; i < policies.length; i++) {
+            if (policies[i] === 3) {
+                this.tasks.delete(refs[i]);
+                this.tags.delete(refs[i]);
+            }
+        }
+        return Array.from(policies);
     }
     beginFlush(): number { return this.machine.begin_flush(); }
     shift(): { task: Task; tag: string } | undefined {
@@ -367,15 +388,29 @@ export function inferCallerLaneFromStack(stack: string | undefined = new Error()
     return sanitizeLaneKey(fallback);
 }
 
-function inferLane(tag: string): string {
-    const explicit = extractTaggedLane(tag, "lane:");
-    if (explicit) return sanitizeLaneKey(explicit);
-    const caller = extractTaggedLane(tag, "caller:");
-    if (caller) return sanitizeLaneKey(caller);
+// Lane key cache to avoid repeated string processing for the same tag
+const laneKeyCache = new Map<string, string>();
+const LANE_CACHE_MAX = 1024;
 
-    const firstSep = firstSeparatorIndex(tag);
-    const first = firstSep < 0 ? tag : tag.slice(0, firstSep);
-    return sanitizeLaneKey(first || "anonymous");
+function inferLane(tag: string): string {
+    let cached = laneKeyCache.get(tag);
+    if (cached !== undefined) return cached;
+
+    const explicit = extractTaggedLane(tag, "lane:");
+    if (explicit) { cached = sanitizeLaneKey(explicit); }
+    else {
+        const caller = extractTaggedLane(tag, "caller:");
+        if (caller) { cached = sanitizeLaneKey(caller); }
+        else {
+            const firstSep = firstSeparatorIndex(tag);
+            const first = firstSep < 0 ? tag : tag.slice(0, firstSep);
+            cached = sanitizeLaneKey(first || "anonymous");
+        }
+    }
+
+    if (laneKeyCache.size >= LANE_CACHE_MAX) laneKeyCache.clear();
+    laneKeyCache.set(tag, cached);
+    return cached;
 }
 
 function extractTaggedLane(tag: string, prefix: string): string | undefined {
@@ -436,6 +471,11 @@ export class Scheduler {
         return this.scheduleJs(task, tag);
     }
 
+    scheduleBatch(tasks: Array<{ fn: Task; tag: string }>): ScheduleResult[] {
+        if (this.wasm) return this.scheduleBatchWasm(tasks);
+        return tasks.map(({ fn, tag }) => this.schedule(fn, tag));
+    }
+
     stats(): SchedulerStats {
         if (this.wasm) return this.wasm.stats();
         const js = this.js!;
@@ -449,6 +489,46 @@ export class Scheduler {
         if (policy === 0) this.requestFlush("micro");
         else if (policy === 1) this.requestFlush("macro");
         return "accepted";
+    }
+
+    private scheduleBatchWasm(tasks: Array<{ fn: Task; tag: string }>): ScheduleResult[] {
+        const validTasks: Array<{ task: Task; tag: string }> = [];
+        const results: ScheduleResult[] = [];
+        const indexMap: number[] = [];
+
+        for (let i = 0; i < tasks.length; i++) {
+            const { fn, tag } = tasks[i];
+            if (typeof fn !== "function") {
+                results.push("dropped");
+            } else {
+                results.push("accepted"); // tentative, may be overwritten
+                indexMap.push(i);
+                validTasks.push({ task: fn, tag });
+            }
+        }
+
+        if (validTasks.length === 0) return results;
+
+        const policies = this.wasm!.enqueueBatch(validTasks);
+        let needsMicro = false;
+        let needsMacro = false;
+
+        for (let j = 0; j < policies.length; j++) {
+            const policy = policies[j];
+            const originalIdx = indexMap[j];
+            if (policy === 3) {
+                results[originalIdx] = "dropped";
+            } else if (policy === 0) {
+                needsMicro = true;
+            } else if (policy === 1) {
+                needsMacro = true;
+            }
+        }
+
+        if (needsMicro) this.requestFlush("micro");
+        else if (needsMacro) this.requestFlush("macro");
+
+        return results;
     }
 
     private getOrCreateLane(key: string): LaneState {

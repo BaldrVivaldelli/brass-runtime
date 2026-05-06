@@ -68,11 +68,18 @@ export type Managed<R, E, A> = {
 };
 
 
+export type FromArray<R, E, A> = {
+    readonly _tag: "FromArray";
+    readonly values: readonly A[];
+};
+
+
 export type ZStream<R, E, A> =
     | Empty<R, E, A>
     | Emit<R, E, A>
     | Concat<R, E, A>
     | FromPull<R, E, A>
+    | FromArray<R, E, A>
     | Flatten<R, E, A>
     | Merge<R, E, A>
     | Scoped<R, E, A>
@@ -262,6 +269,15 @@ export function uncons<R, E, A>(
         case "Empty":
             return fail<Option<E>>(none);
 
+        case "FromArray": {
+            const arr = self.values;
+            if (arr.length === 0) return fail<Option<E>>(none);
+            const tail: ZStream<R, E, A> = arr.length === 1
+                ? (EMPTY_STREAM as ZStream<R, E, A>)
+                : { _tag: "FromArray", values: arr.slice(1) } as ZStream<R, E, A>;
+            return succeed([arr[0]!, tail]) as any;
+        }
+
         case "Emit":
             return map(
                 mapError<R, E, Option<E>, A>(self.value, (e) => some<E>(e)),
@@ -435,6 +451,9 @@ export function mapStream<R, E, A, B>(
         case "Empty":
             return emptyStream<R, E, B>();
 
+        case "FromArray":
+            return { _tag: "FromArray", values: self.values.map(f) } as ZStream<R, E, B>;
+
         case "Emit":
             return emitStream<R, E, B>(map(self.value, f));
 
@@ -555,18 +574,21 @@ export function foreachStream<R, E, A, R2, E2>(
 }
 
 export function fromArray<A>(values: readonly A[]): ZStream<unknown, never, A> {
-    let s: ZStream<unknown, never, A> = emptyStream<unknown, never, A>();
-
-    for (let i = values.length - 1; i >= 0; i--) {
-        const head = emitStream<unknown, never, A>(succeed(values[i]!));
-        s = concatStream<unknown, never, A>(head, s);
-    }
-
-    return s;
+    if (values.length === 0) return emptyStream<unknown, never, A>();
+    return { _tag: "FromArray", values } as ZStream<unknown, never, A>;
 }
 
 // Consumidor síncrono del stream
 export function collectStream<R, E, A>(stream: ZStream<R, E, A>): ZIO<R, E, A[]> {
+    // Fast path: if the stream can be drained synchronously (e.g., fromArray or fused result),
+    // return the result immediately without going through the effect system.
+    // SAFETY: drainStreamSyncFull only succeeds for finite, pure streams (FromArray, Emit(Succeed),
+    // Concat chains). It cannot loop infinitely because all recognized node types are finite.
+    const syncResult = drainStreamSyncFull<R, E, A>(stream);
+    if (syncResult !== null) {
+        return asyncSucceed(syncResult) as any;
+    }
+
     const loop = (cur: ZStream<R, E, A>, acc: A[]): ZIO<R, Option<E>, A[]> =>
         asyncFold(
             uncons(cur),
@@ -574,13 +596,62 @@ export function collectStream<R, E, A>(stream: ZStream<R, E, A>): ZIO<R, E, A[]>
                 if (opt._tag === "None") return succeed(acc);
                 return fail(opt);
             },
-            ([a, tail]) => loop(tail, [...acc, a])
+            ([a, tail]) => { acc.push(a); return loop(tail, acc); }
         );
 
     return mapError(loop(stream, []), (opt) => {
         if (opt._tag === "Some") return opt.value;
         throw new Error("unreachable: stream end handled as success");
     });
+}
+
+/**
+ * Attempts to drain a stream into an array synchronously.
+ * Works for streams built from fromArray (Concat chains of Emit(Succeed(...)) nodes).
+ * Returns null if the stream contains async/effectful nodes.
+ */
+function drainStreamSyncFull<R, E, A>(stream: ZStream<R, E, A>): A[] | null {
+    const result: A[] = [];
+    let cur: ZStream<R, E, A> = stream;
+
+    while (true) {
+        switch (cur._tag) {
+            case "Empty":
+                return result;
+
+            case "FromArray": {
+                // O(1) drain — just copy the array
+                const arr = cur.values;
+                for (let i = 0; i < arr.length; i++) {
+                    result.push(arr[i]!);
+                }
+                return result;
+            }
+
+            case "Emit": {
+                const zio = cur.value as any;
+                if (zio._tag === "Succeed") {
+                    result.push(zio.value);
+                    return result;
+                }
+                return null;
+            }
+
+            case "Concat": {
+                // Drain left recursively, then continue with right
+                const leftItems = drainStreamSyncFull<R, E, A>(cur.left);
+                if (leftItems === null) return null;
+                for (let i = 0; i < leftItems.length; i++) {
+                    result.push(leftItems[i]!);
+                }
+                cur = cur.right;
+                break;
+            }
+
+            default:
+                return null;
+        }
+    }
 }
 
 

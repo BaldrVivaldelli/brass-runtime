@@ -23,6 +23,13 @@ const STEP = {
     DONE: "Done",
 } as const satisfies Record<string, StepDecision>;
 
+const TRAMPOLINE = {
+    CONTINUE: 0,  // exited trampoline, more work to do via normal switch
+    SUSPEND: 1,   // hit an async that didn't resolve synchronously
+    DONE: 2,      // fiber completed (success or failure)
+} as const;
+type TrampolineResult = typeof TRAMPOLINE[keyof typeof TRAMPOLINE];
+
 const RUN = {
     QUEUED: "Queued",
     RUNNING: "Running",
@@ -42,7 +49,7 @@ export type Fiber<E, A> = {
 let nextId: FiberId = 1;
 
 // cuántos opcodes sync procesa
-const DEFAULT_BUDGET = 4096;
+const DEFAULT_BUDGET = 16384;
 
 /**
  * Override for benchmarking purposes only.
@@ -124,10 +131,52 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
      */
     private readonly boundStep: () => void;
 
+    // Reusable async callback state — avoids allocating a closure per Async step.
+    // These fields are reset at the start of each Async case and reused.
+    private _syncResolved = false;
+    private _syncExit: Exit<E, any> | null = null;
+    private _asyncRegistered = false;
+    private _asyncDetach: (() => void) | undefined;
+    private readonly _asyncCb: (exit: Exit<E, any>) => void;
+
     constructor(runtime: Runtime<R>, effect: Async<R, E, A>) {
         this.id = nextId++;
         this.runtime = runtime;
         this.current = effect;
+
+        this._asyncCb = (exit: Exit<E, any>) => {
+            if (this._syncResolved) return; // already handled (double-call guard)
+
+            if (this.result != null || this.closing != null) return;
+
+            // If register() hasn't returned yet, this is synchronous resolution
+            if (!this._asyncRegistered) {
+                this._syncResolved = true;
+                this._syncExit = exit;
+                return;
+            }
+
+            // Async path (callback fired after register returned)
+            this._syncResolved = true; // mark as done
+            this._asyncDetach?.();
+            this._asyncDetach = undefined;
+
+            if (exit._tag === "Success") {
+                this.current = Async.succeed(exit.value);
+                this.schedule("async-resume");
+                return;
+            }
+
+            const cause = exit.cause;
+            if (cause._tag === "Interrupt") {
+                this.notify(Exit.failCause(Cause.interrupt()));
+            } else if (cause._tag === "Fail") {
+                this.current = Async.fail(cause.error);
+                this.schedule("async-resume");
+            } else {
+                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
+            }
+        };
 
         this.boundStep = () => {
             withCurrentFiber(this, () => {
@@ -342,7 +391,24 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.budget = __benchmarkBudget ?? DEFAULT_BUDGET;
 
         while (this.budget-- > 0) {
-            this.current = reassociateFlatMap(this.current);
+            // ─── Sync trampoline: unroll FlatMap chains that resolve synchronously ───
+            // This is the critical optimization for queue/stream workloads where
+            // thousands of FlatMap(Async(sync), k) are chained together.
+            // Instead of going through the full switch/case per node, we stay in
+            // a tight inner loop as long as each step resolves synchronously.
+            if (this.current._tag === "FlatMap") {
+                const trampolineResult = this.syncTrampoline();
+                if (trampolineResult === TRAMPOLINE.DONE) {
+                    return STEP.DONE;
+                }
+                if (trampolineResult === TRAMPOLINE.SUSPEND) {
+                    return STEP.SUSPEND;
+                }
+                // TRAMPOLINE.CONTINUE means we exited the trampoline but have more work
+                // (hit a non-FlatMap node or a non-sync Async). Fall through to normal switch.
+                if (this.result != null) return STEP.DONE;
+                if (this.budget <= 0) return STEP.CONTINUE;
+            }
 
             const current: any = this.current;
 
@@ -378,58 +444,18 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                         return this.result != null ? STEP.DONE : STEP.CONTINUE;
                     }
 
-                    let done = false;
-                    let asyncRegistered = false;
-                    let syncResolved = false;
-                    let syncExit: Exit<E, any> | null = null;
+                    // Reset sync probe state (reused across all Async steps in this fiber)
+                    this._syncResolved = false;
+                    this._syncExit = null;
+                    this._asyncRegistered = false;
 
-                    let detachCanceler: (() => void) | undefined;
-
-                    const cb = (exit: Exit<E, any>) => {
-                        if (done) return;
-                        done = true;
-                        detachCanceler?.();
-                        detachCanceler = undefined;
-
-                        if (this.result != null || this.closing != null) return;
-
-                        // If we're still inside register(), mark as synchronous
-                        if (!asyncRegistered) {
-                            syncResolved = true;
-                            syncExit = exit;
-                            return;
-                        }
-
-                        // Async path (callback fired after register returned)
-                        if (exit._tag === "Success") {
-                            this.current = Async.succeed(exit.value);
-                            this.schedule("async-resume");
-                            return;
-                        }
-
-                        const cause = exit.cause;
-
-                        if (cause._tag === "Interrupt") {
-                            this.notify(Exit.failCause(Cause.interrupt()));
-                            return;
-                        }
-
-                        if (cause._tag === "Fail") {
-                            this.current = Async.fail(cause.error);
-                            this.schedule("async-resume");
-                            return;
-                        }
-
-                        // Die => defecto fatal, NO es un E
-                        this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
-                    };
-
-                    const canceler = current.register(this.env, cb);
-                    asyncRegistered = true;
+                    const canceler = current.register(this.env, this._asyncCb);
+                    this._asyncRegistered = true;
 
                     // Synchronous resolution: continue in the same step without re-enqueuing
-                    if (syncResolved && syncExit) {
-                        const resolvedExit = syncExit as Exit<E, any>;
+                    if (this._syncResolved && this._syncExit) {
+                        const resolvedExit = this._syncExit as Exit<E, any>;
+                        this._syncExit = null; // release reference
                         if (resolvedExit._tag === "Success") {
                             this.onSuccess(resolvedExit.value);
                         } else {
@@ -440,7 +466,6 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                             } else if (cause._tag === "Fail") {
                                 this.onFailure(cause.error);
                             } else {
-                                // Die => defecto fatal
                                 this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
                             }
                         }
@@ -448,13 +473,11 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                     }
 
                     // Async path: register canceler as finalizer only when we actually suspend.
-                    // Detach it on normal completion so long async chains do not retain old
-                    // canceler closures/fetch signals until the fiber finally ends.
                     if (typeof canceler === "function") {
-                        detachCanceler = this.addTransientFinalizer(() => {
-                            if (done) return;
-                            done = true;
-                            detachCanceler = undefined;
+                        this._asyncDetach = this.addTransientFinalizer(() => {
+                            if (this._syncResolved) return;
+                            this._syncResolved = true;
+                            this._asyncDetach = undefined;
                             try {
                                 canceler();
                             } catch {
@@ -493,6 +516,146 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         }
 
         return STEP.CONTINUE;
+    }
+
+    /**
+     * Sync trampoline: processes FlatMap chains in a tight loop without the
+     * overhead of the general switch/case. Handles:
+     * - FlatMap(Async(sync), k) — the queue/stream hot path
+     * - FlatMap(Succeed(v), k) — pure value chains
+     * - FlatMap(Sync(f), k) — synchronous thunks
+     * - FlatMap(FlatMap(...), k) — left-associated chains (reassociates inline)
+     * - FlatMap(Fold(...), k) — pushes fold frame and continues
+     *
+     * Returns TRAMPOLINE.CONTINUE when it hits a node it can't handle,
+     * leaving this.current set to that node for the normal switch to process.
+     */
+    private syncTrampoline(): TrampolineResult {
+        while (this.budget-- > 0) {
+            let cur: any = this.current;
+
+            // Handle left-associated FlatMap chains by pushing continuations to stack
+            // instead of reassociating (which creates intermediate closures).
+            // FlatMap(FlatMap(FlatMap(x, f), g), h) → push h, push g, process x then f
+            while (cur._tag === "FlatMap" && cur.first?._tag === "FlatMap") {
+                this.stack.push({ _tag: "SuccessCont", k: cur.andThen });
+                cur = cur.first;
+            }
+
+            if (cur._tag !== "FlatMap") {
+                this.current = cur;
+                return TRAMPOLINE.CONTINUE;
+            }
+
+            const first = cur.first;
+            const andThen = cur.andThen;
+
+            switch (first._tag) {
+                case "Succeed": {
+                    // FlatMap(Succeed(v), k) → k(v)
+                    try {
+                        this.current = andThen(first.value);
+                    } catch (e) {
+                        this.notify(Exit.failCause(Cause.die<E>(e)));
+                        return TRAMPOLINE.DONE;
+                    }
+                    continue;
+                }
+
+                case "Sync": {
+                    // FlatMap(Sync(f), k) → k(f(env))
+                    try {
+                        const value = first.thunk(this.env);
+                        this.current = andThen(value);
+                    } catch (e) {
+                        this.notify(Exit.failCause(Cause.die<E>(e)));
+                        return TRAMPOLINE.DONE;
+                    }
+                    continue;
+                }
+
+                case "Fail": {
+                    // FlatMap(Fail(e), k) → propagate failure up the stack
+                    this.stack.push({ _tag: "SuccessCont", k: andThen });
+                    this.current = first;
+                    return TRAMPOLINE.CONTINUE; // let normal switch handle Fail
+                }
+
+                case "Async": {
+                    if (this.finishing) {
+                        this.current = cur;
+                        return TRAMPOLINE.CONTINUE;
+                    }
+
+                    // Try synchronous resolution
+                    this._syncResolved = false;
+                    this._syncExit = null;
+                    this._asyncRegistered = false;
+                    const canceler = first.register(this.env, this._asyncCb);
+                    this._asyncRegistered = true;
+
+                    if (this._syncResolved && this._syncExit) {
+                        const exit = this._syncExit as Exit<E, any>;
+                        this._syncExit = null;
+                        if (exit._tag === "Success") {
+                            try {
+                                this.current = andThen(exit.value);
+                            } catch (e) {
+                                this.notify(Exit.failCause(Cause.die<E>(e)));
+                                return TRAMPOLINE.DONE;
+                            }
+                            continue;
+                        } else {
+                            // Failure in async — push continuation and propagate
+                            this.stack.push({ _tag: "SuccessCont", k: andThen });
+                            const cause = exit.cause;
+                            if (cause._tag === "Fail") {
+                                this.onFailure(cause.error);
+                            } else if (cause._tag === "Interrupt") {
+                                this.notify(Exit.failCause(Cause.interrupt()));
+                            } else {
+                                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
+                            }
+                            return this.result != null ? TRAMPOLINE.DONE : TRAMPOLINE.CONTINUE;
+                        }
+                    }
+
+                    // Didn't resolve synchronously — suspend
+                    this.stack.push({ _tag: "SuccessCont", k: andThen });
+                    if (typeof canceler === "function") {
+                        this._asyncDetach = this.addTransientFinalizer(() => {
+                            if (this._syncResolved) return;
+                            this._syncResolved = true;
+                            this._asyncDetach = undefined;
+                            try { canceler(); } catch { }
+                        });
+                    }
+                    return TRAMPOLINE.SUSPEND;
+                }
+
+                case "Fold": {
+                    // FlatMap(Fold(first, onF, onS), k) → push both frames, continue with inner
+                    this.stack.push({ _tag: "SuccessCont", k: andThen });
+                    this.stack.push({
+                        _tag: "FoldCont",
+                        onFailure: first.onFailure,
+                        onSuccess: first.onSuccess,
+                    });
+                    this.current = first.first;
+                    continue;
+                }
+
+                default: {
+                    // FlatMap(something else), let normal switch handle it
+                    this.stack.push({ _tag: "SuccessCont", k: andThen });
+                    this.current = first;
+                    return TRAMPOLINE.CONTINUE;
+                }
+            }
+        }
+
+        // Budget exhausted
+        return TRAMPOLINE.CONTINUE;
     }
 }
 
