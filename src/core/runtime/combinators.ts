@@ -65,12 +65,12 @@ export function timeout<R, E, A>(
     const runtime = unsafeGetCurrentRuntime();
 
     if (runtime) {
-      const fiber = runtime.fork(effect);
-      fiber.join((exit: Exit<E, A>) => {
+      const fiber = runtime.fork(effect as any);
+      fiber.join((exit: any) => {
         if (done) return;
         done = true;
         clearTimeout(timerId!);
-        cb(exit as Exit<E | TimeoutError, A>);
+        cb(exit);
       });
 
       // Return canceler that interrupts the fiber and clears the timer

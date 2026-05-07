@@ -45,14 +45,14 @@ export function makeRef<A>(initial: A): Ref<A> {
   let value = initial;
 
   return {
-    get: () => asyncSync(() => value),
-    set: (v: A) => asyncSync(() => { value = v; }) as Async<unknown, never, void>,
-    update: (f: (current: A) => A) => asyncSync(() => { value = f(value); return value; }),
+    get: () => asyncSync(() => value) as any as Async<unknown, never, A>,
+    set: (v: A) => asyncSync(() => { value = v; }) as any as Async<unknown, never, void>,
+    update: (f: (current: A) => A) => asyncSync(() => { value = f(value); return value; }) as any as Async<unknown, never, A>,
     modify: <B>(f: (current: A) => [B, A]) => asyncSync(() => {
       const [result, next] = f(value);
       value = next;
       return result;
-    }),
+    }) as any,
     unsafeGet: () => value,
   };
 }
@@ -71,22 +71,19 @@ export function derivedRef<A, B>(
   set: (a: A, b: B) => A
 ): Ref<B> {
   return {
-    get: () => asyncSync(() => get(parent.unsafeGet())),
+    get: () => asyncSync(() => get(parent.unsafeGet())) as any,
     set: (b: B) => asyncSync(() => {
       const current = parent.unsafeGet();
-      // Use parent's internal set via modify pattern
       (parent as any).set(set(current, b));
-    }) as Async<unknown, never, void>,
+    }) as any,
     update: (f: (current: B) => B) => asyncSync(() => {
       const parentVal = parent.unsafeGet();
       const currentB = get(parentVal);
       const newB = f(currentB);
-      // Trigger parent update
       const newParent = set(parentVal, newB);
-      // Directly mutate parent (we know it's a makeRef)
       (parent as any).unsafeGet = () => newParent;
       return newB;
-    }),
+    }) as any,
     modify: <C>(f: (current: B) => [C, B]) => asyncSync(() => {
       const parentVal = parent.unsafeGet();
       const currentB = get(parentVal);
@@ -94,7 +91,7 @@ export function derivedRef<A, B>(
       const newParent = set(parentVal, newB);
       (parent as any).unsafeGet = () => newParent;
       return result;
-    }),
+    }) as any,
     unsafeGet: () => get(parent.unsafeGet()),
   };
 }

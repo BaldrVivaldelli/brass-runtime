@@ -234,7 +234,7 @@ export function managedAll<R, E, Resources extends readonly any[]>(
   const release = (resources: Resources, exit: Exit<any, any>): Async<R, any, void> => {
     return async((_env, cb) => {
       const runtime = unsafeGetCurrentRuntime<R>();
-      releaseAcquired(runtime, manageds, resources as any[], exit).then(() => {
+      releaseAcquired(runtime, manageds, resources as unknown as any[], exit).then(() => {
         cb({ _tag: "Success", value: undefined });
       });
     });
