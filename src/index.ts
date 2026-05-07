@@ -3,6 +3,20 @@ export * from "./core/types/asyncEffect";
 export * from "./core/types/option";
 export * from "./core/types/cancel";
 
+export * from "./core/runtime/combinators";
+export * from "./core/runtime/resource";
+export * from "./core/runtime/semaphore";
+export * from "./core/runtime/circuitBreaker";
+export * from "./core/runtime/ref";
+export * from "./core/runtime/schedule";
+export * from "./core/runtime/shutdown";
+export * from "./core/runtime/testing";
+export * from "./core/runtime/layer";
+export * from "./core/runtime/workerPool";
+export * from "./core/runtime/tracing";
+export * from "./core/runtime/metrics";
+export * from "./core/types/typedError";
+
 export * from "./core/runtime/runtime";
 export * from "./core/runtime/fiber";
 export * from "./core/runtime/scope";
@@ -20,5 +34,6 @@ export * from "./core/stream/pipeline";
 export * from "./core/stream/fusion";
 export * from "./core/stream/chunks";
 export * from "./core/stream/queue";
+export * from "./core/stream/operators";
 export * from "./core/runtime/engineStats";
 export * from "./core/runtime/capabilities";

@@ -5,7 +5,7 @@ import { fromPromiseAbortable, type AbortablePromiseFinish } from "../core/runti
 import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 import { Request, mergeHeadersUnder } from "./optics/request";
 import type { RetryPolicy } from "./retry/retry";
-import { sleepMs } from "./sleep";
+import { sleep } from "../core/runtime/combinators";
 import {
     HttpConcurrencyPool,
     resolveHttpPoolKey,
@@ -466,7 +466,7 @@ export const withRetryStream =
 
             const d = delayWithinBudget(backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs));
             if (d <= 0 && maxElapsedMs !== undefined) return asyncFail(e) as Out;
-            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1)) as Out;
+            return asyncFlatMap(sleep(d) as any, () => loop(attempt + 1)) as Out;
           },
           (w) => {
             const canRetry =
@@ -481,7 +481,7 @@ export const withRetryStream =
             const d = delayWithinBudget(rawDelay);
             if (d <= 0 && maxElapsedMs !== undefined) return asyncSucceed(w) as Out;
 
-            return asyncFlatMap(sleepMs(d), () => loop(attempt + 1)) as Out;
+            return asyncFlatMap(sleep(d) as any, () => loop(attempt + 1)) as Out;
           }
         ) as Out;
 

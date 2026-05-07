@@ -8,7 +8,7 @@ import type {
 } from "../client";
 import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../../core/types/asyncEffect";
 import type { Async } from "../../core/types/asyncEffect";
-import { sleepMs } from "../sleep";
+import { sleep } from "../../core/runtime/combinators";
 import { makeWasmRetryPlanner } from "./wasmRetryPlanner";
 
 export type RetryPolicy = {
@@ -137,7 +137,7 @@ export const withRetry =
                             dropPlanner(retryId);
                             return asyncFail(e);
                         }
-                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt, retryId));
+                        return asyncFlatMap(sleep(d) as any, () => loop(req, attempt + 1, startedAt, retryId));
                     },
                     (w) => {
                         const retryable = attempt < p.maxRetries && retryOnStatus(w.status) && remainingBudget() > 0;
@@ -147,7 +147,7 @@ export const withRetry =
                             dropPlanner(retryId);
                             return asyncSucceed(w);
                         }
-                        return asyncFlatMap(sleepMs(d), () => loop(req, attempt + 1, startedAt, retryId));
+                        return asyncFlatMap(sleep(d) as any, () => loop(req, attempt + 1, startedAt, retryId));
                     }
                 );
             };

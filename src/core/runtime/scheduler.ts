@@ -115,11 +115,7 @@ class JsSchedulerState {
 
     constructor(readonly options: SchedulerOptions) {}
 
-    get totalLength(): number {
-        let n = 0;
-        for (const lane of this.lanes.values()) n += lane.queue.length;
-        return n;
-    }
+    totalLength = 0;
     get totalCapacity(): number {
         let n = 0;
         for (const lane of this.lanes.values()) n += lane.queue.capacity;
@@ -562,6 +558,8 @@ export class Scheduler {
             return "dropped";
         }
 
+        js.totalLength++;
+
         if (js.flushing) return "accepted";
         if (!js.scheduled) {
             js.scheduled = true;
@@ -604,7 +602,7 @@ export class Scheduler {
             const currentIdx = (js.rrIndex + n - 1) % n;
             const currentLane = js.lanes.get(js.laneOrder[currentIdx]);
             const next = currentLane?.queue.shift();
-            if (next) { js.rrRemaining--; return next; }
+            if (next) { js.rrRemaining--; currentLane!.executedTasks++; js.totalLength--; return next; }
             js.rrRemaining = 0;
         }
         for (let scanned = 0; scanned < n; scanned++) {
@@ -614,6 +612,8 @@ export class Scheduler {
             const lane = js.lanes.get(key);
             if (!lane || lane.queue.length === 0) continue;
             js.rrRemaining = Math.max(0, this.laneBudget - 1);
+            lane.executedTasks++;
+            js.totalLength--;
             return lane.queue.shift();
         }
         return undefined;
@@ -629,8 +629,7 @@ export class Scheduler {
             while (ran < this.flushBudget) {
                 const next = this.shiftFromNextLane();
                 if (!next) break;
-                const lane = js.lanes.get(inferLane(next.tag));
-                ran++; js.executedTasks++; if (lane) lane.executedTasks++;
+                ran++; js.executedTasks++;
                 try { next.task(); } catch (e) { console.error(`[Scheduler] task threw (tag=${next.tag})`, e); }
             }
         } finally {
