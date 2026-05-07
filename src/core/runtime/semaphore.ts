@@ -102,8 +102,8 @@ export function makeSemaphore(n: number): Semaphore {
     return asyncFlatMap(acquire(), () =>
       async((_env, cb) => {
         const runtime = unsafeGetCurrentRuntime();
-        const fiber = runtime.fork(effect);
-        fiber.join((exit: Exit<E, A>) => {
+        const fiber = runtime.fork(effect as any);
+        fiber.join((exit: any) => {
           release();
           cb(exit);
         });

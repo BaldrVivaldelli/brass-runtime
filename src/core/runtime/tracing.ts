@@ -4,7 +4,7 @@
 // Provides automatic span creation for effects, with context propagation
 // across fiber boundaries. Can export to any OTel-compatible backend.
 
-import { Async, async, asyncFlatMap, asyncFold, asyncSucceed } from "../types/asyncEffect";
+import { Async, async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../types/asyncEffect";
 import { Exit } from "../types/effect";
 
 // ---------------------------------------------------------------------------

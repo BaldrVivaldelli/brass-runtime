@@ -165,14 +165,14 @@ export function makeCircuitBreaker(config: CircuitBreakerConfig = {}): CircuitBr
     }
 
     return asyncFold(
-      effect,
+      effect as any,
       (error: E) => {
         onFailure(error);
-        return asyncFail(error) as Async<R, E | CircuitBreakerError, A>;
+        return asyncFail(error) as any;
       },
       (value: A) => {
         onSuccess();
-        return asyncSucceed(value) as Async<R, E | CircuitBreakerError, A>;
+        return asyncSucceed(value) as any;
       }
     );
   };

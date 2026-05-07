@@ -20,11 +20,11 @@ export type MetricValue = {
 
 export type HistogramBuckets = {
   readonly boundaries: readonly number[];
-  readonly counts: number[];
-  readonly sum: number;
-  readonly count: number;
-  readonly min: number;
-  readonly max: number;
+  counts: number[];
+  sum: number;
+  count: number;
+  min: number;
+  max: number;
 };
 
 export type MetricsRegistry = {

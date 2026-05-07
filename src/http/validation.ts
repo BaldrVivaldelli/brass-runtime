@@ -31,26 +31,26 @@ export function validatedJson<A>(
   validator: JsonValidator<A>
 ): (req: Parameters<HttpClientFn>[0]) => Async<unknown, HttpError | ValidationError, A> {
   return (req) => asyncFold(
-    client(req),
-    (error: HttpError) => asyncFail(error) as Async<unknown, HttpError | ValidationError, A>,
-    (response: HttpWireResponse) => {
+    client(req) as any,
+    (error: HttpError) => asyncFail(error) as any,
+    (response: any) => {
       try {
         const parsed = JSON.parse(response.bodyText);
         const result = validator(parsed);
         if (result.success) {
-          return asyncSucceed(result.data) as Async<unknown, HttpError | ValidationError, A>;
+          return asyncSucceed(result.data) as any;
         }
         return asyncFail({
           _tag: "ValidationError" as const,
           message: result.error,
           body: response.bodyText,
-        }) as Async<unknown, HttpError | ValidationError, A>;
+        }) as any;
       } catch (e) {
         return asyncFail({
           _tag: "ValidationError" as const,
           message: `JSON parse error: ${String(e)}`,
           body: response.bodyText,
-        }) as Async<unknown, HttpError | ValidationError, A>;
+        }) as any;
       }
     }
   );
