@@ -2,13 +2,20 @@
 
 ## Introduction
 
-The HTTP Lifecycle Client is a composable HTTP client that wraps the low-level Wire\_Client (`makeHttp`) with three optional processing layers:
+The HTTP Lifecycle Client is a composable HTTP client that wraps the low-level Wire\_Client (`makeHttp`) with optional processing layers:
 
 - **Deduplication** — Collapses concurrent identical requests into a single in-flight `Async` effect, sharing the response across all callers with the same cache key.
 - **Caching** — Stores responses in an in-memory LRU cache keyed by a deterministic cache key, serving subsequent requests without hitting the network.
 - **Priority Scheduling** — Orders outgoing requests by priority level (0–9) and limits concurrency to prevent overwhelming the downstream Wire\_Client.
+- **Retry** — Retries transient failures/statuses with bounded backoff and lifecycle retry events.
 
-Each layer is independently optional. When a layer is not configured, it is completely bypassed with zero additional overhead ("zero-cost when disabled"). Layers compose in a fixed order — user middleware (outermost), then dedup, then cache, then priority, then the Wire\_Client (innermost).
+Each layer is independently optional. When a layer is not configured, it is completely bypassed with zero additional overhead ("zero-cost when disabled"). Layers compose in the fixed order shown below.
+
+The canonical production factory is `makeHttpClient`, an alias of `makeLifecycleClient`. The stable internal order is:
+
+```txt
+wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+```
 
 The lifecycle client is callable as a standard `HttpClientFn`, meaning it accepts an `HttpRequest` and returns an `Async<unknown, HttpError, HttpWireResponse>`. It additionally exposes `.with()` for middleware composition, `.stats()` for observability, `.cancelAll()` for bulk cancellation, and `.cache` for manual cache management.
 
@@ -18,6 +25,7 @@ The lifecycle client is available from the `brass-runtime/http` package entry po
 
 ```typescript
 import {
+  makeHttpClient,
   makeLifecycleClient,
   type LifecycleClientConfig,
   type LifecycleClient,
@@ -90,6 +98,7 @@ console.log("Cache hits:", snapshot.cacheHits);
 console.log("Cache misses:", snapshot.cacheMisses);
 console.log("Dedup hits:", snapshot.dedupHits);
 console.log("Queue depth:", snapshot.queueDepth);
+console.log("Retries:", snapshot.retries);
 console.log("Requests started:", snapshot.requestsStarted);
 ```
 
@@ -126,6 +135,7 @@ The following event types are emitted during request processing:
 | `dedup-miss` | Emitted when a request initiates a new in-flight Async\_Effect |
 | `queue-enqueue` | Emitted when a request is enqueued in the priority scheduler |
 | `queue-dispatch` | Emitted when a queued request is dispatched to the Wire\_Client |
+| `retry` | Emitted when retry schedules another attempt |
 
 ## Performance
 
@@ -338,6 +348,7 @@ Extends `MakeHttpConfig` with optional lifecycle layer configurations. Each laye
 | `dedup` | `DedupConfig \| false` | `undefined` (disabled) | Dedup layer configuration. Set to an object to enable, `false` to explicitly disable. |
 | `cache` | `CacheConfig \| false` | `undefined` (disabled) | Cache layer configuration. Set to an object to enable, `false` to explicitly disable. |
 | `priority` | `PriorityConfig \| false` | `undefined` (disabled) | Priority scheduler configuration. Set to an object to enable, `false` to explicitly disable. |
+| `retry` | `RetryPolicy \| false` | `undefined` (disabled) | Retry policy. Set to an object to enable, `false` to explicitly disable. |
 | `onEvent` | `(event: LifecycleEvent) => void` | `undefined` | Optional event observer callback invoked for each lifecycle event during request processing. |
 
 ### DedupConfig
@@ -396,7 +407,8 @@ All public exports from `src/http/lifecycle/index.ts`:
 
 | Export | Description |
 |--------|-------------|
-| [`makeLifecycleClient`](#quick-start) | Creates a lifecycle-aware HTTP client composing dedup, cache, and priority layers. |
+| [`makeLifecycleClient`](#quick-start) | Creates a lifecycle-aware HTTP client composing optional HTTP lifecycle layers. |
+| [`makeHttpClient`](#quick-start) | Canonical alias for makeLifecycleClient with stable production composition order. |
 | [`computeCacheKey`](#cache-key) | Computes a deterministic cache key string from an HTTP request. |
 | [`parseCacheKey`](#cache-key) | Parses a cache key string back into its component parts (method, URL, headers, body). |
 | [`withAuth`](#middleware) | Creates middleware that injects a Bearer token via an async token provider. |

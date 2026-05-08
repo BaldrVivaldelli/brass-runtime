@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { makeLifecycleClient } from "../lifecycle/lifecycleClient";
+import { makeHttpClient, makeLifecycleClient } from "../lifecycle/lifecycleClient";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse, HttpMiddleware } from "../client";
 import type { Async } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
@@ -328,6 +328,7 @@ describe("makeLifecycleClient", () => {
       expect(stats.requestsStarted).toBe(0);
       expect(stats.requestsCompleted).toBe(0);
       expect(stats.requestsFailed).toBe(0);
+      expect(stats.retries).toBe(0);
       expect(stats.wire).toBeDefined();
     });
 
@@ -339,6 +340,88 @@ describe("makeLifecycleClient", () => {
       expect(stats.wire.started).toBe(0);
       expect(stats.wire.succeeded).toBe(0);
       expect(stats.wire.failed).toBe(0);
+    });
+
+    it("tracks lifecycle request, cache, dedup, and event counters", async () => {
+      let resolveFetch: ((value: Response) => void) | undefined;
+      const events: string[] = [];
+      const mockFetch = vi.fn().mockImplementation(
+        () => new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        })
+      );
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({
+          baseUrl: "https://example.com",
+          dedup: {},
+          cache: { ttlSeconds: 60 },
+          priority: { concurrency: 4 },
+          onEvent: (event) => events.push(event.type),
+        });
+
+        const req: HttpRequest = { method: "GET", url: "/stats" };
+        const p1 = run<HttpWireResponse>(client(req));
+        const p2 = run<HttpWireResponse>(client(req));
+
+        await new Promise((r) => setTimeout(r, 0));
+        expect(client.stats().dedupHits).toBe(1);
+        expect(client.stats().dedupActive).toBe(1);
+
+        resolveFetch?.(new Response("cached", { status: 200, statusText: "OK" }));
+        await Promise.all([p1, p2]);
+
+        const fromCache = await run<HttpWireResponse>(client(req));
+        expect(fromCache.bodyText).toBe("cached");
+
+        const stats = client.stats();
+        expect(stats.requestsStarted).toBe(3);
+        expect(stats.requestsCompleted).toBe(3);
+        expect(stats.cacheMisses).toBe(1);
+        expect(stats.cacheHits).toBe(1);
+        expect(stats.dedupHits).toBe(1);
+        expect(stats.dedupActive).toBe(0);
+        expect(events).toContain("request-start");
+        expect(events).toContain("request-end");
+        expect(events).toContain("cache-hit");
+        expect(events).toContain("dedup-hit");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("tracks retry lifecycle events and stats in canonical client composition", async () => {
+      const events: string[] = [];
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response("retry", { status: 503, statusText: "Unavailable" }))
+        .mockResolvedValueOnce(new Response("ok", { status: 200, statusText: "OK" }));
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeHttpClient({
+          baseUrl: "https://example.com",
+          priority: { concurrency: 1 },
+          retry: { maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, retryOnMethods: ["GET"] },
+          cache: { ttlSeconds: 60 },
+          dedup: {},
+          onEvent: (event) => events.push(event.type),
+        });
+
+        const res = await run<HttpWireResponse>(client({ method: "GET", url: "/retry" }));
+
+        expect(res.status).toBe(200);
+        expect(mockFetch).toHaveBeenCalledTimes(2);
+        expect(client.stats().retries).toBe(1);
+        expect(events).toContain("queue-dispatch");
+        expect(events).toContain("retry");
+        expect(events).toContain("cache-miss");
+        expect(events).toContain("dedup-miss");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
   });
 
@@ -372,6 +455,172 @@ describe("makeLifecycleClient", () => {
       // Should resolve cleanly with no in-flight requests
       const result = await run<void>(client.cancelAll());
       expect(result).toBeUndefined();
+    });
+
+    it("cancelAll aborts active requests", async () => {
+      let observedSignal: AbortSignal | undefined;
+      const mockFetch = vi.fn().mockImplementation((_url: URL, init: RequestInit) => {
+        observedSignal = init.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({ baseUrl: "https://example.com" });
+        const pending = run<HttpWireResponse>(client({ method: "GET", url: "/slow" }));
+
+        await new Promise((r) => setTimeout(r, 0));
+        expect(observedSignal?.aborted).toBe(false);
+
+        await run<void>(client.cancelAll());
+        expect(observedSignal?.aborted).toBe(true);
+        await expect(pending).rejects.toMatchObject({ _tag: "Abort" });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("external AbortSignal aborts an active lifecycle request", async () => {
+      let observedSignal: AbortSignal | undefined;
+      const controller = new AbortController();
+      const mockFetch = vi.fn().mockImplementation((_url: URL, init: RequestInit) => {
+        observedSignal = init.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          observedSignal?.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({ baseUrl: "https://example.com" });
+        const pending = run<HttpWireResponse>(
+          client({ method: "GET", url: "/signal", init: { signal: controller.signal } as any })
+        );
+
+        await new Promise((r) => setTimeout(r, 0));
+        controller.abort();
+
+        expect(observedSignal?.aborted).toBe(true);
+        await expect(pending).rejects.toMatchObject({ _tag: "Abort" });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("external AbortSignal cancels retry sleep without issuing another attempt", async () => {
+      const controller = new AbortController();
+      const events: string[] = [];
+      const mockFetch = vi.fn().mockResolvedValue(
+        new Response("retry later", {
+          status: 503,
+          statusText: "Unavailable",
+          headers: { "retry-after": "5" },
+        })
+      );
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({
+          baseUrl: "https://example.com",
+          retry: { maxRetries: 3, baseDelayMs: 1000, maxDelayMs: 5000 },
+          onEvent: (event) => events.push(event.type),
+        });
+
+        const pending = run<HttpWireResponse>(
+          client({ method: "GET", url: "/retry-abort", init: { signal: controller.signal } as any })
+        );
+
+        for (let i = 0; i < 20 && !events.includes("retry"); i++) {
+          await new Promise((r) => setTimeout(r, 0));
+        }
+
+        expect(events).toContain("retry");
+        controller.abort();
+
+        await expect(pending).rejects.toMatchObject({ _tag: "Abort" });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("cancelAll aborts queued priority requests without dispatching them", async () => {
+      const mockFetch = vi.fn().mockImplementation((_url: URL, init: RequestInit) => {
+        const signal = init.signal as AbortSignal;
+        return new Promise<Response>((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            reject(new DOMException("aborted", "AbortError"));
+          }, { once: true });
+        });
+      });
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({
+          baseUrl: "https://example.com",
+          priority: { concurrency: 1 },
+        });
+
+        const first = run<HttpWireResponse>(client({ method: "GET", url: "/one" }));
+        const second = run<HttpWireResponse>(client({ method: "GET", url: "/two" }));
+        first.catch(() => undefined);
+        second.catch(() => undefined);
+
+        await new Promise((r) => setTimeout(r, 0));
+        expect(client.stats().queueDepth).toBe(1);
+
+        await run<void>(client.cancelAll());
+        await expect(first).rejects.toMatchObject({ _tag: "Abort" });
+        await expect(second).rejects.toMatchObject({ _tag: "Abort" });
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+        expect(client.stats().queueDepth).toBe(0);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    });
+
+    it("interrupting one deduplicated consumer leaves the shared request alive", async () => {
+      let resolveFetch: ((value: Response) => void) | undefined;
+      const mockFetch = vi.fn().mockImplementation(
+        () => new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        })
+      );
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = mockFetch;
+
+      try {
+        const client = makeLifecycleClient({ baseUrl: "https://example.com", dedup: {} });
+        const req: HttpRequest = { method: "GET", url: "/dedup-cancel" };
+        const first = rt.fork(client(req));
+        const second = rt.fork(client(req));
+
+        await new Promise((r) => setTimeout(r, 0));
+        expect(mockFetch).toHaveBeenCalledTimes(1);
+
+        first.interrupt();
+        const firstExit = await new Promise<Exit<HttpError, HttpWireResponse>>((resolve) => first.join(resolve));
+        expect(firstExit._tag).toBe("Failure");
+        expect(firstExit._tag === "Failure" ? firstExit.cause._tag : "").toBe("Interrupt");
+
+        resolveFetch?.(new Response("still-alive", { status: 200, statusText: "OK" }));
+        const secondExit = await new Promise<Exit<HttpError, HttpWireResponse>>((resolve) => second.join(resolve));
+
+        expect(secondExit._tag).toBe("Success");
+        expect(secondExit._tag === "Success" ? secondExit.value.bodyText : "").toBe("still-alive");
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     });
 
     it("cancelAll is available after .with() middleware", async () => {

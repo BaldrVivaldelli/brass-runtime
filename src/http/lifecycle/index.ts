@@ -14,8 +14,8 @@ export type {
   PriorityConfig,
 } from "./types";
 
-// Lifecycle client factory
-export { makeLifecycleClient } from "./lifecycleClient";
+// Lifecycle client factories
+export { makeLifecycleClient, makeHttpClient } from "./lifecycleClient";
 
 // Cache key utilities
 export {

@@ -7,6 +7,7 @@ This file tracks the package surface that users can import.
 Defined in `package.json`:
 
 - `brass-runtime` -> `dist/index.*`
+- `brass-runtime/core` -> `dist/core/index.*`
 - `brass-runtime/http` -> `dist/http/index.*`
 - `brass-runtime/agent` -> `dist/agent/index.*`
 - `brass-runtime/package.json`
@@ -22,6 +23,11 @@ Bundle entries are defined in `tsup.config.ts`.
 ## Root export: `brass-runtime`
 
 Source: `src/index.ts`
+
+The root export is compatibility-first. New public APIs should prefer a named
+subpath when they belong to an optional subsystem (`brass-runtime/http`,
+`brass-runtime/agent`, future stream/runtime subpaths) instead of widening the
+root surface by default.
 
 Primary categories:
 
@@ -40,9 +46,27 @@ When adding a root export:
 - Avoid exporting test/benchmark/internal implementation details.
 - Add or update docs/examples when the export is user-facing.
 
+## Core export: `brass-runtime/core`
+
+Source: `src/core/index.ts`
+
+This is the preferred stable core surface for new imports. It intentionally
+exports effect/runtime/resource/layer/schedule/observability helpers without
+the lower-level engine, scheduler queue, ring-buffer, and WASM bridge internals
+that remain available from the root export for compatibility.
+
 ## HTTP export: `brass-runtime/http`
 
 Source: `src/http/index.ts`
+
+Recommended API order:
+
+- `httpClient` for day-to-day typed text/JSON calls.
+- `makeHttpClient` / `makeLifecycleClient` for cache, deduplication, priority
+  queues, retry, lifecycle events, stats, and bulk cancellation.
+- `makeHttp` / `makeHttpStream` for low-level wire behavior and middleware
+  authors.
+- `httpClientWithMeta` for metadata-oriented compatibility helpers.
 
 Primary categories:
 

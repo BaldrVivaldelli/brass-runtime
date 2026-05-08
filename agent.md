@@ -23,6 +23,33 @@ If an async operation cannot be cancelled, it is considered a bug.
 
 ## Execution Model
 
+### Package Entry Points
+
+The package has several public surfaces:
+
+- `brass-runtime`: broad compatibility root export.
+- `brass-runtime/core`: preferred stable core/runtime surface for new code.
+- `brass-runtime/http`: HTTP clients, middleware, lifecycle utilities.
+- `brass-runtime/agent`: agent library API.
+- `brass-agent`: CLI binary.
+
+Root exports are compatibility-first. Do not widen `src/index.ts` by default.
+Prefer a focused subpath when adding a public API.
+
+If package shape changes, update:
+
+- `package.json`
+- `tsup.config.ts`
+- `docs/ai/PUBLIC_API.md`
+- relevant README/docs examples
+
+Then run:
+
+```bash
+npm run build
+npm run validate:cjs
+```
+
 ### Effects
 
 The core abstraction is `Async<R, E, A>` (and `ZIO` aliases):
@@ -36,6 +63,16 @@ Effects are:
 - composable
 - cancelable
 - interpretable by a runtime
+
+Typing rules:
+
+- Preserve `R`, `E`, and `A` in public helpers.
+- `flatMap` composes environments as `R & R2`.
+- `flatMap` composes failures as `E | E2`.
+- `fold/catchAll` should preserve typed recovery rather than collapse to
+  `unknown`.
+- Keep `as any` out of public helper signatures. If unavoidable, hide it inside
+  a constructor or interpreter boundary.
 
 Execution happens via:
 
@@ -72,6 +109,9 @@ The scheduler:
 - prevents runaway recursion
 
 All async boundaries must go through the scheduler.
+
+Lane/caller scheduling is observability and fairness metadata. It must not
+change the semantic result of user effects.
 
 ---
 
@@ -153,25 +193,38 @@ Why pipelines exist:
 
 ## HTTP Client
 
-brass-runtime exposes **two HTTP clients**:
+HTTP is built on top of core effects. Core must never import HTTP.
 
-### 1) Non‑streaming client
+brass-runtime exposes several HTTP layers:
+
+### 1) DX client: `httpClient`
 
 - `getText`
 - `getJson`
 - `post`
 - `postJson`
 
-This client eagerly consumes the body via `fetch().text()`.
+This client eagerly consumes the body via `fetch().text()` for non-streaming
+helpers.
 
 It is intended for:
 - small payloads
 - simple DX
 - classic REST usage
 
-### 2) Streaming HTTP client
+### 2) Wire client: `makeHttp`
 
-- `httpClientStream`
+Low-level client that returns `HttpWireResponse`.
+
+Use it for:
+- middleware authorship
+- tests
+- custom DX layers
+
+It should stay ignorant of JSON/domain parsing.
+
+### 3) Streaming HTTP client: `makeHttpStream` / `httpClientStream`
+
 - body is a `ZStream<Uint8Array>`
 
 This client:
@@ -179,6 +232,30 @@ This client:
 - supports backpressure
 - supports cancellation
 - works in Browser and Node 18+
+
+### 4) Lifecycle client: `makeHttpClient` / `makeLifecycleClient`
+
+Production-oriented client with optional:
+
+- deduplication
+- response cache
+- priority queueing
+- retry
+- lifecycle events
+- lifecycle stats
+- `cancelAll`
+
+Canonical composition order:
+
+```txt
+wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+```
+
+`LifecycleStatsTracker` owns lifecycle counters. The client should report real
+request/cache/dedup/queue/retry stats, not placeholder zeros.
+
+`cancelAll` must abort active requests through `AbortController`, using the same
+cancellation path as fiber interruption.
 
 ---
 
@@ -209,6 +286,19 @@ If cancellation hangs, the bug is:
 - a finalizer that never completes
 - or misuse of `scope.close()` instead of `closeAsync`
 
+### Cancellation Checklist
+
+Before changing async, HTTP, streams, scheduler, or resources, answer:
+
+- What owns this operation?
+- What cancels it?
+- Does cancellation reach the host primitive (`AbortSignal`, reader, timer,
+  child process, worker, etc.)?
+- Is the canceler detached when the operation completes?
+- Which scope/fiber owns the finalizer?
+- Is interruption idempotent?
+- Is there a regression test for cancellation?
+
 ---
 
 ## HTTP Request Model
@@ -236,6 +326,52 @@ a convenient `init + headers` shape and adapt it internally.
 If you see `unknown` creeping into stream errors,
 it usually means a constructor was not typed strictly enough.
 
+## Module Rules
+
+### Core
+
+- Semantics first, performance second.
+- Keep effects lazy.
+- Keep Promise usage at host interop boundaries.
+- Avoid expanding root exports unless compatibility requires it.
+- Prefer `brass-runtime/core` for new stable core APIs.
+
+### Streams
+
+- Preserve ordering.
+- Preserve backpressure.
+- Preserve end-of-stream as `None`, not as a thrown/failing error.
+- Fusion optimizations must be behavior-preserving.
+
+### HTTP
+
+- Keep wire/content/meta/lifecycle concerns separate.
+- Middleware composition must stay lazy.
+- Retry must respect method safety, retry budgets, aborts, pool rejection, and
+  per-request overrides.
+- Compression must keep body/header semantics explicit.
+
+### Agent
+
+- `src/agent` may depend on runtime primitives.
+- Core runtime must not depend on agent code.
+- Workspace reads/writes go through services and permission policies.
+- Prompt/context helpers must be bounded and redaction-aware.
+
+### WASM
+
+- WASM mode is strict.
+- If WASM is requested and unavailable, fail clearly.
+- Do not silently fall back to TypeScript.
+- Source changes live in `crates/` and TypeScript bridge files.
+- `wasm/pkg` is generated output.
+
+If WASM-specific tests fail in a way that suggests stale bindings, run:
+
+```bash
+npm run build:wasm
+```
+
 ---
 
 ## Common Failure Modes
@@ -253,6 +389,73 @@ Usually:
 - reader was not cancelled
 - fetch was not wired to `AbortSignal`
 - stream adapter leaked
+
+### Lifecycle stats stay at zero
+
+Usually:
+- `makeLifecycleClient` is bypassing `LifecycleStatsTracker`
+- a layer emits local events but not lifecycle events
+- stats are being read from the wire client only
+
+### CJS build validates tests but fails package validation
+
+Usually:
+- a TS module is named like a native addon, e.g. `*.node.ts`
+- a public export is represented internally by a binding name that confuses the
+  CJS transform
+- package exports changed without updating `tsup.config.ts`
+
+Run:
+
+```bash
+npm run build:ts
+npm run validate:cjs
+```
+
+### WASM scheduler/fiber tests fail unexpectedly
+
+Usually:
+- `wasm/pkg` is stale relative to `crates/brass-runtime-wasm-engine`
+- bindings were regenerated in another checkout
+
+Run:
+
+```bash
+npm run build:wasm
+npm test -- src/core/runtime/__tests__/scheduler-lanes.test.ts
+```
+
+## Validation
+
+Baseline before handing off changes:
+
+```bash
+npm run test:types
+npm test
+```
+
+For core type/runtime changes:
+
+```bash
+npm run test:types
+npm test -- src/core/types src/core/runtime/__tests__
+```
+
+For HTTP changes:
+
+```bash
+npm run test:types
+npm test -- src/http/__tests__
+```
+
+For public exports, build config, CJS/ESM, or release work:
+
+```bash
+npm run build
+npm run validate:cjs
+```
+
+`npm run build` requires `wasm-pack` and a valid WASM toolchain.
 
 ---
 

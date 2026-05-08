@@ -103,14 +103,21 @@ export function makeSemaphore(n: number): Semaphore {
       async((_env, cb) => {
         const runtime = unsafeGetCurrentRuntime();
         const fiber = runtime.fork(effect as any);
-        fiber.join((exit: any) => {
+        let released = false;
+        const releaseOnce = () => {
+          if (released) return;
+          released = true;
           release();
+        };
+
+        fiber.join((exit: any) => {
+          releaseOnce();
           cb(exit);
         });
 
         return () => {
           fiber.interrupt();
-          release();
+          releaseOnce();
         };
       })
     );

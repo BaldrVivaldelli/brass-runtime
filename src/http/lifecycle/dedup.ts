@@ -3,6 +3,7 @@ import type { Async } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
+import { registerHttpEffect } from "../effectRunner";
 import { computeDedupKey, SAFE_METHODS } from "./dedupKey";
 
 /**
@@ -11,7 +12,21 @@ import { computeDedupKey, SAFE_METHODS } from "./dedupKey";
 export type DedupConfig = {
   /** Custom key function. When provided, overrides default key computation. */
   dedupKey?: (req: HttpRequest) => string;
+  /** Optional lifecycle observer for dedup hits/misses. */
+  onEvent?: (event: { type: "dedup-hit" | "dedup-miss" | "dedup-active"; cacheKey?: string; active?: number }) => void;
 };
+
+function safeEmit(
+  onEvent: ((event: { type: "dedup-hit" | "dedup-miss" | "dedup-active"; cacheKey?: string; active?: number }) => void) | undefined,
+  event: { type: "dedup-hit" | "dedup-miss" | "dedup-active"; cacheKey?: string; active?: number }
+): void {
+  if (!onEvent) return;
+  try {
+    onEvent(event);
+  } catch {
+    /* swallow observer errors */
+  }
+}
 
 /**
  * Internal entry tracking an in-flight deduplicated request.
@@ -61,6 +76,7 @@ type DedupEntry = {
 export function withDedup(config?: DedupConfig): HttpMiddleware {
   const inFlight = new Map<string, DedupEntry>();
   const customKeyFn = config?.dedupKey;
+  const onEvent = config?.onEvent;
 
   return (next: HttpClientFn): HttpClientFn => {
     return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> => {
@@ -92,17 +108,24 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
         _tag: "Async",
         register: (_env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
           const existing = inFlight.get(key);
+          let callerDone = false;
+          const finishCaller = (exit: Exit<HttpError, HttpWireResponse>) => {
+            if (callerDone) return;
+            callerDone = true;
+            cb(exit);
+          };
 
           if (existing) {
+            safeEmit(onEvent, { type: "dedup-hit", cacheKey: key });
             // Attach as a waiter to the existing in-flight request
             existing.refCount++;
 
             const waiter = {
               resolve: (res: HttpWireResponse) => {
-                cb({ _tag: "Success", value: res });
+                finishCaller({ _tag: "Success", value: res });
               },
               reject: (err: HttpError) => {
-                cb({ _tag: "Failure", cause: Cause.fail(err) });
+                finishCaller({ _tag: "Failure", cause: Cause.fail(err) });
               },
             };
 
@@ -110,6 +133,7 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
 
             // Return cancellation function (ref-counted)
             return () => {
+              if (callerDone) return;
               existing.refCount--;
 
               // Remove this waiter from the list
@@ -121,15 +145,17 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
               // If no more callers, abort the underlying request
               if (existing.refCount <= 0) {
                 inFlight.delete(key);
+                safeEmit(onEvent, { type: "dedup-active", active: inFlight.size });
                 existing.controller.abort();
               }
 
               // Signal interrupt to this caller
-              cb({ _tag: "Failure", cause: Cause.interrupt() });
+              finishCaller({ _tag: "Failure", cause: Cause.interrupt() });
             };
           }
 
           // Start a new in-flight request
+          safeEmit(onEvent, { type: "dedup-miss", cacheKey: key });
           const controller = new AbortController();
           const entry: DedupEntry = {
             key,
@@ -139,6 +165,7 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
           };
 
           inFlight.set(key, entry);
+          safeEmit(onEvent, { type: "dedup-active", active: inFlight.size });
 
           // Build the request with the dedup controller's signal
           const dedupReq: HttpRequest = {
@@ -152,107 +179,42 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
           // Execute the underlying request
           const innerEffect = next(dedupReq);
 
-          // Run the inner effect
-          let innerCancel: (() => void) | undefined;
+          const innerCancel = registerHttpEffect(innerEffect, _env, (exit) => {
+            inFlight.delete(key);
+            safeEmit(onEvent, { type: "dedup-active", active: inFlight.size });
 
-          const innerRegister = innerEffect._tag === "Async" ? innerEffect.register : undefined;
-
-          if (innerEffect._tag === "Succeed") {
-            // Immediate success
-            resolveAll(entry, innerEffect.value);
-            cb({ _tag: "Success", value: innerEffect.value });
-          } else if (innerEffect._tag === "Fail") {
-            // Immediate failure
-            rejectAll(entry, innerEffect.error);
-            cb({ _tag: "Failure", cause: Cause.fail(innerEffect.error) });
-          } else if (innerRegister) {
-            // Async effect — register it
-            const cancelFn = innerRegister(_env, (exit: Exit<HttpError, HttpWireResponse>) => {
-              inFlight.delete(key);
-
-              if (exit._tag === "Success") {
-                // Resolve all waiters with the response
-                const waiters = entry.waiters.slice();
-                for (const w of waiters) {
-                  w.resolve(exit.value);
-                }
-                cb(exit);
-              } else {
-                // Failure — determine if it's an interrupt or an error
-                if (exit.cause._tag === "Interrupt") {
-                  // Only propagate interrupt if all callers cancelled
-                  // (this happens when refCount reached 0 and we aborted)
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject({ _tag: "Abort" });
-                  }
-                  cb({ _tag: "Failure", cause: Cause.interrupt() });
-                } else if (exit.cause._tag === "Fail") {
-                  // Propagate the same error to all waiters
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject(exit.cause.error);
-                  }
-                  cb(exit);
-                } else {
-                  // Die — treat as FetchError
-                  const err: HttpError = { _tag: "FetchError", message: String((exit.cause as any).defect ?? "unknown") };
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject(err);
-                  }
-                  cb({ _tag: "Failure", cause: Cause.fail(err) });
-                }
-              }
-            });
-
-            if (typeof cancelFn === "function") {
-              innerCancel = cancelFn;
+            if (exit._tag === "Success") {
+              resolveAll(entry, exit.value);
+              finishCaller(exit);
+              return;
             }
-          } else {
-            // FlatMap or Fold — we need to run through the effect system
-            // For complex effects, wrap in a promise-based approach
-            runEffect(innerEffect, _env, (exit) => {
-              inFlight.delete(key);
 
-              if (exit._tag === "Success") {
-                const waiters = entry.waiters.slice();
-                for (const w of waiters) {
-                  w.resolve(exit.value);
-                }
-                cb(exit);
-              } else {
-                if (exit.cause._tag === "Interrupt") {
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject({ _tag: "Abort" });
-                  }
-                  cb({ _tag: "Failure", cause: Cause.interrupt() });
-                } else if (exit.cause._tag === "Fail") {
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject(exit.cause.error);
-                  }
-                  cb(exit);
-                } else {
-                  const err: HttpError = { _tag: "FetchError", message: String((exit.cause as any).defect ?? "unknown") };
-                  const waiters = entry.waiters.slice();
-                  for (const w of waiters) {
-                    w.reject(err);
-                  }
-                  cb({ _tag: "Failure", cause: Cause.fail(err) });
-                }
-              }
-            });
-          }
+            if (exit.cause._tag === "Interrupt") {
+              rejectAll(entry, { _tag: "Abort" });
+              finishCaller({ _tag: "Failure", cause: Cause.interrupt() });
+              return;
+            }
+
+            if (exit.cause._tag === "Fail") {
+              rejectAll(entry, exit.cause.error);
+              finishCaller(exit);
+              return;
+            }
+
+            const err: HttpError = { _tag: "FetchError", message: String((exit.cause as any).defect ?? "unknown") };
+            rejectAll(entry, err);
+            finishCaller({ _tag: "Failure", cause: Cause.fail(err) });
+          });
 
           // Return cancellation function for the initiator
           return () => {
+            if (callerDone) return;
             entry.refCount--;
 
             if (entry.refCount <= 0) {
               // All callers cancelled — abort the underlying request
               inFlight.delete(key);
+              safeEmit(onEvent, { type: "dedup-active", active: inFlight.size });
               controller.abort();
               if (innerCancel) {
                 innerCancel();
@@ -260,7 +222,7 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
             }
 
             // Signal interrupt to this caller
-            cb({ _tag: "Failure", cause: Cause.interrupt() });
+            finishCaller({ _tag: "Failure", cause: Cause.interrupt() });
           };
         },
       };
@@ -285,76 +247,5 @@ function rejectAll(entry: DedupEntry, err: HttpError): void {
   const waiters = entry.waiters.slice();
   for (const w of waiters) {
     w.reject(err);
-  }
-}
-
-/**
- * Minimal effect interpreter for running complex (FlatMap/Fold) effects.
- * This handles the case where the inner effect is not a simple Async or Succeed/Fail.
- */
-function runEffect<E, A>(
-  effect: Async<unknown, E, A>,
-  env: unknown,
-  cb: (exit: Exit<E, A>) => void
-): void {
-  switch (effect._tag) {
-    case "Succeed":
-      cb({ _tag: "Success", value: effect.value });
-      return;
-    case "Fail":
-      cb({ _tag: "Failure", cause: Cause.fail(effect.error) });
-      return;
-    case "Sync":
-      try {
-        const value = effect.thunk(env);
-        cb({ _tag: "Success", value });
-      } catch (e) {
-        cb({ _tag: "Failure", cause: Cause.die(e) as any });
-      }
-      return;
-    case "Async":
-      effect.register(env, cb);
-      return;
-    case "FlatMap":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Failure") {
-          cb(exit as any);
-          return;
-        }
-        try {
-          const next = effect.andThen(exit.value);
-          runEffect(next, env, cb);
-        } catch (e) {
-          cb({ _tag: "Failure", cause: Cause.die(e) as any });
-        }
-      });
-      return;
-    case "Fold":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Success") {
-          try {
-            const next = effect.onSuccess(exit.value);
-            runEffect(next, env, cb);
-          } catch (e) {
-            cb({ _tag: "Failure", cause: Cause.die(e) as any });
-          }
-        } else {
-          if (exit.cause._tag === "Fail") {
-            try {
-              const next = effect.onFailure(exit.cause.error);
-              runEffect(next, env, cb);
-            } catch (e) {
-              cb({ _tag: "Failure", cause: Cause.die(e) as any });
-            }
-          } else {
-            cb(exit as any);
-          }
-        }
-      });
-      return;
-    case "Fork":
-      // Fork is not expected in this context; treat as succeed with undefined
-      cb({ _tag: "Success", value: undefined as any });
-      return;
   }
 }

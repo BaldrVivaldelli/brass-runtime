@@ -104,14 +104,19 @@ describe("Observability and cancellation edge cases", () => {
     const client: HttpClientFn = (_req: HttpRequest) => {
       callCount++;
       // Always return retryable status
-      return asyncSucceed(makeResponse(503));
+      return asyncSucceed(makeResponse(503, { "Retry-After": "5" }));
     };
 
+    let retryStarted!: () => void;
+    const enteredRetrySleep = new Promise<void>((resolve) => {
+      retryStarted = resolve;
+    });
     const retryClient = withRetry({
       maxRetries: 10,
       baseDelayMs: 5000,
       maxDelayMs: 10000,
       engine: "ts",
+      onRetry: retryStarted,
     })(client);
 
     const req = makeRequest();
@@ -120,8 +125,8 @@ describe("Observability and cancellation edge cases", () => {
     // Fork the effect into a fiber
     const fiber = rt.fork(effect);
 
-    // Wait for the first request to complete and the retry loop to enter sleep
-    await wait(50);
+    // Wait for the first request to complete and the retry loop to enter sleep.
+    await enteredRetrySleep;
 
     // Interrupt the fiber mid-sleep
     fiber.interrupt();

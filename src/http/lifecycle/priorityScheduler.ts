@@ -3,6 +3,7 @@ import type { Async } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
+import { registerHttpEffect } from "../effectRunner";
 import { PriorityQueue, clampPriority } from "./priorityQueue";
 
 /**
@@ -13,6 +14,8 @@ export type PriorityConfig = {
   concurrency?: number;
   /** Queue timeout in ms for priority-queued requests. Default: no timeout. */
   queueTimeoutMs?: number;
+  /** Optional lifecycle observer for queue events. */
+  onEvent?: (event: { type: "queue-enqueue" | "queue-dispatch"; priority: number }) => void;
 };
 
 /**
@@ -41,6 +44,18 @@ function extractPriority(req: HttpRequest): number {
   if (fromInit !== undefined) return clampPriority(fromInit);
 
   return 5;
+}
+
+function safeEmit(
+  onEvent: ((event: { type: "queue-enqueue" | "queue-dispatch"; priority: number }) => void) | undefined,
+  event: { type: "queue-enqueue" | "queue-dispatch"; priority: number }
+): void {
+  if (!onEvent) return;
+  try {
+    onEvent(event);
+  } catch {
+    /* swallow observer errors */
+  }
 }
 
 /**
@@ -87,11 +102,12 @@ function extractPriority(req: HttpRequest): number {
 export function withPriority(config?: PriorityConfig): HttpMiddleware & { queueDepth: () => number } {
   const concurrency = resolveConcurrency(config?.concurrency);
   const queueTimeoutMs = resolveQueueTimeout(config?.queueTimeoutMs);
+  const onEvent = config?.onEvent;
   const queue = new PriorityQueue<QueuedRequest>();
   let inFlight = 0;
 
   const queueDepth = (): number => {
-    return queue.size;
+    return queue.activeSize;
   };
 
   const middleware: HttpMiddleware = (next: HttpClientFn): HttpClientFn => {
@@ -109,6 +125,7 @@ export function withPriority(config?: PriorityConfig): HttpMiddleware & { queueD
           // Otherwise, enqueue in the priority queue
           const queued: QueuedRequest = { req, env, cb, signal: getSignal(req) };
           const entry = queue.enqueue(queued, priority);
+          safeEmit(onEvent, { type: "queue-enqueue", priority });
 
           // Set up queue timeout if configured
           if (queueTimeoutMs !== undefined) {
@@ -140,14 +157,13 @@ export function withPriority(config?: PriorityConfig): HttpMiddleware & { queueD
                 clearTimeout(queued.timer);
                 queued.timer = undefined;
               }
-              // Signal interrupt to the caller
-              cb({ _tag: "Failure", cause: Cause.interrupt() });
+              cb({ _tag: "Failure", cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) });
             };
             signal.addEventListener("abort", abortHandler, { once: true });
           } else if (signal?.aborted) {
             // Already aborted — cancel immediately
             entry.cancelled = true;
-            cb({ _tag: "Failure", cause: Cause.interrupt() });
+            cb({ _tag: "Failure", cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) });
             return;
           }
 
@@ -182,41 +198,25 @@ export function withPriority(config?: PriorityConfig): HttpMiddleware & { queueD
       cb: (exit: Exit<HttpError, HttpWireResponse>) => void,
     ): void | (() => void) {
       inFlight++;
+      safeEmit(onEvent, { type: "queue-dispatch", priority: extractPriority(req) });
 
       const innerEffect = downstream(req);
-      let innerCancel: (() => void) | undefined;
+      let completed = false;
 
       const onComplete = (exit: Exit<HttpError, HttpWireResponse>) => {
+        if (completed) return;
+        completed = true;
         inFlight--;
         cb(exit);
         // Drain the next queued request
         drainNext(downstream);
       };
 
-      if (innerEffect._tag === "Succeed") {
-        onComplete({ _tag: "Success", value: innerEffect.value });
-      } else if (innerEffect._tag === "Fail") {
-        onComplete({ _tag: "Failure", cause: Cause.fail(innerEffect.error) });
-      } else if (innerEffect._tag === "Async") {
-        const cancelFn = innerEffect.register(env, onComplete);
-        if (typeof cancelFn === "function") {
-          innerCancel = cancelFn;
-        }
-      } else {
-        // FlatMap, Fold, Sync, Fork — run through minimal interpreter
-        runEffect(innerEffect, env, onComplete);
-      }
+      const innerCancel = registerHttpEffect(innerEffect, env, onComplete);
 
       // Return cancellation function for the dispatched request
       return () => {
-        if (innerCancel) {
-          innerCancel();
-        } else {
-          // If we can't cancel the inner effect, still decrement and drain
-          inFlight--;
-          drainNext(downstream);
-        }
-        cb({ _tag: "Failure", cause: Cause.interrupt() });
+        innerCancel();
       };
     }
 
@@ -241,7 +241,7 @@ export function withPriority(config?: PriorityConfig): HttpMiddleware & { queueD
 
         // Check if the signal was aborted while queued
         if (queued.signal?.aborted) {
-          queued.cb({ _tag: "Failure", cause: Cause.interrupt() });
+          queued.cb({ _tag: "Failure", cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) });
           continue;
         }
 
@@ -277,73 +277,4 @@ function resolveQueueTimeout(value: number | undefined): number | undefined {
  */
 function getSignal(req: HttpRequest): AbortSignal | undefined {
   return (req.init as any)?.signal as AbortSignal | undefined;
-}
-
-/**
- * Minimal effect interpreter for running complex (FlatMap/Fold/Sync) effects.
- */
-function runEffect<E, A>(
-  effect: Async<unknown, E, A>,
-  env: unknown,
-  cb: (exit: Exit<E, A>) => void,
-): void {
-  switch (effect._tag) {
-    case "Succeed":
-      cb({ _tag: "Success", value: effect.value });
-      return;
-    case "Fail":
-      cb({ _tag: "Failure", cause: Cause.fail(effect.error) });
-      return;
-    case "Sync":
-      try {
-        const value = effect.thunk(env);
-        cb({ _tag: "Success", value });
-      } catch (e) {
-        cb({ _tag: "Failure", cause: Cause.die(e) as any });
-      }
-      return;
-    case "Async":
-      effect.register(env, cb);
-      return;
-    case "FlatMap":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Failure") {
-          cb(exit as any);
-          return;
-        }
-        try {
-          const next = effect.andThen(exit.value);
-          runEffect(next, env, cb);
-        } catch (e) {
-          cb({ _tag: "Failure", cause: Cause.die(e) as any });
-        }
-      });
-      return;
-    case "Fold":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Success") {
-          try {
-            const next = effect.onSuccess(exit.value);
-            runEffect(next, env, cb);
-          } catch (e) {
-            cb({ _tag: "Failure", cause: Cause.die(e) as any });
-          }
-        } else {
-          if (exit.cause._tag === "Fail") {
-            try {
-              const next = effect.onFailure(exit.cause.error);
-              runEffect(next, env, cb);
-            } catch (e) {
-              cb({ _tag: "Failure", cause: Cause.die(e) as any });
-            }
-          } else {
-            cb(exit as any);
-          }
-        }
-      });
-      return;
-    case "Fork":
-      cb({ _tag: "Success", value: undefined as any });
-      return;
-  }
 }

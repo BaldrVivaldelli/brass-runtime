@@ -95,11 +95,7 @@ export function mapError<R, E, E2, A>(
   effect: Async<R, E, A>,
   f: (error: E) => E2
 ): Async<R, E2, A> {
-  return asyncFold(
-    effect as any,
-    (error: E) => asyncFail(f(error)) as any,
-    (value: A) => asyncSucceed(value) as any
-  ) as any;
+  return asyncFold(effect, (error) => asyncFail(f(error)), asyncSucceed);
 }
 
 // ---------------------------------------------------------------------------
@@ -120,13 +116,13 @@ export function tagError<R, E, A, Tag extends string, Fields extends Record<stri
   enrich?: (error: E) => Fields
 ): Async<R, { _tag: Tag } & Fields, A> {
   return asyncFold(
-    effect as any,
+    effect,
     (error: E) => {
       const fields = enrich ? enrich(error) : ({} as Fields);
-      return asyncFail({ _tag: tag, ...fields }) as any;
+      return asyncFail({ _tag: tag, ...fields });
     },
-    (value: A) => asyncSucceed(value) as any
-  ) as any;
+    asyncSucceed
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -144,9 +140,5 @@ export function orElse<R, E, A, R2, E2, B>(
   effect: Async<R, E, A>,
   fallback: (error: E) => Async<R2, E2, B>
 ): Async<R & R2, E2, A | B> {
-  return asyncFold(
-    effect as any,
-    (error: E) => fallback(error) as any,
-    (value: A) => asyncSucceed(value) as any
-  ) as any;
+  return asyncFold(effect, fallback, asyncSucceed);
 }

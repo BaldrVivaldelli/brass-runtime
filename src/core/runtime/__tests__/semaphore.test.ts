@@ -6,6 +6,7 @@ import { sleep } from "../combinators";
 
 const rt = Runtime.make({});
 function run<A>(effect: any): Promise<A> { return rt.toPromise(effect); }
+const wait = () => new Promise((resolve) => setImmediate(resolve));
 
 describe("Semaphore", () => {
   it("allows up to N concurrent effects", async () => {
@@ -65,6 +66,39 @@ describe("Semaphore", () => {
     await new Promise(r => setTimeout(r, 10));
     expect(waiterResolved).toBe(true);
     expect(sem.waiting()).toBe(0);
+  });
+
+  it("removes canceled acquire waiters", async () => {
+    const sem = makeSemaphore(1);
+    await run(sem.acquire());
+
+    const waiter = rt.fork(sem.acquire());
+    await wait();
+    expect(sem.waiting()).toBe(1);
+
+    waiter.interrupt();
+    await wait();
+
+    expect(sem.waiting()).toBe(0);
+    sem.release();
+    expect(sem.available()).toBe(1);
+  });
+
+  it("interrupts an in-flight withPermit effect and releases the permit", async () => {
+    const sem = makeSemaphore(1);
+    let canceled = false;
+    const fiber = rt.fork(sem.withPermit(async(() => () => {
+      canceled = true;
+    })));
+
+    await wait();
+    expect(sem.available()).toBe(0);
+
+    fiber.interrupt();
+    await wait();
+
+    expect(canceled).toBe(true);
+    expect(sem.available()).toBe(1);
   });
 
   it("limits concurrency with withPermit", async () => {

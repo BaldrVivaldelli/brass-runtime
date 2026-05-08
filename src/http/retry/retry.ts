@@ -67,18 +67,18 @@ export type RetryPolicy = {
     onRetry?: (event: RetryEvent) => void;
 };
 
-const defaultRetryableMethods: HttpMethod[] = ["GET", "HEAD", "OPTIONS"];
+export const defaultRetryableMethods: HttpMethod[] = ["GET", "HEAD", "OPTIONS"];
 
-const defaultRetryOnStatus = (s: number) =>
+export const defaultRetryOnStatus = (s: number) =>
     s === 408 || s === 429 || s === 500 || s === 502 || s === 503 || s === 504;
 
-const defaultRetryOnError = (e: HttpError) =>
+export const defaultRetryOnError = (e: HttpError) =>
     e._tag === "FetchError" || e._tag === "Timeout" || e._tag === "PoolTimeout";
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
 // “full jitter”: random(0, cap)
-const backoffDelayMs = (attempt: number, base: number, cap: number) => {
+export const backoffDelayMs = (attempt: number, base: number, cap: number) => {
     const b = Math.max(0, base);
     const c = Math.max(0, cap);
     const exp = b * Math.pow(2, attempt);
@@ -92,7 +92,7 @@ const headerCI = (h: Record<string, string>, name: string): string | undefined =
 };
 
 // Retry-After: segundos o HTTP date
-const retryAfterMs = (headers: Record<string, string>): number | undefined => {
+export const retryAfterMs = (headers: Record<string, string>): number | undefined => {
     const v = headerCI(headers, "retry-after")?.trim();
     if (!v) return undefined;
 
@@ -105,7 +105,7 @@ const retryAfterMs = (headers: Record<string, string>): number | undefined => {
     return undefined;
 };
 
-const normalizeBudget = (ms: number | undefined): number | undefined => {
+export const normalizeRetryBudget = (ms: number | undefined): number | undefined => {
     if (ms === undefined || !Number.isFinite(ms)) return undefined;
     return Math.max(0, Math.floor(ms));
 };
@@ -240,7 +240,7 @@ export const withRetry =
 
                 const epRetryOnStatus = effectivePolicy.retryOnStatus ?? defaultRetryOnStatus;
                 const epRetryOnError = effectivePolicy.retryOnError ?? defaultRetryOnError;
-                const epMaxElapsedMs = normalizeBudget(effectivePolicy.maxElapsedMs);
+                const epMaxElapsedMs = normalizeRetryBudget(effectivePolicy.maxElapsedMs);
                 const originalPriority = (req as any).priority ?? 5;
 
                 const startedAt = performance.now();

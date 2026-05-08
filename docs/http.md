@@ -17,6 +17,13 @@ This is **not a wrapper around `fetch` promises** — it is an effectful HTTP cl
 
 The HTTP client is split into **three conceptual layers**:
 
+Recommended entry points:
+
+- `httpClient` is the default DX for most callers: text/JSON helpers, retry middleware, and `.toPromise`.
+- `makeHttpClient` / `makeLifecycleClient` are the production-oriented clients when you need cache, deduplication, priority queues, retry, lifecycle events, stats, or `cancelAll`.
+- `makeHttp` / `makeHttpStream` are low-level wire clients for middleware authors and tests.
+- `httpClientWithMeta` is a compatibility/DX helper for responses that should carry request metadata.
+
 ### 1) Wire layer (transport)
 
 Lowest level. Talks to `fetch`, returns raw HTTP data.
@@ -118,6 +125,43 @@ console.log(res.body.title);
 ```
 
 Metadata is **opt-in**, not baked into the core.
+
+---
+
+## Lifecycle client
+
+Use `makeHttpClient` (alias of `makeLifecycleClient`) when request lifecycle behavior is part of the contract:
+
+```ts
+import { makeHttpClient } from "brass-runtime/http";
+import { toPromise } from "brass-runtime";
+
+const http = makeHttpClient({
+  baseUrl: "https://api.example.com",
+  dedup: {},
+  cache: { ttlSeconds: 60, maxEntries: 512 },
+  priority: { concurrency: 8 },
+  retry: { maxRetries: 2, baseDelayMs: 50, maxDelayMs: 500 },
+  onEvent: (event) => {
+    console.log(event.type, event.cacheKey ?? event.priority ?? event.attempt ?? "");
+  },
+});
+
+const res = await toPromise(http({ method: "GET", url: "/users/1" }), {});
+console.log(res.status, http.stats().cacheHits);
+```
+
+`stats()` reports wire counters plus lifecycle counters for cache hits/misses,
+dedup hits/active groups, queue depth, retry attempts, and request
+success/failure totals.
+`cancelAll()` aborts active requests through the same `AbortController` path used
+by fiber interruption.
+
+The stable composition order is:
+
+```txt
+wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+```
 
 ---
 

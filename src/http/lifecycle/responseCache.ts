@@ -1,8 +1,8 @@
 // src/http/lifecycle/responseCache.ts
 import type { Async } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
-import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
+import { registerHttpEffect } from "../effectRunner";
 import { computeCacheKey } from "./cacheKey";
 import { SAFE_METHODS } from "./dedupKey";
 import { LRUCache } from "./lruCache";
@@ -32,8 +32,10 @@ export type CacheConfig = {
   cacheRelevantHeaders?: string[];
   /** Base URL needed for cache key computation. */
   baseUrl?: string;
-  /** Optional event callback for structured failure events. */
-  onEvent?: (event: { type: string; cacheKey: string; error?: any }) => void;
+  /** Optional event callback for structured cache failure events. */
+  onEvent?: (event: { type: string; cacheKey?: string; error?: any }) => void;
+  /** Optional internal lifecycle callback for hit/miss/eviction stats. */
+  onLifecycleEvent?: (event: { type: "cache-hit" | "cache-miss" | "cache-eviction"; cacheKey?: string; count?: number }) => void;
 };
 
 /**
@@ -47,84 +49,14 @@ function clamp(n: number, min: number, max: number): number {
  * Safely emits an event via the onEvent callback, swallowing any errors.
  */
 function safeEmit(
-  onEvent: ((event: { type: string; cacheKey: string; error?: any }) => void) | undefined,
-  event: { type: string; cacheKey: string; error?: any }
+  onEvent: ((event: { type: string; cacheKey?: string; error?: any }) => void) | undefined,
+  event: { type: string; cacheKey?: string; error?: any }
 ): void {
   if (!onEvent) return;
   try {
     onEvent(event);
   } catch {
     /* swallow */
-  }
-}
-
-/**
- * Minimal effect interpreter for running complex (FlatMap/Fold) effects.
- * Used for background SWR revalidation.
- */
-function runEffect<E, A>(
-  effect: Async<unknown, E, A>,
-  env: unknown,
-  cb: (exit: Exit<E, A>) => void
-): void {
-  switch (effect._tag) {
-    case "Succeed":
-      cb({ _tag: "Success", value: effect.value });
-      return;
-    case "Fail":
-      cb({ _tag: "Failure", cause: Cause.fail(effect.error) });
-      return;
-    case "Sync":
-      try {
-        const value = effect.thunk(env);
-        cb({ _tag: "Success", value });
-      } catch (e) {
-        cb({ _tag: "Failure", cause: Cause.die(e) as any });
-      }
-      return;
-    case "Async":
-      effect.register(env, cb);
-      return;
-    case "FlatMap":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Failure") {
-          cb(exit as any);
-          return;
-        }
-        try {
-          const next = effect.andThen(exit.value);
-          runEffect(next, env, cb);
-        } catch (e) {
-          cb({ _tag: "Failure", cause: Cause.die(e) as any });
-        }
-      });
-      return;
-    case "Fold":
-      runEffect(effect.first, env, (exit) => {
-        if (exit._tag === "Success") {
-          try {
-            const next = effect.onSuccess(exit.value);
-            runEffect(next, env, cb);
-          } catch (e) {
-            cb({ _tag: "Failure", cause: Cause.die(e) as any });
-          }
-        } else {
-          if (exit.cause._tag === "Fail") {
-            try {
-              const next = effect.onFailure(exit.cause.error);
-              runEffect(next, env, cb);
-            } catch (e) {
-              cb({ _tag: "Failure", cause: Cause.die(e) as any });
-            }
-          } else {
-            cb(exit as any);
-          }
-        }
-      });
-      return;
-    case "Fork":
-      cb({ _tag: "Success", value: undefined as any });
-      return;
   }
 }
 
@@ -184,8 +116,12 @@ export function withCache(config?: CacheConfig): {
   const cacheRelevantHeaders = config?.cacheRelevantHeaders ?? [];
   const baseUrl = config?.baseUrl ?? "";
   const onEvent = config?.onEvent;
+  const onLifecycleEvent = config?.onLifecycleEvent;
 
-  const cache = new LRUCache<HttpWireResponse>({ maxEntries });
+  const cache = new LRUCache<HttpWireResponse>({
+    maxEntries,
+    onEvict: (count) => onLifecycleEvent?.({ type: "cache-eviction", count }),
+  });
 
   // Track in-flight SWR revalidation keys to prevent duplicates
   const revalidating = new Set<string>();
@@ -217,41 +153,23 @@ export function withCache(config?: CacheConfig): {
           const cached = cache.get(key);
 
           if (cached !== undefined) {
+            onLifecycleEvent?.({ type: "cache-hit", cacheKey: key });
             // Cache hit — return immediately
             cb({ _tag: "Success", value: cached });
             return;
           }
 
           // Cache miss — forward to next
+          onLifecycleEvent?.({ type: "cache-miss", cacheKey: key });
           const innerEffect = next(req);
 
           // Run the inner effect and handle the response
-          let innerCancel: (() => void) | void = undefined;
-
-          if (innerEffect._tag === "Succeed") {
-            storeIfCacheable(req, innerEffect.value, key);
-            cb({ _tag: "Success", value: innerEffect.value });
-          } else if (innerEffect._tag === "Fail") {
-            cb({ _tag: "Failure", cause: Cause.fail(innerEffect.error) });
-          } else if (innerEffect._tag === "Async") {
-            innerCancel = innerEffect.register(env, (exit: Exit<HttpError, HttpWireResponse>) => {
-              if (exit._tag === "Success") {
-                storeIfCacheable(req, exit.value, key);
-              }
-              cb(exit);
-            });
-          } else {
-            // Complex effect (FlatMap, Fold, etc.)
-            runEffect(innerEffect, env, (exit: Exit<HttpError, HttpWireResponse>) => {
-              if (exit._tag === "Success") {
-                storeIfCacheable(req, exit.value, key);
-              }
-              cb(exit);
-            });
-          }
-
-          // Return cancellation function
-          return typeof innerCancel === "function" ? innerCancel : undefined;
+          return registerHttpEffect(innerEffect, env, (exit) => {
+            if (exit._tag === "Success") {
+              storeIfCacheable(req, exit.value, key);
+            }
+            cb(exit);
+          });
         },
       };
     };
@@ -308,15 +226,7 @@ export function withCache(config?: CacheConfig): {
       }
     };
 
-    if (innerEffect._tag === "Succeed") {
-      handleExit({ _tag: "Success", value: innerEffect.value });
-    } else if (innerEffect._tag === "Fail") {
-      handleExit({ _tag: "Failure", cause: Cause.fail(innerEffect.error) });
-    } else if (innerEffect._tag === "Async") {
-      innerEffect.register(undefined, handleExit);
-    } else {
-      runEffect(innerEffect, undefined, handleExit);
-    }
+    registerHttpEffect(innerEffect, undefined, handleExit);
   }
 
   // --- SWR-aware middleware variant ---
@@ -352,47 +262,32 @@ export function withCache(config?: CacheConfig): {
             const expiresAt = expirationMap.get(key);
 
             if (expiresAt !== undefined && now() < expiresAt) {
+              onLifecycleEvent?.({ type: "cache-hit", cacheKey: key });
               // Fresh cache hit
               cb({ _tag: "Success", value: cached });
               return;
             }
 
             // Stale entry — return it immediately and trigger background revalidation
+            onLifecycleEvent?.({ type: "cache-hit", cacheKey: key });
             cb({ _tag: "Success", value: cached });
             triggerRevalidation(next, req, key);
             return;
           }
 
           // Cache miss — forward to next
+          onLifecycleEvent?.({ type: "cache-miss", cacheKey: key });
           const innerEffect = next(req);
-          let innerCancel: (() => void) | void = undefined;
-
           const handleSuccess = (res: HttpWireResponse) => {
             swrStoreIfCacheable(req, res, key);
           };
 
-          if (innerEffect._tag === "Succeed") {
-            handleSuccess(innerEffect.value);
-            cb({ _tag: "Success", value: innerEffect.value });
-          } else if (innerEffect._tag === "Fail") {
-            cb({ _tag: "Failure", cause: Cause.fail(innerEffect.error) });
-          } else if (innerEffect._tag === "Async") {
-            innerCancel = innerEffect.register(env, (exit: Exit<HttpError, HttpWireResponse>) => {
-              if (exit._tag === "Success") {
-                handleSuccess(exit.value);
-              }
-              cb(exit);
-            });
-          } else {
-            runEffect(innerEffect, env, (exit: Exit<HttpError, HttpWireResponse>) => {
-              if (exit._tag === "Success") {
-                handleSuccess(exit.value);
-              }
-              cb(exit);
-            });
-          }
-
-          return typeof innerCancel === "function" ? innerCancel : undefined;
+          return registerHttpEffect(innerEffect, env, (exit) => {
+            if (exit._tag === "Success") {
+              handleSuccess(exit.value);
+            }
+            cb(exit);
+          });
         },
       };
     };

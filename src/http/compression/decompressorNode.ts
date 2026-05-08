@@ -1,4 +1,3 @@
-// src/http/compression/decompressor.node.ts
 import type { Decompressor, DecompressResult, SupportedEncoding } from "./types";
 
 /**

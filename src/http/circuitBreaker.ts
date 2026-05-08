@@ -1,6 +1,7 @@
 import { makeCircuitBreaker, CircuitBreakerConfig, CircuitBreakerError } from "../core/runtime/circuitBreaker";
 import type { HttpClientFn, HttpMiddleware, HttpError } from "./client";
-import { asyncFail } from "../core/types/asyncEffect";
+import type { Exit } from "../core/types/effect";
+import { registerHttpEffect } from "./effectRunner";
 
 export type HttpCircuitBreakerConfig = CircuitBreakerConfig & {
   /** Key resolver for per-origin circuit breakers. Default: per-origin. */
@@ -34,7 +35,7 @@ export function withCircuitBreaker(config: HttpCircuitBreakerConfig = {}): HttpM
 
     return (next: HttpClientFn): HttpClientFn => (req) => {
       const breaker = getBreaker(req.url);
-      return breaker.protect(next(req)) as any;
+      return protectLazy(breaker, next, req) as any;
     };
   }
 
@@ -49,6 +50,36 @@ export function withCircuitBreaker(config: HttpCircuitBreakerConfig = {}): HttpM
   });
 
   return (next: HttpClientFn): HttpClientFn => (req) => {
-    return breaker.protect(next(req)) as any;
+    return protectLazy(breaker, next, req) as any;
+  };
+}
+
+function protectLazy(
+  breaker: ReturnType<typeof makeCircuitBreaker>,
+  next: HttpClientFn,
+  req: Parameters<HttpClientFn>[0],
+) {
+  return {
+    _tag: "Async" as const,
+    register: (env: unknown, cb: (exit: Exit<HttpError | CircuitBreakerError, unknown>) => void) => {
+      let cancel: (() => void) | undefined;
+      try {
+        const deferred = {
+          _tag: "Async" as const,
+          register: (innerEnv: unknown, innerCb: (exit: Exit<HttpError, unknown>) => void) =>
+            registerHttpEffect(next(req) as any, innerEnv, innerCb as any),
+        };
+        cancel = registerHttpEffect(breaker.protect(deferred as any) as any, env, cb as any);
+      } catch (error) {
+        cb({
+          _tag: "Failure",
+          cause: {
+            _tag: "Fail",
+            error: { _tag: "FetchError", message: String(error) } satisfies HttpError,
+          },
+        });
+      }
+      return () => cancel?.();
+    },
   };
 }

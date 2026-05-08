@@ -415,15 +415,18 @@ export function uncons<R, E, A>(
                     const wrap = (s: ZStream<R, E, A>): ZStream<R, E, A> =>
                         fromPull(
                             async((env2, cb2) => {
-                                (uncons(s) as any)(env2, (ex2: any) => {
-                                    if (ex2._tag === "Failure") {
+                                unsafeRunFoldWithEnv<R, Option<E>, UnconsValue<R, E, A>>(
+                                  uncons(s) as any,
+                                  env2 as R,
+                                    (cause) => {
+                                        const ex2 = Exit.failCause<Option<E>, UnconsValue<R, E, A>>(cause);
                                         closeWith(ex2);
                                         cb2(ex2);
-                                        return;
+                                    },
+                                    ([a, tail]) => {
+                                        cb2(Exit.succeed([a, wrap(tail)]));
                                     }
-                                    const [a, tail] = ex2.value as [A, ZStream<R, E, A>];
-                                    cb2(Exit.succeed([a, wrap(tail)]));
-                                });
+                                );
                             }) as any
                         );
 
@@ -657,7 +660,8 @@ function drainStreamSyncFull<R, E, A>(stream: ZStream<R, E, A>): A[] | null {
 
 function readerStream<E>(
     reader: ReadableStreamDefaultReader<Uint8Array>,
-    normalizeError: Normalize<E>
+    normalizeError: Normalize<E>,
+    signal?: AbortSignal
 ): ZStream<unknown, E, Uint8Array> {
     const pull: ZIO<
         unknown,
@@ -665,29 +669,71 @@ function readerStream<E>(
         [Uint8Array, ZStream<unknown, E, Uint8Array>]
     > =
         async((_, cb) => {
+            let done = false;
+            const cleanup = () => signal?.removeEventListener("abort", abort);
+            const finish = (exit: Exit<Option<E>, [Uint8Array, ZStream<unknown, E, Uint8Array>]>) => {
+                if (done) return;
+                done = true;
+                cleanup();
+                cb(exit);
+            };
+            const abort = () => {
+                try {
+                    reader.cancel();
+                } catch {
+                    // ignore
+                }
+                const error = typeof DOMException === "function"
+                    ? new DOMException("aborted", "AbortError")
+                    : new Error("aborted");
+                finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(error)) } });
+            };
+
+            if (signal?.aborted) {
+                abort();
+                return;
+            }
+
+            signal?.addEventListener("abort", abort, { once: true });
+
             reader.read()
                 .then(({ done, value }) => {
                     if (done) {
-                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: none } }); // fin normal
+                        finish({ _tag: "Failure", cause: { _tag: "Fail", error: none } }); // fin normal
                         return;
                     }
-                    cb({
+                    finish({
                         _tag: "Success",
                         value: [value as Uint8Array, fromPull(pull)]
                     });
                 })
                 .catch((e) => {
                     // Error real => Some(e)
-                    cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(e)) } });
+                    finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(e)) } });
                 });
+
+            return () => {
+                cleanup();
+                try {
+                    reader.cancel();
+                } catch {
+                    // ignore
+                }
+            };
         }) as any;
 
     return fromPull(pull);
 }
 
+export type ReadableStreamOptions = {
+    signal?: AbortSignal;
+    onRelease?: () => void;
+};
+
 export function streamFromReadableStream<E>(
     body: ReadableStream<Uint8Array> | null | undefined,
-    normalizeError: Normalize<E>
+    normalizeError: Normalize<E>,
+    options: ReadableStreamOptions = {}
 ): ZStream<unknown, E, Uint8Array> {
     if (!body) return emptyStream<unknown, E, Uint8Array>();
 
@@ -698,7 +744,7 @@ export function streamFromReadableStream<E>(
         // acquire: produce un ZStream
         sync(() => {
             reader = body.getReader();
-            return readerStream(reader, normalizeError);
+            return readerStream(reader, normalizeError, options.signal);
         }) as any,
         // release: se corre en fin / error / interrupción
         () =>
@@ -708,6 +754,8 @@ export function streamFromReadableStream<E>(
                     reader?.cancel();
                 } catch {
                     // ignorar
+                } finally {
+                    options.onRelease?.();
                 }
             }) as any
     );

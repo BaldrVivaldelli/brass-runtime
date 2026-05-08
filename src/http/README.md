@@ -6,8 +6,17 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 
 - **Lazy**: no se ejecuta nada hasta “correr” el effect.
 - **Cancelable**: la interrupción del fiber / effect cancela `fetch` vía `AbortController` (usando `fromPromiseAbortable`).
-- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`httpClient`, `httpClientWithMeta`, streaming).
+- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`httpClient`, `makeHttpClient`, `httpClientWithMeta`, streaming).
 - **Sin magia**: los tipos principales son chicos y fáciles de debuggear.
+
+---
+
+## Qué API usar
+
+- `httpClient`: opción recomendada para consumo normal, con helpers `getText`, `getJson`, `postJson`, retry y `.toPromise`.
+- `makeHttpClient` / `makeLifecycleClient`: opción recomendada para clientes de producción que necesitan cache, dedup, prioridad, retry, eventos, stats o `cancelAll`.
+- `makeHttp` / `makeHttpStream`: wire layer para middlewares, tests y casos avanzados.
+- `httpClientWithMeta`: helper de compatibilidad cuando querés respuesta + metadata.
 
 ---
 
@@ -16,7 +25,7 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 Este módulo se exporta desde `src/http/index.ts`:
 
 ```ts
-import { httpClient, httpClientWithMeta, httpClientStream } from "../http";
+import { httpClient, makeHttpClient, makeLifecycleClient, makeHttp } from "../http";
 ```
 
 > En Node necesitás una versión con `fetch` global (Node 18+), o un polyfill.

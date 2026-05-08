@@ -7,13 +7,25 @@ import { EventBus } from "../eventBus";
 import { getBenchmarkBudget, getCurrentFiber, setBenchmarkBudget, unsafeGetCurrentRuntime, withCurrentFiber } from "../fiber";
 import { consoleJsonLogger } from "../loggerSink";
 import { RuntimeRegistry } from "../registry";
-import { Runtime, fork, fromPromiseAbortable, toPromise, unsafeRunAsync, unsafeRunFoldWithEnv } from "../runtime";
+import {
+  Runtime,
+  abortablePromiseStats,
+  fork,
+  fromPromiseAbortable,
+  resetAbortablePromiseStats,
+  runtimeForCaller,
+  toPromise,
+  toPromiseByCaller,
+  unsafeRunAsync,
+  unsafeRunFoldWithEnv,
+} from "../runtime";
 import { Scheduler } from "../scheduler";
 import { defaultTracer } from "../tracer";
 import { InMemoryTracer } from "../tracingSink";
 
 afterEach(() => {
   vi.restoreAllMocks();
+  resetAbortablePromiseStats();
   setBenchmarkBudget(undefined);
 });
 
@@ -89,6 +101,67 @@ describe("runtime helpers and observability coverage", () => {
     // Interrupt exit. Whether the underlying AbortSignal listener fires is an
     // implementation detail of fromPromiseAbortable/canceler propagation.
     expect(aborted).toBeTypeOf("boolean");
+  });
+
+  it("fromPromiseAbortable records make errors, timeout, labels, and late settlements", async () => {
+    resetAbortablePromiseStats();
+    const finishes: unknown[] = [];
+    const rt = Runtime.make({});
+
+    await expect(rt.toPromise(fromPromiseAbortable(
+      () => { throw new Error("make exploded"); },
+      (u) => (u as Error).message,
+      { label: "  make-error  ", onFinish: (finish) => finishes.push(finish) },
+    ))).rejects.toBe("make exploded");
+
+    let resolveLate!: (value: string) => void;
+    await expect(rt.toPromise(fromPromiseAbortable(
+      (signal) => new Promise<string>((resolve) => {
+        signal.addEventListener("abort", () => undefined);
+        resolveLate = resolve;
+      }),
+      (u) => u as any,
+      { label: "slow-timeout", timeoutMs: 1 },
+    ))).rejects.toMatchObject({ _tag: "Timeout", timeoutMs: 1 });
+
+    resolveLate("late");
+    await wait();
+
+    expect(finishes).toEqual([expect.objectContaining({ label: "make-error", outcome: "failure" })]);
+    expect(abortablePromiseStats()).toMatchObject({
+      active: 0,
+      started: 2,
+      failed: 1,
+      timedOut: 1,
+      lateSettlements: 1,
+      byLabel: expect.arrayContaining([
+        expect.objectContaining({ label: "make-error", failed: 1 }),
+        expect.objectContaining({ label: "slow-timeout", timedOut: 1, lateSettlements: 1 }),
+      ]),
+    });
+  });
+
+  it("keeps caller lanes stable across helpers and derived runtimes", async () => {
+    const scheduledTags: string[] = [];
+    const scheduler = {
+      schedule: (task: () => void, tag: string) => {
+        scheduledTags.push(tag);
+        queueMicrotask(task);
+        return "accepted";
+      },
+    } as any;
+
+    const rt = new Runtime({ env: { a: 1 }, scheduler, lane: "service/users", inferLane: false });
+    const provided = rt.provide({ b: 2 });
+    await expect(provided.toPromise(asyncSync((env: { a: number; b: number }) => env.a + env.b))).resolves.toBe(3);
+
+    const child = await provided.toPromise({ _tag: "Fork", effect: asyncSucceed("child") } as any);
+    expect(child).toMatchObject({ lane: "service/users" });
+    expect(scheduledTags.some((tag) => tag.startsWith("lane:service/users|"))).toBe(true);
+
+    const callerRuntime = runtimeForCaller("feature/reporting", {});
+    expect(callerRuntime.lane).toBe("feature/reporting");
+    await expect(toPromiseByCaller("feature/reporting", asyncSucceed("ok"))).resolves.toBe("ok");
   });
 
   it("exposes current runtime only inside a fiber", async () => {

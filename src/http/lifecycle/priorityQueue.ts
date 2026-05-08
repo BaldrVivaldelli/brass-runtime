@@ -101,6 +101,11 @@ export class PriorityQueue<T> {
     return this.heap.length;
   }
 
+  /** Returns the number of entries that have not been cancelled. */
+  get activeSize(): number {
+    return this.heap.reduce((n, entry) => n + (entry.cancelled ? 0 : 1), 0);
+  }
+
   /**
    * Adds a value to the queue with the given priority.
    *

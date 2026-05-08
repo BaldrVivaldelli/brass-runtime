@@ -9,6 +9,7 @@ import type {
   MakeHttpConfig,
   HttpClientStats,
 } from "../client";
+import type { RetryPolicy } from "../retry/retry";
 
 /**
  * Configuration for the deduplication layer.
@@ -22,6 +23,8 @@ import type {
 export type DedupConfig = {
   /** Custom key function. When provided, overrides default Cache_Key computation. */
   dedupKey?: (req: HttpRequest) => string;
+  /** Internal lifecycle observer. Public callers should prefer LifecycleClientConfig.onEvent. */
+  onEvent?: (event: { type: "dedup-hit" | "dedup-miss" | "dedup-active"; cacheKey?: string; active?: number }) => void;
 };
 
 /**
@@ -47,6 +50,10 @@ export type CacheConfig = {
   cachePolicy?: (req: HttpRequest, res: HttpWireResponse) => CachePolicyResult;
   /** Additional headers to include in Cache_Key computation. */
   cacheRelevantHeaders?: string[];
+  /** Cache-specific observer for stale revalidation failures. */
+  onEvent?: (event: { type: string; cacheKey?: string; error?: any }) => void;
+  /** Internal lifecycle observer. Public callers should prefer LifecycleClientConfig.onEvent. */
+  onLifecycleEvent?: (event: { type: "cache-hit" | "cache-miss" | "cache-eviction"; cacheKey?: string; count?: number }) => void;
 };
 
 /**
@@ -79,6 +86,8 @@ export type PriorityConfig = {
   concurrency?: number;
   /** Queue timeout in ms for priority-queued requests. Default: no timeout. */
   queueTimeoutMs?: number;
+  /** Internal lifecycle observer. Public callers should prefer LifecycleClientConfig.onEvent. */
+  onEvent?: (event: { type: "queue-enqueue" | "queue-dispatch"; priority: number }) => void;
 };
 
 /**
@@ -101,6 +110,8 @@ export type LifecycleClientConfig = MakeHttpConfig & {
   cache?: CacheConfig | false;
   /** Priority scheduler config. Set to `false` to explicitly disable. Default: undefined (disabled). */
   priority?: PriorityConfig | false;
+  /** Retry policy. Set to `false` to explicitly disable. Default: undefined (disabled). */
+  retry?: RetryPolicy | false;
   /** Optional event observer for lifecycle events. */
   onEvent?: (event: LifecycleEvent) => void;
 };
@@ -147,6 +158,7 @@ export type LifecycleClient = HttpClientFn & {
  * - `"dedup-miss"` — Emitted when a request initiates a new in-flight Async_Effect (no existing match).
  * - `"queue-enqueue"` — Emitted when a request is enqueued in the priority scheduler.
  * - `"queue-dispatch"` — Emitted when a queued request is dispatched to the Wire_Client.
+ * - `"retry"` — Emitted when the retry middleware schedules another attempt.
  */
 export type LifecycleEventType =
   | "request-start"
@@ -156,7 +168,8 @@ export type LifecycleEventType =
   | "dedup-hit"
   | "dedup-miss"
   | "queue-enqueue"
-  | "queue-dispatch";
+  | "queue-dispatch"
+  | "retry";
 
 /**
  * A lifecycle event emitted to the onEvent observer.
@@ -168,6 +181,10 @@ export type LifecycleEventType =
  * @property {number} timestamp - Timestamp in milliseconds (from `Date.now()`) when the event occurred. Required.
  * @property {string} [cacheKey] - The Cache_Key associated with the event, if applicable (present for cache and dedup events).
  * @property {number} [priority] - Priority level associated with the event, if applicable (present for queue events). Valid range: 0-9.
+ * @property {number} [attempt] - Zero-based retry attempt, if applicable.
+ * @property {number} [delayMs] - Retry delay in milliseconds, if applicable.
+ * @property {number} [status] - HTTP status that triggered retry, if applicable.
+ * @property {string} [errorTag] - HttpError tag that triggered retry, if applicable.
  */
 export type LifecycleEvent = {
   /** The type of lifecycle event. */
@@ -178,6 +195,14 @@ export type LifecycleEvent = {
   cacheKey?: string;
   /** Priority level associated with the event, if applicable. Valid range: 0-9. */
   priority?: number;
+  /** Zero-based retry attempt, if applicable. */
+  attempt?: number;
+  /** Retry delay in milliseconds, if applicable. */
+  delayMs?: number;
+  /** HTTP status that triggered retry, if applicable. */
+  status?: number;
+  /** HttpError tag that triggered retry, if applicable. */
+  errorTag?: string;
 };
 
 /**
@@ -195,6 +220,7 @@ export type LifecycleEvent = {
  * @property {number} requestsStarted - Total number of requests that entered the lifecycle pipeline. Default: 0.
  * @property {number} requestsCompleted - Total number of requests that completed successfully. Default: 0.
  * @property {number} requestsFailed - Total number of requests that failed with an error. Default: 0.
+ * @property {number} retries - Total number of retry attempts scheduled. Default: 0.
  * @property {HttpClientStats} wire - Underlying Wire_Client statistics snapshot.
  */
 export type LifecycleStats = {
@@ -216,6 +242,8 @@ export type LifecycleStats = {
   requestsCompleted: number;
   /** Total number of requests that failed. */
   requestsFailed: number;
+  /** Total number of retry attempts scheduled. */
+  retries: number;
   /** Underlying Wire_Client stats. */
   wire: HttpClientStats;
 };

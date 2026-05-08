@@ -37,6 +37,7 @@ export class LifecycleStatsTracker {
   private _requestsStarted = 0;
   private _requestsCompleted = 0;
   private _requestsFailed = 0;
+  private _retries = 0;
   private readonly _onEvent: ((event: LifecycleEvent) => void) | undefined;
   private readonly _wireStats: () => HttpClientStats;
 
@@ -209,6 +210,10 @@ export class LifecycleStatsTracker {
     this._requestsFailed++;
   }
 
+  retry(): void {
+    this._retries++;
+  }
+
   // --- Event emission ---
 
   /**
@@ -220,8 +225,6 @@ export class LifecycleStatsTracker {
    *
    * @param type - The lifecycle event type to emit (e.g., `"cache-hit"`, `"request-start"`).
    * @param extra - Optional additional event data.
-   * @param extra.cacheKey - The cache key associated with the event, if applicable.
-   * @param extra.priority - The priority level (0-9) associated with the event, if applicable.
    *
    * @example
    * ```typescript
@@ -234,7 +237,17 @@ export class LifecycleStatsTracker {
    * tracker.emit("cache-hit", { cacheKey: "GET|/api/users" });
    * ```
    */
-  emit(type: LifecycleEventType, extra?: { cacheKey?: string; priority?: number }): void {
+  emit(
+    type: LifecycleEventType,
+    extra?: {
+      cacheKey?: string;
+      priority?: number;
+      attempt?: number;
+      delayMs?: number;
+      status?: number;
+      errorTag?: string;
+    },
+  ): void {
     if (!this._onEvent) return;
     try {
       const event: LifecycleEvent = {
@@ -282,6 +295,7 @@ export class LifecycleStatsTracker {
       requestsStarted: this._requestsStarted,
       requestsCompleted: this._requestsCompleted,
       requestsFailed: this._requestsFailed,
+      retries: this._retries,
       wire: this._wireStats(),
     });
   }

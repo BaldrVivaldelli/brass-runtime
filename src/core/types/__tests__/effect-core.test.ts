@@ -32,6 +32,11 @@ import {
   sync,
 } from "../effect";
 import { none, some } from "../option";
+import {
+  mapError as mapTaggedError,
+  orElse,
+  tagError,
+} from "../typedError";
 import { Runtime } from "../../runtime/runtime";
 import { Scope } from "../../runtime/scope";
 
@@ -39,6 +44,21 @@ const rt = Runtime.make({ factor: 2 });
 const run = <A>(eff: any) => rt.toPromise(eff) as Promise<A>;
 
 describe("Async core constructors and combinators", () => {
+  it("type-checks environment and error widening across flatMap/fold", () => {
+    const needsFactor = asyncSync((env: { factor: number }) => env.factor);
+    const needsLabel = (n: number) =>
+      asyncSync((env: { label: string }) => `${env.label}:${n}`) as Async<{ label: string }, "label-error", string>;
+
+    const chained: Async<{ factor: number } & { label: string }, unknown | "label-error", string> =
+      asyncFlatMap(needsFactor, needsLabel);
+
+    const recovered: Async<{ factor: number }, never, number | string> =
+      asyncCatchAll(asyncMapError(needsFactor, () => "factor-error" as const), (error) => asyncSucceed(error));
+
+    expect(chained._tag).toBe("FlatMap");
+    expect(recovered._tag).toBe("Fold");
+  });
+
   it("constructs the low-level Async ADT variants", () => {
     expect(Async.succeed<unknown, never, number>(1)).toEqual({ _tag: "Succeed", value: 1 });
     expect(Async.fail<unknown, string>("e")).toEqual({ _tag: "Fail", error: "e" });
@@ -126,5 +146,25 @@ describe("Effect facade", () => {
     await expect(run(orElseOptional(fail(none), () => succeed("fallback")))).resolves.toBe("fallback");
     await expect(run(orElseOptional(fail(some("real")), () => succeed("fallback")))).rejects.toEqual(some("real"));
     await expect(run(end())).rejects.toEqual(none);
+  });
+});
+
+describe("Typed error helpers", () => {
+  it("maps, tags, and falls back on typed errors", async () => {
+    type NeedsEnv = { readonly prefix: string };
+    type SourceError = { readonly _tag: "Source"; readonly code: number };
+    type WrappedError = { readonly _tag: "Wrapped"; readonly code: number };
+
+    const source: Async<NeedsEnv, SourceError, string> = asyncFail({ _tag: "Source", code: 7 });
+    const mapped: Async<NeedsEnv, WrappedError, string> =
+      mapTaggedError(source, (error) => ({ _tag: "Wrapped", code: error.code }));
+    const tagged: Async<NeedsEnv, { _tag: "Tagged"; code: number }, string> =
+      tagError(source, "Tagged", (error) => ({ code: error.code }));
+    const recovered: Async<NeedsEnv & { readonly fallback: string }, never, string> =
+      orElse(tagged, (error) => asyncSync((env: { fallback: string }) => `${env.fallback}:${error.code}`));
+
+    await expect(run(mapped)).rejects.toEqual({ _tag: "Wrapped", code: 7 });
+    await expect(run(tagged)).rejects.toEqual({ _tag: "Tagged", code: 7 });
+    await expect(Runtime.make({ prefix: "p", fallback: "ok" }).toPromise(recovered)).resolves.toBe("ok:7");
   });
 });

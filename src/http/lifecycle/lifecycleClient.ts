@@ -6,17 +6,19 @@ import { Cause } from "../../core/types/effect";
 import {
   makeHttp,
   type HttpClientFn,
-  type HttpClientStats,
   type HttpError,
   type HttpMiddleware,
   type HttpRequest,
   type HttpWireResponse,
   type MakeHttpConfig,
 } from "../client";
+import { withRetry } from "../retry/retry";
 import { withDedup } from "./dedup";
 import { withCache } from "./responseCache";
 import { withPriority } from "./priorityScheduler";
 import { computeDedupKey } from "./dedupKey";
+import { LifecycleStatsTracker } from "./stats";
+import { registerHttpEffect } from "../effectRunner";
 import type {
   LifecycleClient,
   LifecycleClientConfig,
@@ -46,7 +48,7 @@ function validateGlobals(): void {
  * Extracts the MakeHttpConfig subset from a LifecycleClientConfig.
  */
 function extractWireConfig(config: LifecycleClientConfig): MakeHttpConfig {
-  const { dedup, cache, priority, onEvent, ...wireConfig } = config;
+  const { dedup, cache, priority, retry, onEvent, ...wireConfig } = config;
   return wireConfig;
 }
 
@@ -104,23 +106,30 @@ function extractWireConfig(config: LifecycleClientConfig): MakeHttpConfig {
  * const response = client({ method: "GET", url: "/users" });
  * ```
  */
-export function makeLifecycleClient(config: LifecycleClientConfig): LifecycleClient {
+export function makeLifecycleClient(config: LifecycleClientConfig = {}): LifecycleClient {
   // Validate globals at construction time
   validateGlobals();
 
   const wireConfig = extractWireConfig(config);
   const wireClient = makeHttp(wireConfig);
+  const activeControllers = new Set<AbortController>();
+  const tracker = new LifecycleStatsTracker({
+    onEvent: config.onEvent,
+    wireStats: wireClient.stats,
+  });
 
   const hasDedup = config.dedup !== undefined && config.dedup !== false;
   const hasCache = config.cache !== undefined && config.cache !== false;
   const hasPriority = config.priority !== undefined && config.priority !== false;
+  const hasRetry = config.retry !== undefined && config.retry !== false;
 
   // Zero-cost path: no layers configured, delegate directly to wire client
-  if (!hasDedup && !hasCache && !hasPriority) {
-    return buildLifecycleClient(wireClient, wireClient.stats, {
+  if (!hasDedup && !hasCache && !hasPriority && !hasRetry) {
+    return buildLifecycleClient(wireClient, tracker, {
       cacheInvalidate: noopInvalidate,
       cacheClear: noopClear,
-      cancelAll: () => asyncSucceed(undefined) as Async<unknown, never, void>,
+      cancelAll: () => cancelControllers(activeControllers),
+      activeControllers,
     });
   }
 
@@ -128,7 +137,13 @@ export function makeLifecycleClient(config: LifecycleClientConfig): LifecycleCli
   let priorityMiddleware: (HttpMiddleware & { queueDepth: () => number }) | undefined;
   if (hasPriority) {
     const priorityConfig = config.priority as Exclude<typeof config.priority, false | undefined>;
-    priorityMiddleware = withPriority(priorityConfig);
+    priorityMiddleware = withPriority({
+      ...priorityConfig,
+      onEvent: (event) => {
+        tracker.setQueueDepth(priorityMiddleware?.queueDepth() ?? 0);
+        tracker.emit(event.type, { priority: event.priority });
+      },
+    });
   }
 
   // Set up cache layer
@@ -138,6 +153,14 @@ export function makeLifecycleClient(config: LifecycleClientConfig): LifecycleCli
     cacheLayer = withCache({
       ...cacheConfig,
       baseUrl: wireConfig.baseUrl,
+      onLifecycleEvent: (event) => {
+        if (event.type === "cache-hit") tracker.cacheHit();
+        if (event.type === "cache-miss") tracker.cacheMiss();
+        if (event.type === "cache-eviction") tracker.cacheEviction();
+        if (event.type === "cache-hit" || event.type === "cache-miss") {
+          tracker.emit(event.type, { cacheKey: event.cacheKey });
+        }
+      },
     });
   }
 
@@ -151,15 +174,44 @@ export function makeLifecycleClient(config: LifecycleClientConfig): LifecycleCli
     const effectiveDedupConfig = dedupConfig.dedupKey || !baseUrl
       ? dedupConfig
       : { ...dedupConfig, dedupKey: (req: HttpRequest) => computeDedupKey(req, baseUrl) };
-    dedupMiddleware = withDedup(effectiveDedupConfig);
+    dedupMiddleware = withDedup({
+      ...effectiveDedupConfig,
+      onEvent: (event) => {
+        if (event.type === "dedup-hit") tracker.dedupHit();
+        if (event.type === "dedup-active") {
+          tracker.setDedupActive(event.active ?? 0);
+          return;
+        }
+        tracker.emit(event.type, { cacheKey: event.cacheKey });
+      },
+    });
   }
 
   // Compose layers: innermost to outermost
-  // Wire → Priority → Cache → Dedup
+  // Wire → Priority → Retry → Cache → Dedup
   let composedFn: HttpClientFn = wireClient;
 
   if (priorityMiddleware) {
     composedFn = priorityMiddleware(composedFn);
+  }
+
+  // Retry is placed between priority and cache/dedup so one logical request can
+  // retry through the queue while cache and dedup observe the final outcome.
+  if (hasRetry) {
+    const retryConfig = config.retry as Exclude<typeof config.retry, false | undefined>;
+    composedFn = withRetry({
+      ...retryConfig,
+      onRetry: (event) => {
+        tracker.retry();
+        tracker.emit("retry", {
+          attempt: event.attempt,
+          delayMs: event.delayMs,
+          status: event.status,
+          errorTag: event.error?._tag,
+        });
+        retryConfig.onRetry?.(event);
+      },
+    })(composedFn);
   }
 
   if (cacheLayer) {
@@ -170,27 +222,27 @@ export function makeLifecycleClient(config: LifecycleClientConfig): LifecycleCli
     composedFn = dedupMiddleware(composedFn);
   }
 
-  // Build cancelAll that aborts all in-flight and queued requests
-  const cancelAll = (): Async<unknown, never, void> => {
-    return {
-      _tag: "Async",
-      register: (_env: unknown, cb: (exit: Exit<never, void>) => void) => {
-        // Abort all in-flight requests by creating a new AbortController
-        // The wire client handles its own abort propagation.
-        // For the priority queue, cancellation is handled by the queue's internal mechanism.
-        // We signal completion immediately since abort signals are synchronous.
-        cb({ _tag: "Success", value: undefined });
-        return undefined;
-      },
-    };
-  };
-
-  return buildLifecycleClient(composedFn, wireClient.stats, {
+  return buildLifecycleClient(composedFn, tracker, {
     cacheInvalidate: cacheLayer?.invalidate ?? noopInvalidate,
     cacheClear: cacheLayer?.clear ?? noopClear,
-    cancelAll,
+    cancelAll: () => cancelControllers(activeControllers),
+    activeControllers,
     queueDepth: priorityMiddleware?.queueDepth,
   });
+}
+
+/**
+ * Canonical production HTTP client factory.
+ *
+ * Alias of {@link makeLifecycleClient}; kept as the recommended public name
+ * for callers that want the stable wire -> priority -> retry -> cache -> dedup
+ * lifecycle pipeline without importing lower-level building blocks.
+ *
+ * @param config - Lifecycle client configuration with optional wire, retry, cache, dedup, and priority settings.
+ * @returns A lifecycle-aware HTTP client with stats, cache controls, middleware composition, and `cancelAll`.
+ */
+export function makeHttpClient(config: LifecycleClientConfig = {}): LifecycleClient {
+  return makeLifecycleClient(config);
 }
 
 // --- Internal helpers ---
@@ -202,6 +254,7 @@ type LifecycleClientInternals = {
   cacheInvalidate: (key: string) => void;
   cacheClear: () => void;
   cancelAll: () => Async<unknown, never, void>;
+  activeControllers: Set<AbortController>;
   queueDepth?: () => number;
 };
 
@@ -211,28 +264,20 @@ type LifecycleClientInternals = {
  */
 function buildLifecycleClient(
   fn: HttpClientFn,
-  wireStats: () => HttpClientStats,
+  tracker: LifecycleStatsTracker,
   internals: LifecycleClientInternals,
 ): LifecycleClient {
-  const client: HttpClientFn = (req: HttpRequest) => fn(req);
+  const client: HttpClientFn = (req: HttpRequest) => trackRequest(fn, req, tracker, internals);
 
-  const stats = (): LifecycleStats => ({
-    cacheHits: 0,
-    cacheMisses: 0,
-    cacheEvictions: 0,
-    dedupHits: 0,
-    dedupActive: 0,
-    queueDepth: internals.queueDepth?.() ?? 0,
-    requestsStarted: 0,
-    requestsCompleted: 0,
-    requestsFailed: 0,
-    wire: wireStats(),
-  });
+  const stats = (): LifecycleStats => {
+    tracker.setQueueDepth(internals.queueDepth?.() ?? 0);
+    return tracker.snapshot();
+  };
 
   const withMw = (mw: HttpMiddleware): LifecycleClient => {
     // Apply middleware outermost (wraps the composed fn)
     const wrappedFn = mw(fn);
-    return buildLifecycleClient(wrappedFn, wireStats, internals);
+    return buildLifecycleClient(wrappedFn, tracker, internals);
   };
 
   const lifecycleClient = Object.assign(client, {
@@ -246,4 +291,103 @@ function buildLifecycleClient(
   });
 
   return lifecycleClient;
+}
+
+function cancelControllers(activeControllers: Set<AbortController>): Async<unknown, never, void> {
+  for (const controller of Array.from(activeControllers)) {
+    try {
+      controller.abort();
+    } catch {
+      // ignore
+    }
+  }
+  return asyncSucceed(undefined) as Async<unknown, never, void>;
+}
+
+function trackRequest(
+  fn: HttpClientFn,
+  req: HttpRequest,
+  tracker: LifecycleStatsTracker,
+  internals: LifecycleClientInternals,
+): Async<unknown, HttpError, HttpWireResponse> {
+  return {
+    _tag: "Async",
+    register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
+      const controller = new AbortController();
+      const previousSignal = (req.init as any)?.signal as AbortSignal | undefined;
+      let done = false;
+      let abortedByPreviousSignal = false;
+      let cancelInner: (() => void) | undefined;
+
+      const abortFromPrevious = () => {
+        abortedByPreviousSignal = true;
+        try {
+          controller.abort(previousSignal?.reason);
+        } catch {
+          controller.abort();
+        }
+        cancelInner?.();
+      };
+
+      if (previousSignal?.aborted) {
+        abortFromPrevious();
+      } else {
+        previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
+      }
+
+      internals.activeControllers.add(controller);
+      tracker.requestStarted();
+      tracker.emit("request-start");
+
+      const finish = (exit0: Exit<HttpError, HttpWireResponse>) => {
+        if (done) return;
+        done = true;
+        const exit = abortedByPreviousSignal && exit0._tag === "Failure" && exit0.cause._tag === "Interrupt"
+          ? { _tag: "Failure" as const, cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) }
+          : exit0;
+        previousSignal?.removeEventListener("abort", abortFromPrevious);
+        internals.activeControllers.delete(controller);
+
+        if (exit._tag === "Success") {
+          tracker.requestCompleted();
+        } else {
+          tracker.requestFailed();
+        }
+
+        tracker.emit("request-end");
+        cb(exit);
+      };
+
+      const trackedReq: HttpRequest = {
+        ...req,
+        init: {
+          ...(req.init ?? {}),
+          signal: controller.signal,
+        } as any,
+      };
+
+      try {
+        cancelInner = registerHttpEffect(fn(trackedReq), env, finish);
+      } catch (error) {
+        finish({
+          _tag: "Failure",
+          cause: Cause.fail({ _tag: "FetchError", message: String(error) } satisfies HttpError),
+        });
+      }
+
+      return () => {
+        if (done) return;
+        try {
+          controller.abort();
+        } catch {
+          // ignore
+        }
+        if (cancelInner) {
+          cancelInner();
+        } else {
+          finish({ _tag: "Failure", cause: Cause.interrupt() });
+        }
+      };
+    },
+  };
 }
