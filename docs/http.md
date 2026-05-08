@@ -223,3 +223,88 @@ Y desde runtime:
 import { abortablePromiseStats } from "../core/runtime/runtime";
 console.log(abortablePromiseStats());
 ```
+
+---
+
+## HTTP feature middlewares
+
+Estas features viven en la capa HTTP y se componen como middleware sobre el wire client.
+
+### Response compression
+
+`makeResponseCompressionMiddleware` agrega `Accept-Encoding` cuando falta y descomprime respuestas con `Content-Encoding` soportado.
+
+```ts
+import { httpClient, makeResponseCompressionMiddleware } from "brass-runtime/http";
+
+const compression = makeResponseCompressionMiddleware({
+  encodings: ["br", "gzip", "deflate"],
+});
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(compression.middleware);
+
+const res = await http.getText("/data").toPromise({});
+console.log(res.body);
+console.log(compression.stats());
+```
+
+### Request compression
+
+`makeRequestCompressionMiddleware` comprime bodies salientes de `POST`, `PUT` y `PATCH` cuando superan `minBytes`.
+
+```ts
+import { httpClient, makeRequestCompressionMiddleware } from "brass-runtime/http";
+
+const requestCompression = makeRequestCompressionMiddleware({
+  encoding: "gzip",
+  minBytes: 1024,
+});
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(requestCompression.middleware);
+
+await http.post("/upload", largeBody).toPromise({});
+```
+
+### Request batching
+
+El batching es server-specific: Brass agrupa requests y vos definis como se encodea el batch y como se divide la respuesta.
+
+```ts
+import { httpClient, withRequestBatching } from "brass-runtime/http";
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(withRequestBatching({
+    key: () => "users",
+    maxBatchSize: 16,
+    maxWaitMs: 5,
+    encode: (requests) => ({
+      method: "POST",
+      url: "/batch",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requests.map((req) => ({ method: req.method, url: req.url }))),
+    }),
+    decode: (response) => {
+      const bodies = JSON.parse(response.bodyText) as unknown[];
+      return bodies.map((body) => ({ ...response, bodyText: JSON.stringify(body) }));
+    },
+  }));
+```
+
+### Connection pre-warming
+
+`prewarmConnections` ejecuta requests livianos, por defecto `HEAD`, para preparar conexiones antes del trafico real. Tambien existe `withConnectionPrewarming` para calentar el origen en el primer request.
+
+```ts
+import { toPromise } from "brass-runtime";
+import { prewarmConnections } from "brass-runtime/http";
+
+await toPromise(
+  prewarmConnections({
+    baseUrl: "https://api.example.com",
+    urls: ["/health"],
+  }),
+  {}
+);
+```

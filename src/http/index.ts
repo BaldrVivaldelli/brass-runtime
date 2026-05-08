@@ -4,3 +4,8 @@ export * from "./pool";
 export * from "./circuitBreaker";
 export * from "./tracing";
 export * from "./validation";
+export * from "./lifecycle";
+export * from "./retry/retry";
+export * from "./compression";
+export * from "./batching";
+export * from "./prewarm";

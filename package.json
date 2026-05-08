@@ -84,6 +84,7 @@
     "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global",
     "benchmark": "tsx src/benchmarks/runner.ts",
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
+    "context": "node scripts/context-pack.mjs",
     "test:coverage:html": "vitest run --coverage --reporter=default",
     "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg",
     "build:ts": "tsup",

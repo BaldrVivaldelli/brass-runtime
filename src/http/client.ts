@@ -31,12 +31,13 @@ export type HttpMethod =
     | "OPTIONS";
 
 export type HttpInit = Omit<RequestInit, "method" | "body" | "headers">;
+export type HttpBody = string | Uint8Array | ArrayBuffer;
 
 export type HttpRequest = {
     method: HttpMethod;
     url: string; // relative o absolute
     headers?: Record<string, string>;
-    body?: string;
+    body?: HttpBody;
     init?: HttpInit;
     /** Per-request override for `MakeHttpConfig.timeoutMs`. */
     timeoutMs?: number;
@@ -308,7 +309,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                         ...(req.init ?? {}),
                         method: req.method,
                         headers: Request.headers.get(req),
-                        body: req.body,
+                        body: req.body as any,
                         signal,
                     });
 
@@ -373,7 +374,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                         ...(req.init ?? {}),
                         method: req.method,
                         headers: Request.headers.get(req),
-                        body: req.body,
+                        body: req.body as any,
                         signal,
                     });
 
