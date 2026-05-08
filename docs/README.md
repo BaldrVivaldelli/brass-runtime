@@ -8,6 +8,7 @@ Start here:
 - **[Observability](./observability.md)** — hooks, events, sinks, and tracing
 - **[HTTP client](./http.md)** — ZIO-style HTTP built on brass-runtime
 - **[Modules overview](./modules.md)** — map of core modules and where things live
+- **[AI context pack](./ai/PROJECT_MAP.md)** — compact project map, invariants, validation matrix, and public API notes
 - **[Agent module boundaries](./agent-boundaries.md)** — rules for keeping `brass-agent` isolated from the core runtime
 - **[Brass Agent install and configure](./agent-install-and-configure.md)** — end-to-end local setup for CLI, config, providers, and VS Code
 

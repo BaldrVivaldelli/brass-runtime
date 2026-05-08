@@ -1,5 +1,21 @@
 import { defineConfig } from "vitest/config";
 
+const coverageGate = process.env.COVERAGE_GATE ?? "baseline";
+
+const coverageThresholds = (() => {
+  if (coverageGate === "off") return undefined;
+  if (coverageGate === "100") return { 100: true, perFile: true } as const;
+
+  // Current honest baseline from the first full V8 coverage report.
+  // Raise these only when tests have actually increased coverage.
+  return {
+    statements: 92,
+    branches: 83,
+    functions: 94,
+    lines: 94,
+  };
+})();
+
 export default defineConfig({
   test: {
     environment: "node",
@@ -10,7 +26,7 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reportsDirectory: "./coverage",
-      reporter: ["text", "html", "json", "lcov"],
+      reporter: ["text", "html", "json", "json-summary", "lcov"],
       include: [
         "src/core/**/*.ts",
         "src/http/**/*.ts",
@@ -29,12 +45,7 @@ export default defineConfig({
         "coverage/**",
         "wasm/pkg/**"
       ],
-      thresholds: {
-        statements: 80,
-        branches: 80,
-        functions: 80,
-        lines: 80
-      }
+      thresholds: coverageThresholds
     }
   }
 });

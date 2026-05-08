@@ -14,9 +14,9 @@ export type Async<R, E, A> =
         readonly _tag: "Async";
         readonly register: (env: R, cb: (exit: Exit<E, A>) => void) => void | (() => void);
     }
-    | { readonly _tag: "FlatMap"; readonly first: Async<R, E, any>; readonly andThen: (a: any) => Async<R, E, A> }
-    | { readonly _tag: "Fold"; readonly first: Async<R, E, any>; readonly onFailure: (e: any) => Async<R, E, A>; readonly onSuccess: (a: any) => Async<R, E, A> }
-    | { readonly _tag: "Fork"; readonly effect: Async<R, E, any>; readonly scopeId?: number };
+    | { readonly _tag: "FlatMap"; readonly first: Async<any, any, any>; readonly andThen: (a: any) => Async<any, any, A> }
+    | { readonly _tag: "Fold"; readonly first: Async<any, any, any>; readonly onFailure: (e: any) => Async<any, any, A>; readonly onSuccess: (a: any) => Async<any, any, A> }
+    | { readonly _tag: "Fork"; readonly effect: Async<any, any, any>; readonly scopeId?: number };
 
 // ✅ VALUE: constructores (esto arregla TS2693)
 export const Async = {
@@ -30,23 +30,24 @@ export const Async = {
 
 
 
-export function asyncFold<R, E, A, B>(
+export function asyncFold<R, E, A, RFail, EFail, B, RSuccess, ESuccess, C>(
     fa: Async<R, E, A>,
-    onFailure: (e: E) => Async<R, E, B>,
-    onSuccess: (a: A) => Async<R, E, B>
-): Async<R, E, B> {
-    return { _tag: "Fold", first: fa, onFailure, onSuccess };
+    onFailure: (e: E) => Async<RFail, EFail, B>,
+    onSuccess: (a: A) => Async<RSuccess, ESuccess, C>
+): Async<R & RFail & RSuccess, EFail | ESuccess, B | C> {
+    return {
+        _tag: "Fold",
+        first: fa as Async<any, any, any>,
+        onFailure: onFailure as (e: any) => Async<any, any, B | C>,
+        onSuccess: onSuccess as (a: any) => Async<any, any, B | C>,
+    };
 }
 
 export function asyncCatchAll<R, E, A, R2, E2, B>(
     fa: Async<R, E, A>,
     handler: (e: E) => Async<R2, E2, B>
 ): Async<R & R2, E2, A | B> {
-    return asyncFold(
-        fa as any,
-        (e: E) => handler(e) as any,
-        (a: A) => asyncSucceed(a) as any
-    ) as any;
+    return asyncFold(fa, handler, asyncSucceed);
 }
 
 
@@ -54,11 +55,7 @@ export function asyncMapError<R, E, E2, A>(
     fa: Async<R, E, A>,
     f: (e: E) => E2
 ): Async<R, E2, A> {
-    return asyncFold(
-        fa as any,
-        (e: E) => asyncFail(f(e)) as any,
-        (a: A) => asyncSucceed(a) as any
-    ) as any;
+    return asyncFold(fa, (e) => asyncFail(f(e)), asyncSucceed);
 }
 
 
@@ -94,12 +91,13 @@ export const asyncSync = <R, A>(
 export const asyncTotal = <A>(thunk: () => A): Async<unknown, unknown, A> =>
     asyncSync(() => thunk());
 
-export const async = <R, E, A>(
+const asyncEffect = <R, E, A>(
     register: (env: R, cb: (exit: Exit<E, A>) => void) => void | Canceler
 ): Async<R, E, A> => ({
     _tag: "Async",
     register,
 });
+export { asyncEffect as async };
 
 export function asyncMap<R, E, A, B>(
     fa: Async<R, E, A>,
@@ -108,20 +106,18 @@ export function asyncMap<R, E, A, B>(
     return asyncFlatMap(fa, (a) => asyncSucceed(f(a)));
 }
 
-export function asyncFlatMap<R, E, A, B>(
+export function asyncFlatMap<R, E, A, R2, E2, B>(
     fa: Async<R, E, A>,
-    f: (a: A) => Async<R, E, B>
-): Async<R, E, B> {
+    f: (a: A) => Async<R2, E2, B>
+): Async<R & R2, E | E2, B> {
     return {
         _tag: "FlatMap",
-        first: fa,
-        andThen: f,
+        first: fa as Async<any, any, any>,
+        andThen: f as (a: any) => Async<any, any, B>,
     };
 }
 
 
-
-//TODO: Esto lo hago porque me interesa saber el nombre explicito de lo que falla, no solo que falle sino mas bien un detalle
 
 export function acquireRelease<R, E, A>(
     acquire: Async<R, E, A>,
@@ -138,7 +134,7 @@ export function acquireRelease<R, E, A>(
 export function asyncInterruptible<R, E, A>(
     register: (env: R, cb: (exit: Exit<E, A>) => void) => void | Canceler
 ): Async<R, E, A> {
-    return async(register);
+    return asyncEffect(register);
 }
 
 export type AsyncWithPromise<R, E, A> = Async<R, E, A> & {

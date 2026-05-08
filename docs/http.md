@@ -17,6 +17,13 @@ This is **not a wrapper around `fetch` promises** — it is an effectful HTTP cl
 
 The HTTP client is split into **three conceptual layers**:
 
+Recommended entry points:
+
+- `httpClient` is the default DX for most callers: text/JSON helpers, retry middleware, and `.toPromise`.
+- `makeHttpClient` / `makeLifecycleClient` are the production-oriented clients when you need cache, deduplication, priority queues, retry, lifecycle events, stats, or `cancelAll`.
+- `makeHttp` / `makeHttpStream` are low-level wire clients for middleware authors and tests.
+- `httpClientWithMeta` is a compatibility/DX helper for responses that should carry request metadata.
+
 ### 1) Wire layer (transport)
 
 Lowest level. Talks to `fetch`, returns raw HTTP data.
@@ -121,6 +128,43 @@ Metadata is **opt-in**, not baked into the core.
 
 ---
 
+## Lifecycle client
+
+Use `makeHttpClient` (alias of `makeLifecycleClient`) when request lifecycle behavior is part of the contract:
+
+```ts
+import { makeHttpClient } from "brass-runtime/http";
+import { toPromise } from "brass-runtime";
+
+const http = makeHttpClient({
+  baseUrl: "https://api.example.com",
+  dedup: {},
+  cache: { ttlSeconds: 60, maxEntries: 512 },
+  priority: { concurrency: 8 },
+  retry: { maxRetries: 2, baseDelayMs: 50, maxDelayMs: 500 },
+  onEvent: (event) => {
+    console.log(event.type, event.cacheKey ?? event.priority ?? event.attempt ?? "");
+  },
+});
+
+const res = await toPromise(http({ method: "GET", url: "/users/1" }), {});
+console.log(res.status, http.stats().cacheHits);
+```
+
+`stats()` reports wire counters plus lifecycle counters for cache hits/misses,
+dedup hits/active groups, queue depth, retry attempts, and request
+success/failure totals.
+`cancelAll()` aborts active requests through the same `AbortController` path used
+by fiber interruption.
+
+The stable composition order is:
+
+```txt
+wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+```
+
+---
+
 ## Raw wire access (escape hatch)
 
 ```ts
@@ -222,4 +266,89 @@ Y desde runtime:
 ```ts
 import { abortablePromiseStats } from "../core/runtime/runtime";
 console.log(abortablePromiseStats());
+```
+
+---
+
+## HTTP feature middlewares
+
+Estas features viven en la capa HTTP y se componen como middleware sobre el wire client.
+
+### Response compression
+
+`makeResponseCompressionMiddleware` agrega `Accept-Encoding` cuando falta y descomprime respuestas con `Content-Encoding` soportado.
+
+```ts
+import { httpClient, makeResponseCompressionMiddleware } from "brass-runtime/http";
+
+const compression = makeResponseCompressionMiddleware({
+  encodings: ["br", "gzip", "deflate"],
+});
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(compression.middleware);
+
+const res = await http.getText("/data").toPromise({});
+console.log(res.body);
+console.log(compression.stats());
+```
+
+### Request compression
+
+`makeRequestCompressionMiddleware` comprime bodies salientes de `POST`, `PUT` y `PATCH` cuando superan `minBytes`.
+
+```ts
+import { httpClient, makeRequestCompressionMiddleware } from "brass-runtime/http";
+
+const requestCompression = makeRequestCompressionMiddleware({
+  encoding: "gzip",
+  minBytes: 1024,
+});
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(requestCompression.middleware);
+
+await http.post("/upload", largeBody).toPromise({});
+```
+
+### Request batching
+
+El batching es server-specific: Brass agrupa requests y vos definis como se encodea el batch y como se divide la respuesta.
+
+```ts
+import { httpClient, withRequestBatching } from "brass-runtime/http";
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(withRequestBatching({
+    key: () => "users",
+    maxBatchSize: 16,
+    maxWaitMs: 5,
+    encode: (requests) => ({
+      method: "POST",
+      url: "/batch",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requests.map((req) => ({ method: req.method, url: req.url }))),
+    }),
+    decode: (response) => {
+      const bodies = JSON.parse(response.bodyText) as unknown[];
+      return bodies.map((body) => ({ ...response, bodyText: JSON.stringify(body) }));
+    },
+  }));
+```
+
+### Connection pre-warming
+
+`prewarmConnections` ejecuta requests livianos, por defecto `HEAD`, para preparar conexiones antes del trafico real. Tambien existe `withConnectionPrewarming` para calentar el origen en el primer request.
+
+```ts
+import { toPromise } from "brass-runtime";
+import { prewarmConnections } from "brass-runtime/http";
+
+await toPromise(
+  prewarmConnections({
+    baseUrl: "https://api.example.com",
+    urls: ["/health"],
+  }),
+  {}
+);
 ```

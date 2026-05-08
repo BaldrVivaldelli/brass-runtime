@@ -48,6 +48,7 @@ function executeOps(ops: QueueOp[]) {
   const nodes: Node<number>[] = [];
   // Reference model: array of { value, removed } tracking logical queue state
   const model: { value: number; removed: boolean }[] = [];
+  const nodeToModelIndex = new Map<Node<number>, number>();
   const shiftedQueue: (number | undefined)[] = [];
   const shiftedModel: (number | undefined)[] = [];
 
@@ -56,6 +57,7 @@ function executeOps(ops: QueueOp[]) {
       case "push": {
         const node = queue.push(op.value);
         nodes.push(node);
+        nodeToModelIndex.set(node, model.length);
         model.push({ value: op.value, removed: false });
         break;
       }
@@ -77,11 +79,8 @@ function executeOps(ops: QueueOp[]) {
           const nodeIdx = op.index % nodes.length;
           const node = nodes[nodeIdx];
           queue.remove(node);
-          // Model: mark the corresponding entry as removed (if not already)
-          const modelIdx = model.findIndex(
-            (e) => e.value === node.value && !e.removed
-          );
-          if (modelIdx >= 0) {
+          const modelIdx = nodeToModelIndex.get(node);
+          if (modelIdx !== undefined) {
             model[modelIdx].removed = true;
           }
         }

@@ -4,9 +4,10 @@ import {
   makeHttp,
   makeHttpStream,
   normalizeHeadersInit,
+  withRetryStream,
   withMiddleware,
 } from "../client";
-import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse, HttpWireResponseStream } from "../client";
+import type { HttpClientFn, HttpClientStream, HttpError, HttpRequest, HttpWireResponse, HttpWireResponseStream } from "../client";
 import { httpClient, httpClientStream, httpClientWithMeta } from "../httpClient";
 import { Lens } from "../optics/lens";
 import { atKey } from "../optics/record";
@@ -181,6 +182,36 @@ describe("DX http clients", () => {
     expect(fetchMock.mock.calls[0][1]?.headers).toMatchObject({ "x-mw": "1" });
   });
 
+  it("httpClient exposes raw request/post helpers, stats, init splitting, and stream stats", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      new Response(init?.method === "POST" ? "posted" : "raw", { status: 202, statusText: "Accepted" }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = httpClient({ baseUrl: "https://example.test", headers: { "x-default": "1" } });
+
+    await expect(client.request({ method: "GET", url: "/raw", init: { headers: { "x-init": "2" } } as any }).unsafeRunPromise())
+      .resolves.toMatchObject({ status: 202, bodyText: "raw" });
+    await expect(client.post("/post", "", {
+      headers: new Headers([["x-post", "3"]]),
+      timeoutMs: 0,
+      poolKey: 123 as any,
+      cache: "no-store",
+    }).unsafeRunPromise()).resolves.toMatchObject({ bodyText: "posted" });
+
+    expect(client.stats()).toMatchObject({ started: 2, succeeded: 2 });
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST",
+      cache: "no-store",
+      headers: { "x-default": "1", "x-post": "3" },
+    });
+    expect((fetchMock.mock.calls[1][1] as RequestInit).body).toBeUndefined();
+
+    const streamClient = httpClientStream({ baseUrl: "https://example.test" });
+    await expect(streamClient.get("/stream").unsafeRunPromise()).resolves.toMatchObject({ status: 202 });
+    expect(streamClient.stats()).toMatchObject({ started: 1, succeeded: 1 });
+  });
+
   it("httpClientWithMeta returns metadata and resolved final url", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
     const client = httpClientWithMeta({ baseUrl: "https://example.test/root/" });
@@ -196,6 +227,21 @@ describe("DX http clients", () => {
     const post = await client.postJson<{ ok: boolean }>("child", { x: 1 }).unsafeRunPromise();
     expect(post.response.body).toEqual({ ok: true });
   });
+
+  it("httpClientWithMeta exposes raw request/get/post helpers", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200, statusText: "OK" })));
+    const client = httpClientWithMeta({ baseUrl: "https://base.test/" });
+
+    const raw = await client.request({ method: "GET", url: "https://example.test/raw" }).unsafeRunPromise();
+    expect(raw.meta.urlFinal).toBe("https://example.test/raw");
+
+    const got = await client.get("https://example.test/got", { headers: [["x-a", "1"]] as any }).unsafeRunPromise();
+    expect(got.meta.request.headers).toEqual({ "x-a": "1" });
+
+    const posted = await client.post("https://example.test/post", "", { timeoutMs: 10 }).unsafeRunPromise();
+    expect(posted.meta.request).toMatchObject({ method: "POST", timeoutMs: 10 });
+    expect(posted.meta.request.body).toBeUndefined();
+  });
 });
 
 describe("HTTP streaming and sleep", () => {
@@ -209,6 +255,64 @@ describe("HTTP streaming and sleep", () => {
     expect(Array.from(chunks[0])).toEqual([1, 2, 3]);
   });
 
+  it("makeHttpStream maps bad urls, pre-aborted request signals, and releases pool slots for empty bodies", async () => {
+    const badUrlClient = makeHttpStream({ baseUrl: "%%%" });
+    await expect(run(badUrlClient({ method: "GET", url: "%%%" }))).rejects.toMatchObject({ _tag: "BadUrl" });
+    expect(badUrlClient.stats()).toMatchObject({ started: 0, failed: 0 });
+
+    const aborted = new AbortController();
+    aborted.abort(new Error("already aborted"));
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+      return new Response(null, { status: 204, statusText: "No Content" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const streamClient = makeHttpStream({
+      baseUrl: "https://example.test",
+      pool: { concurrency: 1, maxQueue: 0, key: "global" },
+    });
+    await expect(run(streamClient({ method: "GET", url: "/aborted", init: { signal: aborted.signal } as any })))
+      .rejects.toEqual({ _tag: "Abort" });
+    expect(streamClient.stats()).toMatchObject({ started: 1, aborted: 1 });
+
+    const response = await run<HttpWireResponseStream>(streamClient({ method: "GET", url: "/empty" }));
+    expect(response.status).toBe(204);
+    await expect(run<Uint8Array[]>(collectStream(response.body))).resolves.toEqual([]);
+    expect(streamClient.stats()).toMatchObject({
+      started: 2,
+      succeeded: 1,
+      aborted: 1,
+      pool: expect.objectContaining({ acquired: 1, released: 1, running: 0 }),
+    });
+  });
+
+  it("makeHttpStream propagates AbortSignal while the body stream is being read", async () => {
+    let cancelCalled = false;
+    const body = new ReadableStream<Uint8Array>({
+      pull() {
+        // Keep reads pending until the request signal aborts.
+      },
+      cancel() {
+        cancelCalled = true;
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(body, { status: 200, statusText: "OK" })));
+
+    const controller = new AbortController();
+    const streamClient = makeHttpStream({ baseUrl: "https://example.test" });
+    const response = await run<HttpWireResponseStream>(
+      streamClient({ method: "GET", url: "/slow-bytes", init: { signal: controller.signal } as any })
+    );
+
+    const pending = run<Uint8Array[]>(collectStream(response.body));
+    await new Promise((r) => setTimeout(r, 0));
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ _tag: "Abort" });
+    expect(cancelCalled).toBe(true);
+  });
+
   it("httpClientStream supports middleware, retry and default get alias", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([4]), { status: 200, statusText: "OK" })));
     const client = httpClientStream({ baseUrl: "https://example.test" })
@@ -218,6 +322,39 @@ describe("HTTP streaming and sleep", () => {
     const response = await client.get("/s").unsafeRunPromise();
     const chunks = await run<Uint8Array[]>(collectStream(response.body));
     expect(Array.from(chunks[0])).toEqual([4]);
+  });
+
+  it("withRetryStream stops retrying when the fiber is interrupted during retry sleep", async () => {
+    const emptyStats = {
+      inFlight: 0,
+      started: 0,
+      succeeded: 0,
+      failed: 0,
+      aborted: 0,
+      timedOut: 0,
+      poolRejected: 0,
+      poolTimeouts: 0,
+    };
+    const next = Object.assign(
+      vi.fn(() => asyncSucceed({
+        status: 503,
+        statusText: "Unavailable",
+        headers: { "retry-after": "5" },
+        body: { _tag: "Empty" },
+        ms: 1,
+      } as HttpWireResponseStream)),
+      { stats: () => emptyStats },
+    ) as HttpClientStream;
+    const client = withRetryStream({ maxRetries: 5, baseDelayMs: 1000, maxDelayMs: 5000 })(next);
+    const fiber = rt.fork(client({ method: "GET", url: "https://example.test/retry-stream" }));
+
+    await new Promise((r) => setTimeout(r, 0));
+    fiber.interrupt();
+
+    const exit = await new Promise<any>((resolve) => fiber.join(resolve));
+    expect(exit._tag).toBe("Failure");
+    expect(exit._tag === "Failure" ? exit.cause._tag : "").toBe("Interrupt");
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   it("sleepMs resolves and maps interruption to Abort", async () => {

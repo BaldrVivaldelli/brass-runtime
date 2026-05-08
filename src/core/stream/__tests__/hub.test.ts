@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { makeHub, Hub, HubClosed } from "../hub";
+import { broadcastToHub, fromHub, makeHub, Hub, HubClosed } from "../hub";
 import { Runtime } from "../../runtime/runtime";
 import { asyncFlatMap, asyncSucceed, asyncSync } from "../../types/asyncEffect";
+import { collectStream, fromArray } from "../stream";
+import { take } from "../operators";
 
 /**
  * Verification tests for Hub after optimizations (Task 6.1.3).
@@ -18,6 +20,8 @@ const rt = Runtime.make({});
 function run<A>(effect: any): Promise<A> {
     return rt.toPromise(effect);
 }
+
+const wait = () => new Promise((resolve) => setImmediate(resolve));
 
 // ---------------------------------------------------------------------------
 // 1. publish — fast-path: 0 subscribers
@@ -343,5 +347,56 @@ describe("Hub with Sliding strategy", () => {
         const b = await run<number>(sub.take());
         sub.unsubscribe();
         expect([a, b]).toEqual([2, 3]);
+    });
+});
+
+describe("Hub stream integration", () => {
+    it("broadcasts a finite stream into the hub", async () => {
+        const hub = makeHub<number>(4);
+        const sub = await run<any>(hub.subscribe());
+
+        await run(broadcastToHub(fromArray([1, 2, 3]), hub));
+
+        await expect(run(sub.take())).resolves.toBe(1);
+        await expect(run(sub.take())).resolves.toBe(2);
+        await expect(run(sub.take())).resolves.toBe(3);
+        sub.unsubscribe();
+    });
+
+    it("reads from a hub as a stream and releases the subscription", async () => {
+        const hub = makeHub<number>(4);
+        const stream = take(fromHub(hub), 2);
+        const fiber = rt.fork(collectStream(stream));
+
+        await wait();
+        await run(hub.publishAll([10, 20, 30]));
+
+        const result = await new Promise<number[]>((resolve, reject) => {
+            fiber.join((exit) => {
+                if (exit._tag === "Success") resolve(exit.value);
+                else reject(exit.cause);
+            });
+        });
+
+        expect(result).toEqual([10, 20]);
+        expect(await run(hub.publish(40))).toBe(true);
+    });
+
+    it("ends the stream when the hub shuts down", async () => {
+        const hub = makeHub<number>(4);
+        const fiber = rt.fork(collectStream(fromHub(hub)));
+
+        await wait();
+        await run(hub.publish(1));
+        await run(hub.shutdown());
+
+        const result = await new Promise<number[]>((resolve, reject) => {
+            fiber.join((exit) => {
+                if (exit._tag === "Success") resolve(exit.value);
+                else reject(exit.cause);
+            });
+        });
+
+        expect(result).toEqual([1]);
     });
 });

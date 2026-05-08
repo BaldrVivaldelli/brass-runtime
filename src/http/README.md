@@ -6,8 +6,17 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 
 - **Lazy**: no se ejecuta nada hasta “correr” el effect.
 - **Cancelable**: la interrupción del fiber / effect cancela `fetch` vía `AbortController` (usando `fromPromiseAbortable`).
-- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`httpClient`, `httpClientWithMeta`, streaming).
+- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`httpClient`, `makeHttpClient`, `httpClientWithMeta`, streaming).
 - **Sin magia**: los tipos principales son chicos y fáciles de debuggear.
+
+---
+
+## Qué API usar
+
+- `httpClient`: opción recomendada para consumo normal, con helpers `getText`, `getJson`, `postJson`, retry y `.toPromise`.
+- `makeHttpClient` / `makeLifecycleClient`: opción recomendada para clientes de producción que necesitan cache, dedup, prioridad, retry, eventos, stats o `cancelAll`.
+- `makeHttp` / `makeHttpStream`: wire layer para middlewares, tests y casos avanzados.
+- `httpClientWithMeta`: helper de compatibilidad cuando querés respuesta + metadata.
 
 ---
 
@@ -16,7 +25,7 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 Este módulo se exporta desde `src/http/index.ts`:
 
 ```ts
-import { httpClient, httpClientWithMeta, httpClientStream } from "../http";
+import { httpClient, makeHttpClient, makeLifecycleClient, makeHttp } from "../http";
 ```
 
 > En Node necesitás una versión con `fetch` global (Node 18+), o un polyfill.
@@ -233,4 +242,56 @@ También podés mirar promesas abortables activas desde el runtime:
 import { abortablePromiseStats } from "brass-runtime";
 
 console.log(abortablePromiseStats());
+```
+
+---
+
+## Feature middlewares
+
+La capa HTTP tambien expone features componibles:
+
+- `makeResponseCompressionMiddleware` — agrega `Accept-Encoding` y descomprime responses.
+- `makeRequestCompressionMiddleware` — comprime bodies salientes opt-in.
+- `withRequestBatching` — agrupa requests usando un encoder/decoder definido por el servidor.
+- `prewarmConnections` / `withConnectionPrewarming` — calienta conexiones con requests livianos.
+
+Ejemplo:
+
+```ts
+import {
+  httpClient,
+  makeResponseCompressionMiddleware,
+  makeRequestCompressionMiddleware,
+  withRequestBatching,
+  prewarmConnections,
+} from "brass-runtime/http";
+import { toPromise } from "brass-runtime";
+
+const responseCompression = makeResponseCompressionMiddleware();
+const requestCompression = makeRequestCompressionMiddleware({ minBytes: 1024 });
+
+await toPromise(
+  prewarmConnections({
+    baseUrl: "https://api.example.com",
+    urls: ["/health"],
+  }),
+  {}
+);
+
+const http = httpClient({ baseUrl: "https://api.example.com" })
+  .with(responseCompression.middleware)
+  .with(requestCompression.middleware)
+  .with(withRequestBatching({
+    key: () => "default",
+    encode: (requests) => ({
+      method: "POST",
+      url: "/batch",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(requests.map((req) => ({ method: req.method, url: req.url }))),
+    }),
+    decode: (res) => {
+      const bodies = JSON.parse(res.bodyText) as unknown[];
+      return bodies.map((body) => ({ ...res, bodyText: JSON.stringify(body) }));
+    },
+  }));
 ```

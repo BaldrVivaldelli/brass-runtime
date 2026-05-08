@@ -8,6 +8,7 @@ import { none, Option, some } from "../types/option";
 import { async, Async, asyncFail, asyncFold, asyncSucceed } from "../types/asyncEffect";
 import { fromPull, uncons, ZStream, emptyStream, concatStream, emitStream } from "./stream";
 import { succeed } from "../types/effect";
+import { unsafeRunAsync } from "../runtime/runtime";
 
 // ---------------------------------------------------------------------------
 // throttle — emit at most one element per interval
@@ -79,7 +80,7 @@ export function debounce<R, E, A>(
         if (done) return;
 
         const pull = uncons(tail) as any;
-        pull(_env, (exit: any) => {
+        unsafeRunAsync(pull, _env, (exit: any) => {
           if (done) return;
 
           if (exit._tag === "Failure") {

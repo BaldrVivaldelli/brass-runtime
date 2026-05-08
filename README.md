@@ -30,6 +30,9 @@ If you like ZIO’s separation between `zio-core`, `zio-streams`, and `zio-http`
 - Structured `Scope`s for resource safety
 - ZStream-style streams with backpressure
 
+For new code that only needs the stable runtime surface, prefer
+`brass-runtime/core`. The package root remains broad for compatibility.
+
 ---
 
 ## Install
@@ -90,16 +93,16 @@ Example:
 
 ```ts
 import { Runtime, toPromise } from "brass-runtime";
-import { httpClientStream } from "brass-runtime/http";
+import { httpClient } from "brass-runtime/http";
 
 type Post = { id: number; title: string; body: string };
 
 const runtime = new Runtime({ env: {} });
 
-const client = httpClientStream({ baseUrl: "https://jsonplaceholder.typicode.com" });
+const client = httpClient({ baseUrl: "https://jsonplaceholder.typicode.com" });
 
 const res = await toPromise(client.getJson<Post>("/posts/1"), runtime.env);
-console.log(res.status, res.value.title);
+console.log(res.status, res.body.title);
 ```
 
 ---

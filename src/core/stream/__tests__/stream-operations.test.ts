@@ -6,12 +6,18 @@ import {
   flattenStream,
   fromArray,
   merge,
+  mergeStream,
+  emitStream,
   fromPull,
   unwrapScoped,
   managedStream,
+  mapStream,
+  streamFromReadableStream,
+  zip,
+  foreachStream,
 } from "../stream";
-import { succeed, sync } from "../../types/effect";
-import { asyncSucceed, asyncSync, unit } from "../../types/asyncEffect";
+import { fail, succeed, sync } from "../../types/effect";
+import { asyncFail, asyncSucceed, asyncSync, unit } from "../../types/asyncEffect";
 import { Runtime } from "../../runtime/runtime";
 
 /**
@@ -140,18 +146,148 @@ describe("Stream scoped (unwrapScoped)", () => {
 // 6. managed (via managedStream)
 // ---------------------------------------------------------------------------
 describe("Stream managed (managedStream)", () => {
-  it("managedStream constructor produces a Managed-tagged stream", () => {
-    // The Managed case in uncons has a pre-existing issue where it calls
-    // `(uncons(s) as any)(env2, ...)` treating the effect as a function.
-    // This test verifies the constructor works correctly; full integration
-    // testing of Managed streams is deferred to when that issue is fixed.
+  it("managedStream collects values and releases on normal end", async () => {
+    const releases: string[] = [];
     const managed = managedStream(
       sync(() => ({
         stream: fromArray([10, 20, 30]),
-        release: () => asyncSync(() => {}) as any,
+        release: (exit) => asyncSync(() => {
+          releases.push(exit._tag);
+        }) as any,
       }))
     );
 
     expect(managed._tag).toBe("Managed");
+    await expect(run<number[]>(collectStream(managed))).resolves.toEqual([10, 20, 30]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toEqual(["Success"]);
+  });
+
+  it("managedStream releases on stream failure and maps acquire failures", async () => {
+    const releases: string[] = [];
+    const failingStream = managedStream(
+      sync(() => ({
+        stream: fromPull(asyncFail({ _tag: "Some", value: "stream-failed" }) as any),
+        release: (exit) => asyncSync(() => {
+          releases.push(exit._tag);
+        }) as any,
+      }))
+    );
+
+    await expect(run(collectStream(failingStream))).rejects.toBe("stream-failed");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toEqual(["Failure"]);
+
+    const acquireFailed = managedStream(fail("acquire-failed") as any);
+    await expect(run(collectStream(acquireFailed))).rejects.toBe("acquire-failed");
+  });
+});
+
+describe("Stream extra coverage", () => {
+  it("unwrapScoped maps acquire failures and stream failures through release", async () => {
+    const releases: string[] = [];
+    const failingScoped = unwrapScoped(
+      sync(() => fromPull(asyncFail({ _tag: "Some", value: "inner-failed" }) as any)),
+      (exit) => asyncSync(() => {
+        releases.push(exit._tag);
+      }) as any,
+    );
+
+    await expect(run(collectStream(failingScoped))).rejects.toBe("inner-failed");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(releases).toEqual(["Failure"]);
+
+    const acquireFailed = unwrapScoped(fail("scoped-acquire-failed") as any, () => unit() as any);
+    await expect(run(collectStream(acquireFailed))).rejects.toBe("scoped-acquire-failed");
+  });
+
+  it("mapStream handles constructors beyond FromArray", async () => {
+    await expect(run(collectStream(mapStream(emptyStream<unknown, never, number>(), (n) => n + 1)))).resolves.toEqual([]);
+    await expect(run(collectStream(mapStream(emitStream(succeed(4)), (n) => n + 1)))).resolves.toEqual([5]);
+    await expect(run(collectStream(mapStream(fromPull(asyncSucceed([6, emptyStream()]) as any), (n) => n + 1)))).resolves.toEqual([7]);
+
+    const mappedConcat = mapStream(
+      concatStream(fromArray([1]), fromArray([2])),
+      (n) => n * 10,
+    );
+    await expect(run(collectStream(mappedConcat))).resolves.toEqual([10, 20]);
+
+    const mappedFlatten = mapStream(
+      flattenStream(fromArray([fromArray([1]), fromArray([2])])),
+      (n) => String(n),
+    );
+    await expect(run(collectStream(mappedFlatten))).resolves.toEqual(["1", "2"]);
+
+    const scoped = unwrapScoped(sync(() => fromArray([3])), () => unit() as any);
+    await expect(run(collectStream(mapStream(scoped, (n) => n + 1)))).resolves.toEqual([4]);
+
+    const managed = managedStream(sync(() => ({
+      stream: fromArray([8]),
+      release: () => unit() as any,
+    })));
+    await expect(run(collectStream(mapStream(managed, (n) => n + 1)))).resolves.toEqual([9]);
+
+    const mappedMerge = mapStream(mergeStream(fromArray([1]), fromArray([2]), false), (n) => n * 2);
+    await expect(run(collectStream(mappedMerge))).resolves.toEqual(expect.arrayContaining([2, 4]));
+  });
+
+  it("zip and foreachStream handle success, stream failure, and callback failure", async () => {
+    await expect(run(collectStream(zip(fromArray([1, 2]), fromArray(["a"]))))).resolves.toEqual([[1, "a"]]);
+
+    const seen: number[] = [];
+    await expect(run(foreachStream(fromArray([1, 2]), (n) => asyncSync(() => { seen.push(n); })))).resolves.toBeUndefined();
+    expect(seen).toEqual([1, 2]);
+
+    await expect(run(foreachStream(fromPull(asyncFail({ _tag: "Some", value: "stream-error" }) as any), () => unit() as any))).rejects.toBe("stream-error");
+    await expect(run(foreachStream(fromArray([1]), () => asyncFail("callback-error")))).rejects.toBe("callback-error");
+  });
+
+  it("streamFromReadableStream handles empty bodies, chunks, end, abort, release, and reader errors", async () => {
+    expect(await run(collectStream(streamFromReadableStream(undefined, String)))).toEqual([]);
+
+    let released = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+        controller.enqueue(new Uint8Array([2]));
+        controller.close();
+      },
+    });
+    await expect(run(collectStream(streamFromReadableStream(stream, String, { onRelease: () => { released++; } })))).resolves.toEqual([
+      new Uint8Array([1]),
+      new Uint8Array([2]),
+    ]);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(released).toBe(1);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    const abortingStream = new ReadableStream<Uint8Array>({ start() {} });
+    await expect(run(collectStream(streamFromReadableStream(abortingStream, (e) => (e as Error).name, { signal: aborted.signal })))).rejects.toBe("AbortError");
+
+    const erroringStream = {
+      getReader: () => ({
+        read: () => Promise.reject(new Error("reader failed")),
+        cancel: () => undefined,
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+    await expect(run(collectStream(streamFromReadableStream(erroringStream, (e) => (e as Error).message)))).rejects.toBe("reader failed");
+  });
+
+  it("streamFromReadableStream cancels the reader when the consumer is interrupted", async () => {
+    let canceled = 0;
+    const pendingStream = {
+      getReader: () => ({
+        read: () => new Promise(() => undefined),
+        cancel: () => { canceled++; },
+      }),
+    } as unknown as ReadableStream<Uint8Array>;
+
+    const fiber = rt.fork(collectStream(streamFromReadableStream(pendingStream, String)));
+    await new Promise((resolve) => setImmediate(resolve));
+    fiber.interrupt();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(canceled).toBeGreaterThanOrEqual(1);
   });
 });

@@ -45,29 +45,26 @@ export const flatMap = <R, E, A, R2, E2, B>(
     fa: ZIO<R, E, A>,
     f: (a: A) => ZIO<R2, E2, B>
 ): ZIO<R & R2, E | E2, B> =>
-    asyncFlatMap(fa as any, (a: A) => f(a) as any) as any;
+    asyncFlatMap(fa, f);
 
-export const mapError = <R, E, E2, A>(fa: ZIO<R, E, A>, f: (e: E) => E2) => asyncMapError(fa as any, f as any) as any;
+export const mapError = <R, E, E2, A>(fa: ZIO<R, E, A>, f: (e: E) => E2): ZIO<R, E2, A> =>
+    asyncMapError(fa, f);
 
 export const catchAll = <R, E, A, R2, E2, B>(
     fa: ZIO<R, E, A>,
     handler: (e: E) => ZIO<R2, E2, B>
 ): ZIO<R & R2, E2, A | B> =>
-    asyncFold(
-        fa as any,
-        (e: E) => handler(e) as any,
-        (a: A) => asyncSucceed(a) as any
-    ) as any;
+    asyncFold(fa, handler, asyncSucceed);
 
 export function orElseOptional<R, E, A, R2, A2>(
     fa: ZIO<R, Option<E>, A>,
     that: () => ZIO<R2, Option<E>, A2>
 ): ZIO<R & R2, Option<E>, A | A2> {
     return asyncFold(
-        fa as any,
-        (opt: Option<E>) => (opt._tag === "Some" ? asyncFail(opt) : (that() as any)),
-        (a: A) => asyncSucceed(a) as any
-    ) as any;
+        fa,
+        (opt) => (opt._tag === "Some" ? asyncFail(opt) : that()),
+        asyncSucceed
+    );
 }
 
 export const end = <E>(): ZIO<unknown, Option<E>, never> => fail(none as Option<E>);

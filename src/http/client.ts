@@ -4,7 +4,15 @@ import type { Async } from "../core/types/asyncEffect";
 import { fromPromiseAbortable, type AbortablePromiseFinish } from "../core/runtime/runtime";
 import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 import { Request, mergeHeadersUnder } from "./optics/request";
-import type { RetryPolicy } from "./retry/retry";
+import {
+    backoffDelayMs,
+    defaultRetryOnError,
+    defaultRetryableMethods,
+    defaultRetryOnStatus,
+    normalizeRetryBudget,
+    retryAfterMs,
+    type RetryPolicy,
+} from "./retry/retry";
 import { sleep } from "../core/runtime/combinators";
 import {
     HttpConcurrencyPool,
@@ -31,12 +39,13 @@ export type HttpMethod =
     | "OPTIONS";
 
 export type HttpInit = Omit<RequestInit, "method" | "body" | "headers">;
+export type HttpBody = string | Uint8Array | ArrayBuffer;
 
 export type HttpRequest = {
     method: HttpMethod;
     url: string; // relative o absolute
     headers?: Record<string, string>;
-    body?: string;
+    body?: HttpBody;
     init?: HttpInit;
     /** Per-request override for `MakeHttpConfig.timeoutMs`. */
     timeoutMs?: number;
@@ -280,6 +289,38 @@ const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError
     message: `HTTP ${req.method} ${url.origin} timed out after ${timeoutMs}ms`,
 });
 
+const linkAbortSignals = (
+    runtimeSignal: AbortSignal,
+    requestSignal: AbortSignal | undefined
+): { signal: AbortSignal; cleanup: () => void } => {
+    if (!requestSignal) return { signal: runtimeSignal, cleanup: () => undefined };
+
+    const controller = new AbortController();
+    const abort = (source: AbortSignal) => {
+        try {
+            controller.abort(source.reason);
+        } catch {
+            controller.abort();
+        }
+    };
+    const abortFromRuntime = () => abort(runtimeSignal);
+    const abortFromRequest = () => abort(requestSignal);
+
+    if (runtimeSignal.aborted) abortFromRuntime();
+    else runtimeSignal.addEventListener("abort", abortFromRuntime, { once: true });
+
+    if (requestSignal.aborted) abortFromRequest();
+    else requestSignal.addEventListener("abort", abortFromRequest, { once: true });
+
+    return {
+        signal: controller.signal,
+        cleanup: () => {
+            runtimeSignal.removeEventListener("abort", abortFromRuntime);
+            requestSignal.removeEventListener("abort", abortFromRequest);
+        },
+    };
+};
+
 export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
@@ -297,10 +338,12 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
         return fromPromiseAbortable<HttpError, HttpWireResponseStream>(
             async (signal) => {
                 let lease: { release: () => void } | undefined;
+                const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
+                let cleanupTransferredToBody = false;
                 try {
                     if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
-                        lease = await pool.acquire(key, signal);
+                        lease = await pool.acquire(key, linkedSignal.signal);
                     }
 
                     const started = performance.now();
@@ -308,12 +351,16 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                         ...(req.init ?? {}),
                         method: req.method,
                         headers: Request.headers.get(req),
-                        body: req.body,
-                        signal,
+                        body: req.body as any,
+                        signal: linkedSignal.signal,
                     });
 
                     const headers = headersOf(res);
-                    const body = streamFromReadableStream(res.body, normalizeHttpError);
+                    const body = streamFromReadableStream(res.body, normalizeHttpError, {
+                        signal: linkedSignal.signal,
+                        onRelease: linkedSignal.cleanup,
+                    });
+                    cleanupTransferredToBody = res.body !== null;
 
                     // For streaming responses we release at headers to avoid leaking pool slots
                     // when the caller stores/drops the response without consuming the stream.
@@ -328,6 +375,9 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                         ms: Math.round(performance.now() - started),
                     };
                 } finally {
+                    if (!cleanupTransferredToBody) {
+                        linkedSignal.cleanup();
+                    }
                     lease?.release();
                 }
             },
@@ -362,10 +412,11 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
         return fromPromiseAbortable<HttpError, HttpWireResponse>(
             async (signal) => {
                 let lease: { release: () => void } | undefined;
+                const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
                 try {
                     if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
-                        lease = await pool.acquire(key, signal);
+                        lease = await pool.acquire(key, linkedSignal.signal);
                     }
 
                     const started = performance.now();
@@ -373,8 +424,8 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                         ...(req.init ?? {}),
                         method: req.method,
                         headers: Request.headers.get(req),
-                        body: req.body,
-                        signal,
+                        body: req.body as any,
+                        signal: linkedSignal.signal,
                     });
 
                     const bodyText = await res.text();
@@ -388,6 +439,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                         ms: Math.round(performance.now() - started),
                     };
                 } finally {
+                    linkedSignal.cleanup();
                     lease?.release();
                 }
             },
@@ -405,47 +457,18 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     return decorate(run, metrics.snapshot);
 }
 
-// helpers existentes
-
-const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
-const defaultRetryOnError = (e: HttpError) => e._tag === "FetchError" || e._tag === "Timeout" || e._tag === "PoolTimeout";
-const defaultRetryOnStatus = (s: number) =>
-    s === 408 || s === 429 || s === 500 || s === 502 || s === 503 || s === 504;
-const backoffDelayMs = (attempt: number, base: number, cap: number) => {
-    const exp = base * Math.pow(2, attempt);
-    const lim = clamp(exp, 0, cap);
-    return Math.floor(Math.random() * lim);
-};
-
-const retryAfterMs = (headers: Record<string, string>) => {
-    const key = Object.keys(headers).find((k) => k.toLowerCase() === "retry-after");
-    if (!key) return undefined;
-
-    const v = headers[key]?.trim();
-    if (!v) return undefined;
-
-    // segundos
-    const secs = Number(v);
-    if (Number.isFinite(secs)) return Math.max(0, Math.floor(secs * 1000));
-
-    // fecha
-    const t = Date.parse(v);
-    if (Number.isFinite(t)) return Math.max(0, t - Date.now());
-
-    return undefined;
-};
-
 export const withRetryStream =
   (p: RetryPolicy) =>
   (next: HttpClientStream): HttpClientStream => {
     const retryOnStatus = p.retryOnStatus ?? defaultRetryOnStatus;
     const retryOnError = p.retryOnError ?? defaultRetryOnError;
-    const maxElapsedMs = p.maxElapsedMs !== undefined && Number.isFinite(p.maxElapsedMs)
-        ? Math.max(0, Math.floor(p.maxElapsedMs))
-        : undefined;
+    const retryOnMethods = p.retryOnMethods ?? defaultRetryableMethods;
+    const maxElapsedMs = normalizeRetryBudget(p.maxElapsedMs);
 
     const run: HttpClientStreamFn = (req: Parameters<HttpClientStream>[0]) => {
       type Out = ReturnType<HttpClientStream>; // Async<unknown, HttpError, HttpWireResponseStream>
+      if (!retryOnMethods.includes(req.method)) return next(req) as Out;
+
       const startedAt = performance.now();
       const remainingBudget = () => maxElapsedMs === undefined ? Number.POSITIVE_INFINITY : maxElapsedMs - (performance.now() - startedAt);
       const delayWithinBudget = (delayMs: number) => Math.max(0, Math.min(delayMs, remainingBudget()));
@@ -466,6 +489,15 @@ export const withRetryStream =
 
             const d = delayWithinBudget(backoffDelayMs(attempt, p.baseDelayMs, p.maxDelayMs));
             if (d <= 0 && maxElapsedMs !== undefined) return asyncFail(e) as Out;
+            p.onRetry?.({
+              attempt,
+              delayMs: d,
+              error: e,
+              status: undefined,
+              url: req.url,
+              method: req.method,
+              timestamp: Date.now(),
+            });
             return asyncFlatMap(sleep(d) as any, () => loop(attempt + 1)) as Out;
           },
           (w) => {
@@ -481,6 +513,15 @@ export const withRetryStream =
             const d = delayWithinBudget(rawDelay);
             if (d <= 0 && maxElapsedMs !== undefined) return asyncSucceed(w) as Out;
 
+            p.onRetry?.({
+              attempt,
+              delayMs: d,
+              error: undefined,
+              status: w.status,
+              url: req.url,
+              method: req.method,
+              timestamp: Date.now(),
+            });
             return asyncFlatMap(sleep(d) as any, () => loop(attempt + 1)) as Out;
           }
         ) as Out;

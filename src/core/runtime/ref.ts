@@ -5,6 +5,7 @@
 // from multiple fibers. All operations are synchronous (no scheduling overhead).
 
 import { Async, asyncSync } from "../types/asyncEffect";
+import { asyncFlatMap, asyncMap } from "../types/asyncEffect";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -72,26 +73,18 @@ export function derivedRef<A, B>(
 ): Ref<B> {
   return {
     get: () => asyncSync(() => get(parent.unsafeGet())) as any,
-    set: (b: B) => asyncSync(() => {
-      const current = parent.unsafeGet();
-      (parent as any).set(set(current, b));
-    }) as any,
-    update: (f: (current: B) => B) => asyncSync(() => {
-      const parentVal = parent.unsafeGet();
-      const currentB = get(parentVal);
-      const newB = f(currentB);
-      const newParent = set(parentVal, newB);
-      (parent as any).unsafeGet = () => newParent;
-      return newB;
-    }) as any,
-    modify: <C>(f: (current: B) => [C, B]) => asyncSync(() => {
-      const parentVal = parent.unsafeGet();
-      const currentB = get(parentVal);
-      const [result, newB] = f(currentB);
-      const newParent = set(parentVal, newB);
-      (parent as any).unsafeGet = () => newParent;
-      return result;
-    }) as any,
+    set: (b: B) =>
+      asyncFlatMap(parent.get(), (current) => parent.set(set(current, b))) as Async<unknown, never, void>,
+    update: (f: (current: B) => B) =>
+      asyncFlatMap(parent.get(), (parentVal) => {
+        const newB = f(get(parentVal));
+        return asyncMap(parent.set(set(parentVal, newB)), () => newB);
+      }) as Async<unknown, never, B>,
+    modify: <C>(f: (current: B) => [C, B]) =>
+      asyncFlatMap(parent.get(), (parentVal) => {
+        const [result, newB] = f(get(parentVal));
+        return asyncMap(parent.set(set(parentVal, newB)), () => result);
+      }) as Async<unknown, never, C>,
     unsafeGet: () => get(parent.unsafeGet()),
   };
 }
