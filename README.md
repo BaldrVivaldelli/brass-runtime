@@ -1,11 +1,26 @@
-# 🛠️ brass-runtime — Mini ZIO-like runtime in TypeScript
+# brass-runtime
 
-A small experimental runtime inspired by **ZIO 2**, implemented in vanilla TypeScript and intentionally built without using `Promise` / `async`/`await` as the **primary semantic primitive**.
+A ZIO-inspired effect runtime for TypeScript with structured concurrency, pull-based streams, and a production-grade HTTP client.
 
-`brass-runtime` is the foundation: it provides an effect system, fibers, scheduler, scopes, and streams.
-Higher-level modules (HTTP, streaming utilities, integrations) are built **on top of the runtime**, not baked into it.
+Built without `Promise`/`async`/`await` as the primary semantic primitive. Effects are values — lazy, composable, and cancelable by default.
 
-> You can still interop with the outside world (timers, fetch, Node APIs) via explicit, cancellable bridges such as `fromPromiseAbortable`.
+```bash
+npm i brass-runtime
+```
+
+---
+
+## What it does
+
+**Core runtime** — algebraic effects, fibers, scopes, scheduler, layers, semaphores, circuit breakers, metrics, tracing.
+
+**Streams** — pull-based with backpressure, bounded buffers, queues, hubs, pipelines, fusion optimization.
+
+**HTTP client** — lazy/cancelable requests with a full middleware pipeline: adaptive concurrency, compression, batching, connection pre-warming, caching, deduplication, priority scheduling, and retry with backoff.
+
+**WASM engine** — optional Rust/WASM-backed state machines for strict scheduling and bounded queues.
+
+**Brass Agent** — experimental CLI coding agent with workspace inspection, LLM integration, and VS Code extension.
 
 ---
 
@@ -15,31 +30,7 @@ Higher-level modules (HTTP, streaming utilities, integrations) are built **on to
 - **Async is explicit** — no hidden Promise semantics
 - **Concurrency is structured** — fibers, scopes, finalizers
 - **Side effects are interpreted** — not executed eagerly
-- **Higher-level APIs are libraries, not magic**
-
-If you like ZIO’s separation between `zio-core`, `zio-streams`, and `zio-http`, this project follows the same spirit.
-
----
-
-## Core concepts
-
-- Sync core effect: `Effect<R, E, A>` and `Exit<E, A>`
-- Algebraic async representation: `Async<R, E, A>`
-- Cooperative `Scheduler` (observable / testable)
-- Lightweight `Fiber`s with interruption & finalizers
-- Structured `Scope`s for resource safety
-- ZStream-style streams with backpressure
-
-For new code that only needs the stable runtime surface, prefer
-`brass-runtime/core`. The package root remains broad for compatibility.
-
----
-
-## Install
-
-```bash
-npm i brass-runtime
-```
+- **Higher-level APIs are libraries** — HTTP, streams, agent are built on top of core
 
 ---
 
@@ -50,106 +41,183 @@ npm i brass-runtime
 ```ts
 import { Runtime, succeed, toPromise } from "brass-runtime";
 
-const runtime = new Runtime({ env: {} });
-
-const value = await toPromise(succeed(123), runtime.env);
-console.log(value); // 123
+const runtime = Runtime.make({});
+const value = await runtime.toPromise(succeed(42));
 ```
 
-### Structured concurrency with Scope
+### HTTP client with lifecycle middleware
 
 ```ts
-import { Runtime, withScope } from "brass-runtime";
+import { makeLifecycleClient } from "brass-runtime/http";
 
-const runtime = new Runtime({ env: {} });
+const client = makeLifecycleClient({
+  baseUrl: "https://api.example.com",
+  cache: { ttlSeconds: 60, maxEntries: 512 },
+  dedup: {},
+  priority: { concurrency: 8 },
+  retry: { maxAttempts: 3, baseDelayMs: 200 },
+  batch: {
+    windowMs: 50,
+    maxBatchSize: 20,
+    batchKey: (req) => req.url.startsWith("/graphql") ? "graphql" : "",
+    batch: {
+      coalesce: (reqs) => ({ method: "POST", url: "/graphql/batch", body: JSON.stringify(reqs) }),
+      split: (res, reqs) => JSON.parse(res.bodyText),
+    },
+  },
+});
 
-withScope(runtime, (scope) => {
-  const f = scope.fork(/* Async effect */);
-  // later...
-  scope.close(); // interrupts child fibers + runs finalizers
+// All requests go through: dedup → batch → cache → retry → priority → wire
+const response = await runtime.toPromise(client({ method: "GET", url: "/users/1" }));
+```
+
+### Adaptive concurrency
+
+```ts
+import { makeHttp } from "brass-runtime/http";
+
+const http = makeHttp({
+  adaptiveLimiter: {
+    initialLimit: 10,
+    minLimit: 2,
+    maxLimit: 100,
+    onLimitChange: (event) => console.log(`limit: ${event.previousLimit} → ${event.newLimit}`),
+  },
 });
 ```
 
-> `toPromise` is just a convenience bridge for examples/DX. The runtime semantics remain explicit.
-
----
-
-## Modules built on top of brass-runtime
-
-These are optional layers, implemented using the runtime primitives.
-
-### 🌐 HTTP client (brass-http layer)
-
-A ZIO-style HTTP client built on top of fibers and `Async`.
-
-- Lazy & cancelable HTTP requests
-- Explicit wire/content separation
-- Middleware-friendly (logging, retry, timeout, etc.)
-- Integrated with fiber interruption via `AbortController`
-
-👉 **Docs:** [HTTP module](./docs/http.md)
-
-Example:
+### Connection pre-warming
 
 ```ts
-import { Runtime, toPromise } from "brass-runtime";
-import { httpClient } from "brass-runtime/http";
+import { makePrewarmManager } from "brass-runtime/http";
 
-type Post = { id: number; title: string; body: string };
+const prewarm = makePrewarmManager({
+  origins: ["https://api.example.com", "https://cdn.example.com"],
+  keepAliveDurationMs: 55000,
+  autoRefresh: true,
+});
 
-const runtime = new Runtime({ env: {} });
+await prewarm.warmAll();
+// Subsequent requests skip TCP+TLS handshake
+```
 
-const client = httpClient({ baseUrl: "https://jsonplaceholder.typicode.com" });
+### Response compression
 
-const res = await toPromise(client.getJson<Post>("/posts/1"), runtime.env);
-console.log(res.status, res.body.title);
+```ts
+import { makeCompressionMiddleware } from "brass-runtime/http";
+
+const { middleware, stats } = makeCompressionMiddleware({ encodings: ["br", "gzip"] });
+const client = baseClient.with(middleware);
+// Responses are transparently decompressed (gzip, brotli, deflate)
+```
+
+### Structured concurrency
+
+```ts
+import { Runtime, fork, withScope } from "brass-runtime";
+
+const runtime = Runtime.make({});
+
+withScope(runtime, (scope) => {
+  const fiber = scope.fork(someEffect);
+  // scope.close() interrupts children + runs finalizers
+});
+```
+
+### Streams
+
+```ts
+import { Stream, Pipeline } from "brass-runtime";
+
+const numbers = Stream.fromIterable([1, 2, 3, 4, 5]);
+const doubled = numbers.pipe(Pipeline.map((n) => n * 2));
+const result = await runtime.toPromise(doubled.runCollect());
+// [2, 4, 6, 8, 10]
 ```
 
 ---
 
-### 🤖 Brass Agent (experimental)
+## Package exports
 
-A CLI-first coding agent built on top of the runtime. Brass Agent is currently experimental: it can inspect a workspace, discover validation commands, gather bounded context, ask an LLM for a patch, apply/rollback patches through explicit policies, and expose a thin VS Code extension over the CLI protocol.
+| Import | Purpose |
+|--------|---------|
+| `brass-runtime` | Core runtime: effects, fibers, scheduler, streams, layers |
+| `brass-runtime/core` | Stable core surface (preferred for new code) |
+| `brass-runtime/http` | HTTP client, lifecycle middleware, compression, batching, prewarm, adaptive limiter |
+| `brass-runtime/agent` | Brass Agent core (experimental) |
 
-Start here:
+CLI: `brass-agent`
 
-- [Install and configure Brass Agent](./docs/agent-install-and-configure.md)
-- [Declarative optimized planning roadmap](./docs/agent-declarative-optimized-planning.md)
-- [Brass Agent CLI](./docs/agent-cli.md)
-- [Project intelligence](./docs/agent-project-intelligence.md)
-- [Global usage and workspace discovery](./docs/agent-global-usage.md)
-- [VS Code local install](./docs/agent-vscode-install.md)
-- [VS Code auto-discovery](./docs/agent-vscode-auto-discovery.md)
-- [VS Code model setup](./docs/agent-vscode-model-setup.md)
-- [VS Code chat layout / focus mode](./docs/agent-vscode-chat-layout.md)
+---
+
+## HTTP middleware pipeline
+
+The lifecycle client composes middleware in this order (innermost to outermost):
+
+```
+Wire → Adaptive Limiter → Priority → Retry → Cache → Batch → Dedup → Compression
+```
+
+Each layer is independently optional. Set to `false` or omit to disable.
+
+| Layer | What it does |
+|-------|-------------|
+| **Adaptive Limiter** | Gradient-based dynamic concurrency control per origin |
+| **Priority** | Priority queue for request scheduling (0-9 levels) |
+| **Retry** | Exponential backoff with circuit breaker awareness |
+| **Cache** | LRU + TTL + stale-while-revalidate |
+| **Batch** | Time-window request coalescing with split/distribute |
+| **Dedup** | Ref-counted in-flight request deduplication |
+| **Compression** | Transparent gzip/br/deflate decompression |
+| **Prewarm** | Proactive TCP+TLS connection establishment |
+
+All layers emit lifecycle events, track stats, and support cancellation.
+
+---
+
+## WASM engine
+
+Optional Rust/WASM-backed components for strict execution:
+
+- Fiber engine state machine
+- Scheduler queue
+- Bounded queues
+- Permit pool
+- Retry planner
 
 ```bash
-npm run agent:vscode:install
-# then open any repo in VS Code and use Brass Agent -> Chat
-
-npm run build
-npm run agent:link
-brass-agent --where
-brass-agent --doctor
-brass-agent --init
-brass-agent --preset inspect
+npm run build:wasm  # requires wasm-pack
 ```
+
+The WASM engine never silently falls back to TypeScript — if you request WASM and it's unavailable, it fails explicitly.
 
 ---
 
-### 🌊 Streams (ZStream-like)
+## Brass Agent (experimental)
 
-Pull-based, resource-aware streams with backpressure.
+A CLI-first coding agent built on the runtime. Inspects workspaces, discovers validation commands, gathers bounded context, asks an LLM for patches, and applies/rolls back changes under policy.
 
-- `ZStream<R, E, A>`
-- `Pull` semantics
-- Bounded buffers
-- Deterministic resource cleanup
+```bash
+npm run agent:vscode:install   # VS Code extension
+brass-agent --doctor           # check setup
+brass-agent --init             # initialize workspace
+brass-agent --preset inspect   # run inspection
+```
 
-Examples:
+Docs: [Install](./docs/agent-install-and-configure.md) · [CLI](./docs/agent-cli.md) · [Project intelligence](./docs/agent-project-intelligence.md) · [VS Code](./docs/agent-vscode-install.md)
 
-- `src/examples/fromPromise.ts`
-- `src/examples/mergeStreamSync.ts`
+---
+
+## Testing
+
+```bash
+npm test              # 1198 tests via vitest
+npm run test:types    # TypeScript type checking
+npm run test:coverage # coverage with baseline gate
+npm run benchmark     # runtime & HTTP lifecycle benchmarks
+```
+
+Property-based tests use `fast-check` with 100+ iterations per property. Each HTTP middleware has dedicated property tests verifying correctness invariants.
 
 ---
 
@@ -160,78 +228,72 @@ Examples:
 - [Cancellation & Interruption](./docs/cancellation.md)
 - [Observability: Hooks & Tracing](./docs/observability.md)
 - [HTTP module](./docs/http.md)
-- [Modules overview](./docs/modules.md)
-- [Install and configure Brass Agent](./docs/agent-install-and-configure.md)
-- [Declarative optimized planning roadmap](./docs/agent-declarative-optimized-planning.md)
+- [Streams guide](./docs/guides/streams.md)
+- [Testing guide](./docs/guides/testing.md)
+- [WASM engine](./docs/wasm-fiber-engine.md)
 
 ---
 
-## What’s new (recent changes)
-
-- Stream buffering with backpressure (`buffer`)
-- Abortable async integration (`fromPromiseAbortable`)
-- Fiber-safe `toPromise` for examples & DX
-- HTTP client module built on top of the runtime
-
----
-
-## Features (status)
+## Features
 
 ### Runtime (core)
 
-- [x] Sync core: `Effect`
-- [x] Async algebra: `Async`
-- [x] Cooperative `Scheduler`
+- [x] Sync effect: `Effect<R, E, A>`
+- [x] Algebraic async: `Async<R, E, A>`
+- [x] Cooperative scheduler (observable, testable)
 - [x] Fibers with interruption & finalizers
-- [x] Structured `Scope`
-- [x] Resource safety (`acquireRelease`)
+- [x] Structured scopes & resource safety
+- [x] Layers, semaphores, circuit breakers
+- [x] Metrics, tracing, runtime hooks
+- [x] Worker pools
+- [x] WASM engine (optional)
 
-### Concurrency & Streams
+### Streams
 
-- [x] `race`, `zipPar`, `collectAllPar`
-- [x] ZStream-like core
-- [x] Bounded buffers & backpressure
-- [x] Stream merge / zip
-- [x] Hubs / Broadcast
-- [x] Pipelines (`ZPipeline`-style)
+- [x] Pull-based streams with backpressure
+- [x] Bounded buffers, queues, hubs
+- [x] Pipelines with fusion optimization
+- [x] Stream merge, zip, broadcast
+- [x] Chunks & batch operators
 
-### Libraries
+### HTTP
 
-- [x] HTTP client
-- [ ] Retry / timeout middleware
-- [ ] Logging / metrics layers
+- [x] Lazy, cancelable HTTP client
+- [x] Lifecycle client with middleware composition
+- [x] Response cache (LRU + TTL + SWR)
+- [x] Request deduplication (ref-counted)
+- [x] Priority scheduling
+- [x] Retry with exponential backoff
+- [x] Response compression (gzip, br, deflate)
+- [x] Request batching (time-window coalesce/split)
+- [x] Connection pre-warming (probes, auto-refresh)
+- [x] Adaptive concurrency (gradient-based)
+- [x] Circuit breaker
+- [x] Tracing & validation
 
 ---
 
 ## Design notes
 
-- **No hidden Promises**: async is always modeled explicitly
-- **Deterministic execution**: scheduler is observable & testable
-- **Resource safety is structural**: scopes guarantee cleanup
-- **Libraries compose via functions**: middleware, not inheritance
+- **No hidden Promises** — async is always modeled explicitly via `Async`
+- **Deterministic execution** — scheduler is observable and testable
+- **Resource safety is structural** — scopes guarantee cleanup
+- **Middleware composes via functions** — `(next: HttpClientFn) => HttpClientFn`
+- **Cancellation propagates** — ref-counted through the entire middleware stack
+- **Stats are frozen snapshots** — no mutable state leaks to consumers
 
 ---
 
 ## Contributing
 
-- Runtime invariants matter — avoid sneaking Promises into semantics
-- Prefer libraries on top of the runtime over changes in the core
-- Small, focused PRs are welcome (your repo may enforce PR-only changes)
+- Runtime invariants matter — avoid sneaking Promises into core semantics
+- Prefer libraries on top of the runtime over changes in core
+- Add property tests when an invariant is broad
+- Keep tests close to the changed module
+- Small, focused PRs are welcome
 
 ---
 
 ## License
 
-MIT License © 2025
-
-## Brass Agent local smoke tests
-
-Run local smoke tests without CI or a real LLM provider:
-
-```bash
-npm run agent:test:local
-```
-
-This builds the project and runs a fake-LLM smoke test against the `brass-agent` CLI.
-
-See also: [Agent language and workspace setup UX](docs/agent-language-workspace-ux.md).
+MIT © 2025

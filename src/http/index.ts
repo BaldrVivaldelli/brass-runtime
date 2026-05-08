@@ -9,3 +9,4 @@ export * from "./retry/retry";
 export * from "./compression";
 export * from "./batching";
 export * from "./prewarm";
+export * from "./adaptiveLimiter";

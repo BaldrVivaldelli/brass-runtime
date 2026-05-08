@@ -10,6 +10,34 @@ import type {
   HttpClientStats,
 } from "../client";
 import type { RetryPolicy } from "../retry/retry";
+import type { BatchConfig } from "./batch";
+import type { PrewarmEvent } from "../prewarm/types";
+import type { AdaptiveLimiterConfig } from "../adaptiveLimiter/types";
+
+/**
+ * Configuration for the prewarm layer within the lifecycle client.
+ *
+ * When provided to `makeLifecycleClient`, the lifecycle client creates and manages
+ * a PrewarmManager internally, triggering pre-warming based on the `afterResponse` hook.
+ */
+export type PrewarmLifecycleConfig = {
+  /** Origins to pre-warm at client creation. */
+  origins?: string[];
+  /** Hook called after each successful response to determine origins to pre-warm. */
+  afterResponse?: (response: HttpWireResponse, request: HttpRequest) => string[];
+  /** Keep-alive duration in ms. Default: 55000. */
+  keepAliveDurationMs?: number;
+  /** Max concurrent in-flight probes. Default: 4. */
+  budget?: number;
+  /** Probe timeout in ms. Default: 5000. */
+  probeTimeoutMs?: number;
+  /** Auto-refresh expired connections. Default: false. */
+  autoRefresh?: boolean;
+  /** Route probes through the Wire_Client pool. Default: false. */
+  useClientPool?: boolean;
+  /** Event observer for prewarm events. */
+  onEvent?: (event: PrewarmEvent) => void;
+};
 
 /**
  * Configuration for the deduplication layer.
@@ -106,12 +134,18 @@ export type PriorityConfig = {
 export type LifecycleClientConfig = MakeHttpConfig & {
   /** Dedup layer config. Set to `false` to explicitly disable. Default: undefined (disabled). */
   dedup?: DedupConfig | false;
+  /** Batch layer config. Set to `false` to explicitly disable. Default: undefined (disabled). */
+  batch?: BatchConfig | false;
   /** Cache layer config. Set to `false` to explicitly disable. Default: undefined (disabled). */
   cache?: CacheConfig | false;
   /** Priority scheduler config. Set to `false` to explicitly disable. Default: undefined (disabled). */
   priority?: PriorityConfig | false;
   /** Retry policy. Set to `false` to explicitly disable. Default: undefined (disabled). */
   retry?: RetryPolicy | false;
+  /** Prewarm layer config. Set to `false` to explicitly disable. Default: undefined (disabled). */
+  prewarm?: PrewarmLifecycleConfig | false;
+  /** Adaptive concurrency limiter config. Set to `false` to explicitly disable. Default: undefined (disabled). */
+  adaptiveLimiter?: AdaptiveLimiterConfig | false;
   /** Optional event observer for lifecycle events. */
   onEvent?: (event: LifecycleEvent) => void;
 };
@@ -169,7 +203,10 @@ export type LifecycleEventType =
   | "dedup-miss"
   | "queue-enqueue"
   | "queue-dispatch"
-  | "retry";
+  | "retry"
+  | "batch-hit"
+  | "batch-dispatch"
+  | "limit-change";
 
 /**
  * A lifecycle event emitted to the onEvent observer.
@@ -195,6 +232,10 @@ export type LifecycleEvent = {
   cacheKey?: string;
   /** Priority level associated with the event, if applicable. Valid range: 0-9. */
   priority?: number;
+  /** Batch_Key associated with the event, if applicable. Present for batch events. */
+  batchKey?: string;
+  /** Number of requests in the batch, if applicable. Present for batch-dispatch events. */
+  batchSize?: number;
   /** Zero-based retry attempt, if applicable. */
   attempt?: number;
   /** Retry delay in milliseconds, if applicable. */
@@ -203,6 +244,14 @@ export type LifecycleEvent = {
   status?: number;
   /** HttpError tag that triggered retry, if applicable. */
   errorTag?: string;
+  /** Previous concurrency limit, present for limit-change events. */
+  previousLimit?: number;
+  /** New concurrency limit, present for limit-change events. */
+  newLimit?: number;
+  /** Gradient value, present for limit-change events. */
+  gradient?: number;
+  /** Smoothed latency value, present for limit-change events. */
+  smoothedLatency?: number;
 };
 
 /**
@@ -244,6 +293,10 @@ export type LifecycleStats = {
   requestsFailed: number;
   /** Total number of retry attempts scheduled. */
   retries: number;
+  /** Total number of batch dispatches. */
+  batchDispatches: number;
+  /** Total number of individual requests that were coalesced into batches. */
+  batchedRequests: number;
   /** Underlying Wire_Client stats. */
   wire: HttpClientStats;
 };

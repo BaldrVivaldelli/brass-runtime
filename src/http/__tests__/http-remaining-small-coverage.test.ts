@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import zlib from "node:zlib";
 import { Runtime } from "../../core/runtime/runtime";
-import { createNodeDecompressor } from "../compression/decompressorNode";
+import { createNodeDecompressor } from "../compression/decompressor.node";
 import { createNoopDecompressor } from "../compression/decompressor.noop";
 import { createDecompressor } from "../compression/decompressor";
 import { isNodeEnvironment } from "../compression/environment";

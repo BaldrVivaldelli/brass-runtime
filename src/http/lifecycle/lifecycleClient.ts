@@ -14,15 +14,18 @@ import {
 } from "../client";
 import { withRetry } from "../retry/retry";
 import { withDedup } from "./dedup";
+import { withBatch } from "./batch";
 import { withCache } from "./responseCache";
 import { withPriority } from "./priorityScheduler";
 import { computeDedupKey } from "./dedupKey";
 import { LifecycleStatsTracker } from "./stats";
 import { registerHttpEffect } from "../effectRunner";
+import { makePrewarmManager, type PrewarmManager } from "../prewarm/prewarmManager";
 import type {
   LifecycleClient,
   LifecycleClientConfig,
   LifecycleStats,
+  PrewarmLifecycleConfig,
 } from "./types";
 
 /**
@@ -48,7 +51,7 @@ function validateGlobals(): void {
  * Extracts the MakeHttpConfig subset from a LifecycleClientConfig.
  */
 function extractWireConfig(config: LifecycleClientConfig): MakeHttpConfig {
-  const { dedup, cache, priority, retry, onEvent, ...wireConfig } = config;
+  const { dedup, batch, cache, priority, retry, prewarm, onEvent, ...wireConfig } = config;
   return wireConfig;
 }
 
@@ -119,17 +122,40 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
   });
 
   const hasDedup = config.dedup !== undefined && config.dedup !== false;
+  const hasBatch = config.batch !== undefined && config.batch !== false;
   const hasCache = config.cache !== undefined && config.cache !== false;
   const hasPriority = config.priority !== undefined && config.priority !== false;
   const hasRetry = config.retry !== undefined && config.retry !== false;
 
   // Zero-cost path: no layers configured, delegate directly to wire client
-  if (!hasDedup && !hasCache && !hasPriority && !hasRetry) {
+  if (!hasDedup && !hasBatch && !hasCache && !hasPriority && !hasRetry) {
+    // Even in zero-cost path, create PrewarmManager if configured
+    let prewarmMgr: PrewarmManager | undefined;
+    const hasPrewarm = config.prewarm !== undefined && config.prewarm !== false;
+    if (hasPrewarm) {
+      const prewarmConfig = config.prewarm as PrewarmLifecycleConfig;
+      const prewarmOrigins = prewarmConfig.origins ?? [];
+      if (prewarmOrigins.length > 0) {
+        prewarmMgr = makePrewarmManager({
+          origins: prewarmOrigins,
+          keepAliveDurationMs: prewarmConfig.keepAliveDurationMs,
+          budget: prewarmConfig.budget,
+          probeTimeoutMs: prewarmConfig.probeTimeoutMs,
+          autoRefresh: prewarmConfig.autoRefresh,
+          useClientPool: prewarmConfig.useClientPool,
+          client: prewarmConfig.useClientPool ? wireClient : undefined,
+          onEvent: prewarmConfig.onEvent,
+        });
+      }
+    }
+
     return buildLifecycleClient(wireClient, tracker, {
       cacheInvalidate: noopInvalidate,
       cacheClear: noopClear,
-      cancelAll: () => cancelControllers(activeControllers),
+      cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
       activeControllers,
+      prewarmManager: prewarmMgr,
+      afterResponse: hasPrewarm ? (config.prewarm as PrewarmLifecycleConfig).afterResponse : undefined,
     });
   }
 
@@ -187,8 +213,21 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
     });
   }
 
+  // Set up batch layer
+  let batchMiddleware: HttpMiddleware | undefined;
+  if (hasBatch) {
+    const batchConfig = config.batch as Exclude<typeof config.batch, false | undefined>;
+    batchMiddleware = withBatch(batchConfig, (event) => {
+      if (event.type === "batch-dispatch") {
+        tracker.batchDispatch();
+        tracker.batchedRequests(event.batchSize ?? 0);
+      }
+      tracker.emit(event.type, { batchKey: event.batchKey, batchSize: event.batchSize });
+    });
+  }
+
   // Compose layers: innermost to outermost
-  // Wire → Priority → Retry → Cache → Dedup
+  // Wire → Priority → Retry → Cache → Batch → Dedup
   let composedFn: HttpClientFn = wireClient;
 
   if (priorityMiddleware) {
@@ -218,16 +257,42 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
     composedFn = cacheLayer.middleware(composedFn);
   }
 
+  if (batchMiddleware) {
+    composedFn = batchMiddleware(composedFn);
+  }
+
   if (dedupMiddleware) {
     composedFn = dedupMiddleware(composedFn);
+  }
+
+  // Create PrewarmManager if configured
+  let prewarmMgr: PrewarmManager | undefined;
+  const hasPrewarm = config.prewarm !== undefined && config.prewarm !== false;
+  if (hasPrewarm) {
+    const prewarmConfig = config.prewarm as PrewarmLifecycleConfig;
+    const prewarmOrigins = prewarmConfig.origins ?? [];
+    if (prewarmOrigins.length > 0) {
+      prewarmMgr = makePrewarmManager({
+        origins: prewarmOrigins,
+        keepAliveDurationMs: prewarmConfig.keepAliveDurationMs,
+        budget: prewarmConfig.budget,
+        probeTimeoutMs: prewarmConfig.probeTimeoutMs,
+        autoRefresh: prewarmConfig.autoRefresh,
+        useClientPool: prewarmConfig.useClientPool,
+        client: prewarmConfig.useClientPool ? wireClient : undefined,
+        onEvent: prewarmConfig.onEvent,
+      });
+    }
   }
 
   return buildLifecycleClient(composedFn, tracker, {
     cacheInvalidate: cacheLayer?.invalidate ?? noopInvalidate,
     cacheClear: cacheLayer?.clear ?? noopClear,
-    cancelAll: () => cancelControllers(activeControllers),
+    cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
     activeControllers,
     queueDepth: priorityMiddleware?.queueDepth,
+    prewarmManager: prewarmMgr,
+    afterResponse: hasPrewarm ? (config.prewarm as PrewarmLifecycleConfig).afterResponse : undefined,
   });
 }
 
@@ -256,6 +321,8 @@ type LifecycleClientInternals = {
   cancelAll: () => Async<unknown, never, void>;
   activeControllers: Set<AbortController>;
   queueDepth?: () => number;
+  prewarmManager?: PrewarmManager;
+  afterResponse?: (response: HttpWireResponse, request: HttpRequest) => string[];
 };
 
 /**
@@ -293,13 +360,17 @@ function buildLifecycleClient(
   return lifecycleClient;
 }
 
-function cancelControllers(activeControllers: Set<AbortController>): Async<unknown, never, void> {
+function cancelControllers(activeControllers: Set<AbortController>, prewarmMgr?: PrewarmManager): Async<unknown, never, void> {
   for (const controller of Array.from(activeControllers)) {
     try {
       controller.abort();
     } catch {
       // ignore
     }
+  }
+  // Also cancel all prewarm operations
+  if (prewarmMgr) {
+    prewarmMgr.cancelAll();
   }
   return asyncSucceed(undefined) as Async<unknown, never, void>;
 }
@@ -350,6 +421,21 @@ function trackRequest(
 
         if (exit._tag === "Success") {
           tracker.requestCompleted();
+          // Trigger prewarm afterResponse hook if configured
+          if (internals.afterResponse && internals.prewarmManager) {
+            try {
+              const originsToWarm = internals.afterResponse(exit.value, req);
+              if (originsToWarm && originsToWarm.length > 0) {
+                for (const origin of originsToWarm) {
+                  internals.prewarmManager.warm(origin).catch(() => {
+                    // Swallow errors from prewarm triggered by afterResponse
+                  });
+                }
+              }
+            } catch {
+              // Swallow errors from afterResponse hook
+            }
+          }
         } else {
           tracker.requestFailed();
         }

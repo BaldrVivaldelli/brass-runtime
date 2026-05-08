@@ -81,7 +81,6 @@ function processResponse(
 
   // Start with the body as a Buffer
   let currentData: Buffer = Buffer.from(res.bodyText, "latin1");
-  const originalData = currentData;
   let decompressedCount = 0;
 
   for (let i = 0; i < reversedEncodings.length; i++) {

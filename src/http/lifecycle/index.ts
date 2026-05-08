@@ -12,6 +12,7 @@ export type {
   CacheConfig,
   CachePolicyResult,
   PriorityConfig,
+  PrewarmLifecycleConfig,
 } from "./types";
 
 // Lifecycle client factories
@@ -43,5 +44,7 @@ export { LifecycleStatsTracker } from "./stats";
 
 // Advanced middleware (usable standalone for power users)
 export { withDedup } from "./dedup";
+export { withBatch } from "./batch";
+export type { BatchFunction, BatchConfig } from "./batch";
 export { withCache } from "./responseCache";
 export { withPriority } from "./priorityScheduler";

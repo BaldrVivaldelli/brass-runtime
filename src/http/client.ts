@@ -20,6 +20,7 @@ import {
     type HttpPoolConfig,
     type HttpPoolStats,
 } from "./pool";
+import { AdaptiveLimiter, type AdaptiveLimiterConfig } from "./adaptiveLimiter";
 
 export type HttpError =
     | { _tag: "Abort" }
@@ -27,7 +28,8 @@ export type HttpError =
     | { _tag: "FetchError"; message: string }
     | { _tag: "Timeout"; timeoutMs: number; message: string; phase?: "request" | "queue" | "retry" }
     | { _tag: "PoolRejected"; key: string; limit: number; message: string }
-    | { _tag: "PoolTimeout"; key: string; timeoutMs: number; message: string };
+    | { _tag: "PoolTimeout"; key: string; timeoutMs: number; message: string }
+    | { _tag: "BatchSplitError"; expected: number; actual: number; message: string };
 
 export type HttpMethod =
     | "GET"
@@ -81,6 +83,8 @@ export type MakeHttpConfig = {
     timeoutMs?: number;
     /** Downstream pool/concurrency limiter. Disabled by default to preserve existing behavior. */
     pool?: false | HttpPoolConfig;
+    /** Adaptive concurrency limiter. Replaces fixed pool when enabled. */
+    adaptiveLimiter?: false | AdaptiveLimiterConfig;
 };
 
 export type HttpWireResponseStream = {
@@ -132,7 +136,7 @@ const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = 
 const isTaggedHttpError = (e: unknown): e is HttpError => {
     if (typeof e !== "object" || e === null || !("_tag" in e)) return false;
     const tag = (e as any)._tag;
-    return tag === "Abort" || tag === "BadUrl" || tag === "FetchError" || tag === "Timeout" || tag === "PoolRejected" || tag === "PoolTimeout";
+    return tag === "Abort" || tag === "BadUrl" || tag === "FetchError" || tag === "Timeout" || tag === "PoolRejected" || tag === "PoolTimeout" || tag === "BatchSplitError";
 };
 
 const isAbortError = (e: unknown): boolean =>
@@ -267,6 +271,9 @@ const makeHttpStats = (pool: HttpConcurrencyPool | undefined) => {
 const makePool = (cfg: MakeHttpConfig): HttpConcurrencyPool | undefined =>
     cfg.pool === undefined || cfg.pool === false ? undefined : new HttpConcurrencyPool(cfg.pool);
 
+const makeAdaptiveLimiter = (cfg: MakeHttpConfig): AdaptiveLimiter | undefined =>
+    cfg.adaptiveLimiter === undefined || cfg.adaptiveLimiter === false ? undefined : new AdaptiveLimiter(cfg.adaptiveLimiter);
+
 const resolveRequestUrl = (req: HttpRequest, baseUrl: string): URL | HttpError => {
     try {
         return new URL(req.url, baseUrl);
@@ -325,7 +332,8 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
     const normalize = normalizeRequest(defaultHeaders);
-    const pool = makePool(cfg);
+    const adaptiveLimiter = makeAdaptiveLimiter(cfg);
+    const pool = adaptiveLimiter ? undefined : makePool(cfg);
     const metrics = makeHttpStats(pool);
 
     const run: HttpClientStreamFn = (req0) => {
@@ -337,11 +345,14 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
 
         return fromPromiseAbortable<HttpError, HttpWireResponseStream>(
             async (signal) => {
-                let lease: { release: () => void } | undefined;
+                let lease: { release: (...args: any[]) => void } | undefined;
                 const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
                 let cleanupTransferredToBody = false;
                 try {
-                    if (pool) {
+                    if (adaptiveLimiter) {
+                        const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
+                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal);
+                    } else if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
                         lease = await pool.acquire(key, linkedSignal.signal);
                     }
@@ -356,6 +367,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                     });
 
                     const headers = headersOf(res);
+                    const latencyMs = Math.round(performance.now() - started);
                     const body = streamFromReadableStream(res.body, normalizeHttpError, {
                         signal: linkedSignal.signal,
                         onRelease: linkedSignal.cleanup,
@@ -364,7 +376,11 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
 
                     // For streaming responses we release at headers to avoid leaking pool slots
                     // when the caller stores/drops the response without consuming the stream.
-                    lease?.release();
+                    if (adaptiveLimiter && lease) {
+                        (lease as any).release(latencyMs);
+                    } else {
+                        lease?.release();
+                    }
                     lease = undefined;
 
                     return {
@@ -372,13 +388,19 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                         statusText: res.statusText,
                         headers,
                         body,
-                        ms: Math.round(performance.now() - started),
+                        ms: latencyMs,
                     };
                 } finally {
                     if (!cleanupTransferredToBody) {
                         linkedSignal.cleanup();
                     }
-                    lease?.release();
+                    if (lease) {
+                        if (adaptiveLimiter) {
+                            (lease as any).release(0);
+                        } else {
+                            lease.release();
+                        }
+                    }
                 }
             },
             normalizeHttpError,
@@ -399,7 +421,8 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
     const normalize = normalizeRequest(defaultHeaders);
-    const pool = makePool(cfg);
+    const adaptiveLimiter = makeAdaptiveLimiter(cfg);
+    const pool = adaptiveLimiter ? undefined : makePool(cfg);
     const metrics = makeHttpStats(pool);
 
     const run: HttpClientFn = (req0) => {
@@ -411,10 +434,13 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
 
         return fromPromiseAbortable<HttpError, HttpWireResponse>(
             async (signal) => {
-                let lease: { release: () => void } | undefined;
+                let lease: { release: (...args: any[]) => void } | undefined;
                 const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
                 try {
-                    if (pool) {
+                    if (adaptiveLimiter) {
+                        const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
+                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal);
+                    } else if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
                         lease = await pool.acquire(key, linkedSignal.signal);
                     }
@@ -430,17 +456,30 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
 
                     const bodyText = await res.text();
                     const headers = headersOf(res);
+                    const latencyMs = Math.round(performance.now() - started);
+
+                    // Release with latency for adaptive limiter
+                    if (adaptiveLimiter && lease) {
+                        (lease as any).release(latencyMs);
+                        lease = undefined;
+                    }
 
                     return {
                         status: res.status,
                         statusText: res.statusText,
                         headers,
                         bodyText,
-                        ms: Math.round(performance.now() - started),
+                        ms: latencyMs,
                     };
                 } finally {
                     linkedSignal.cleanup();
-                    lease?.release();
+                    if (lease) {
+                        if (adaptiveLimiter) {
+                            (lease as any).release(0);
+                        } else {
+                            lease.release();
+                        }
+                    }
                 }
             },
             normalizeHttpError,

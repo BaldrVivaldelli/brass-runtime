@@ -31,6 +31,34 @@ npm run context -- --module http
 
 Core must not know about HTTP, agent, VS Code, or docs tooling.
 
+## HTTP module structure
+
+The HTTP module (`src/http`) is composed of several sub-modules:
+
+- **Wire client** (`client.ts`, `httpClient.ts`): Low-level fetch wrapper with pool, timeout, typed errors.
+- **Lifecycle** (`lifecycle/`): Middleware composition — dedup, batch, cache, priority, retry, stats.
+- **Compression** (`compression/`): Response decompression middleware (gzip, br, deflate) with environment detection.
+- **Adaptive Limiter** (`adaptiveLimiter/`): Gradient-based adaptive concurrency control per-key.
+- **Prewarm** (`prewarm/`): Connection pre-warming with probes, auto-refresh, and lifecycle integration.
+- **Retry** (`retry/`): Retry middleware with backoff, circuit breaker awareness, priority boost.
+- **Optics** (`optics/`): Response lenses and transformers.
+
+### Lifecycle middleware stack (innermost to outermost)
+
+```
+Wire → Priority → Retry → Cache → Batch → Dedup
+```
+
+Each layer is independently optional. Set to `false` or omit to disable.
+
+### Key patterns
+
+- All middleware conforms to `HttpMiddleware = (next: HttpClientFn) => HttpClientFn`.
+- Effects are lazy `Async` values — side effects only happen when `register` is called.
+- Cancellation is ref-counted: cancel functions returned by `register` propagate through the stack.
+- Stats are tracked via `LifecycleStatsTracker` and exposed as frozen snapshots.
+- Events are emitted via `onEvent` callbacks threaded through config.
+
 ## Editing rules
 
 - Preserve existing public exports unless the task explicitly changes API.
@@ -69,4 +97,25 @@ The repo intentionally contains multiple products:
 
 When a change touches more than one product, update docs and validation notes in
 the same change.
+
+## HTTP sub-modules quick reference
+
+| Module | Path | Key export | Purpose |
+|--------|------|-----------|---------|
+| Compression | `src/http/compression/` | `makeCompressionMiddleware` | Transparent gzip/br/deflate decompression |
+| Batching | `src/http/lifecycle/batch.ts` | `withBatch` | Time-window request coalescing with split |
+| Prewarm | `src/http/prewarm/` | `makePrewarmManager` | Proactive TCP+TLS connection establishment |
+| Adaptive Limiter | `src/http/adaptiveLimiter/` | `AdaptiveLimiter` | Gradient-based dynamic concurrency control |
+| Dedup | `src/http/lifecycle/dedup.ts` | `withDedup` | Ref-counted request deduplication |
+| Cache | `src/http/lifecycle/responseCache.ts` | `withCache` | LRU + TTL + stale-while-revalidate |
+| Priority | `src/http/lifecycle/priorityScheduler.ts` | `withPriority` | Priority queue for request scheduling |
+| Retry | `src/http/retry/retry.ts` | `withRetry` | Backoff with circuit breaker awareness |
+
+### Testing patterns for HTTP middleware
+
+- Property tests use `fast-check` with 100+ iterations.
+- Use `vi.useFakeTimers()` for timer-dependent middleware (batch, prewarm auto-refresh).
+- Use `registerHttpEffect` from `src/http/effectRunner.ts` to run `Async` effects in tests.
+- Mock `globalThis.fetch` for integration tests involving the wire client.
+- Each middleware has its own test directory close to the source.
 

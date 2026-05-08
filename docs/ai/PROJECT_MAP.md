@@ -82,13 +82,15 @@ Paths:
 - `src/http/retry`
 - `src/http/lifecycle`
 - `src/http/compression`
+- `src/http/adaptiveLimiter`
+- `src/http/prewarm`
 - `src/http/optics`
 
 Purpose:
 
 - Provide a lazy, cancelable HTTP client on top of `Async`.
 - Keep wire, content, metadata, lifecycle, retry, compression, batching,
-  pre-warming, tracing, and validation concerns separated.
+  pre-warming, adaptive concurrency, tracing, and validation concerns separated.
 
 Read first:
 
@@ -96,19 +98,25 @@ Read first:
 - `src/http/httpClient.ts`
 - `src/http/index.ts`
 - `src/http/lifecycle/lifecycleClient.ts`
+- `src/http/lifecycle/batch.ts`
 - `src/http/retry/retry.ts`
-- `src/http/batching.ts`
-- `src/http/prewarm.ts`
+- `src/http/compression/middleware.ts`
+- `src/http/adaptiveLimiter/adaptiveLimiter.ts`
+- `src/http/prewarm/prewarmManager.ts`
 
 Tests:
 
 - `src/http/__tests__`
+- `src/http/lifecycle/__tests__`
+- `src/http/prewarm/__tests__`
+- `src/http/adaptiveLimiter/__tests__`
 
 Docs:
 
 - `docs/http.md`
 - `src/http/README.md`
 - `src/http/lifecycle/README.md`
+- `src/http/prewarm/README.md`
 
 ## Brass Agent
 
@@ -191,6 +199,14 @@ Commands:
 - Stream bug: start in `stream.ts`, `queue.ts`, `buffer.ts`, and stream tests.
 - HTTP behavior: start in `client.ts`, `httpClient.ts`, relevant middleware,
   and `src/http/__tests__`.
+- HTTP compression: start in `src/http/compression/middleware.ts` and
+  `src/http/__tests__/compression.property.test.ts`.
+- HTTP batching: start in `src/http/lifecycle/batch.ts` and
+  `src/http/lifecycle/__tests__/batch.property.test.ts`.
+- HTTP prewarm: start in `src/http/prewarm/prewarmManager.ts` and
+  `src/http/prewarm/__tests__/prewarmManager.test.ts`.
+- HTTP adaptive concurrency: start in `src/http/adaptiveLimiter/adaptiveLimiter.ts`
+  and `src/http/adaptiveLimiter/__tests__/`.
 - Agent behavior: start in `src/agent/core`, then CLI/node adapters.
 - Export/package issue: start in `package.json`, `tsup.config.ts`, `src/index.ts`,
   `src/http/index.ts`, and `src/agent/index.ts`.
