@@ -121,7 +121,7 @@ function findJSDocBefore(sourceContent: string, declarationPattern: RegExp): str
   const between = beforeDecl.substring(jsDocEnd).trim();
 
   // Allow only empty space or single-line comments between JSDoc and declaration
-  if (between && !/^(\s*\/\/[^\n]*\n?\s*)*$/.test(between)) {
+  if (between && !/^(?:\s|\/\/[^\n]*(?:\n|$))*$/.test(between)) {
     return null;
   }
 
