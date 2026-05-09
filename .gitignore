@@ -1,5 +1,7 @@
 # .gitignore
 .kiro/
+.codex/
+.agents/
 .idea/
 # Logs
 logs
