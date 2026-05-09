@@ -43,7 +43,7 @@ npm i brass-runtime
 ### Run an effect
 
 ```ts
-import { Runtime, succeed, toPromise } from "brass-runtime";
+import { Runtime, succeed } from "brass-runtime";
 
 const runtime = Runtime.make({});
 const value = await runtime.toPromise(succeed(42));
@@ -105,6 +105,8 @@ const config = Config.parse({ port: 3000, callbackUrl: "https://example.com/cb" 
 Schemas can validate request bodies before the HTTP request is sent:
 
 ```ts
+import { Schema } from "brass-runtime/schema";
+
 const CreateUser = Schema.object({
   name: Schema.string({ minLength: 1 }),
 });
@@ -213,9 +215,13 @@ await prewarm.warmAll();
 ### Response compression
 
 ```ts
-import { makeCompressionMiddleware } from "brass-runtime/http";
+import { makeCompressionMiddleware, makeDefaultHttpClient } from "brass-runtime/http";
 
 const { middleware, stats } = makeCompressionMiddleware({ encodings: ["br", "gzip"] });
+const baseClient = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  compression: false,
+});
 const client = baseClient.with(middleware);
 // Responses are transparently decompressed (gzip, brotli, deflate)
 ```
@@ -268,24 +274,27 @@ state count.
 ### Structured concurrency
 
 ```ts
-import { Runtime, fork, withScope } from "brass-runtime";
+import { Runtime, asyncSucceed, withScope } from "brass-runtime";
 
 const runtime = Runtime.make({});
 
-withScope(runtime, (scope) => {
-  const fiber = scope.fork(someEffect);
-  // scope.close() interrupts children + runs finalizers
-});
+await runtime.toPromise(
+  withScope(runtime, (scope) => {
+    scope.fork(asyncSucceed("child"));
+    // scope close interrupts children + runs finalizers
+  })
+);
 ```
 
 ### Streams
 
 ```ts
-import { Stream, Pipeline } from "brass-runtime";
+import { Runtime, collectStream, fromArray, mapP, via } from "brass-runtime";
 
-const numbers = Stream.fromIterable([1, 2, 3, 4, 5]);
-const doubled = numbers.pipe(Pipeline.map((n) => n * 2));
-const result = await runtime.toPromise(doubled.runCollect());
+const runtime = Runtime.make({});
+const numbers = fromArray([1, 2, 3, 4, 5]);
+const doubled = via(numbers, mapP((n: number) => n * 2));
+const result = await runtime.toPromise(collectStream(doubled));
 // [2, 4, 6, 8, 10]
 ```
 
@@ -312,8 +321,12 @@ CLI: `brass-agent`
 The lifecycle client composes middleware in this order (innermost to outermost):
 
 ```
-Wire → Adaptive Limiter → Priority → Retry → Cache → Batch → Dedup → Compression
+Wire → Priority → Retry → Cache → Batch → Dedup
 ```
+
+Adaptive limiting lives in the wire client, before lifecycle middleware.
+`makeDefaultHttpClient` can then wrap the lifecycle stack with response
+compression and caller middleware; caller middleware is outermost.
 
 Each layer is independently optional. Set to `false` or omit to disable.
 
@@ -411,7 +424,7 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 
 ### Runtime (core)
 
-- [x] Sync effect: `Effect<R, E, A>`
+- [x] Sync effect values via `ZIO<R, E, A>` aliases
 - [x] Algebraic async: `Async<R, E, A>`
 - [x] Cooperative scheduler (observable, testable)
 - [x] Fibers with interruption & finalizers

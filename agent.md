@@ -293,6 +293,7 @@ Production-oriented client with optional:
 - response cache
 - priority queueing
 - retry
+- request batching
 - lifecycle events
 - lifecycle stats
 - `cancelAll`
@@ -300,8 +301,12 @@ Production-oriented client with optional:
 Canonical composition order:
 
 ```txt
-wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+wire -> priority -> retry -> cache -> batch -> dedup -> lifecycle tracking
 ```
+
+The default client may wrap that lifecycle stack with response compression and
+caller middleware. User middleware is outermost; compression is outside the
+lifecycle stack but inside caller middleware.
 
 `LifecycleStatsTracker` owns lifecycle counters. The client should report real
 request/cache/dedup/queue/retry stats, not placeholder zeros.
