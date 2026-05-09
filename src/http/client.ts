@@ -20,15 +20,17 @@ import {
     type HttpPoolConfig,
     type HttpPoolStats,
 } from "./pool";
-import { AdaptiveLimiter, type AdaptiveLimiterConfig } from "./adaptiveLimiter";
+import { AdaptiveLimiter, type AdaptiveLimiterConfig, type AdaptiveLimiterStats } from "./adaptiveLimiter";
+import { validateMakeHttpConfig } from "./configValidation";
 
 export type HttpError =
     | { _tag: "Abort" }
     | { _tag: "BadUrl"; message: string }
     | { _tag: "FetchError"; message: string }
     | { _tag: "Timeout"; timeoutMs: number; message: string; phase?: "request" | "queue" | "retry" }
-    | { _tag: "PoolRejected"; key: string; limit: number; message: string }
+    | { _tag: "PoolRejected"; key: string; limit: number; message: string; retryAfterMs?: number }
     | { _tag: "PoolTimeout"; key: string; timeoutMs: number; message: string }
+    | { _tag: "PoolClosed"; key: string; message: string }
     | { _tag: "BatchSplitError"; expected: number; actual: number; message: string };
 
 export type HttpMethod =
@@ -74,6 +76,7 @@ export type HttpClientStats = {
     readonly poolTimeouts: number;
     readonly lastDurationMs?: number;
     readonly pool?: HttpPoolStats;
+    readonly adaptiveLimiter?: AdaptiveLimiterStats;
 };
 
 export type MakeHttpConfig = {
@@ -106,6 +109,9 @@ export type HttpMiddleware = (next: HttpClientFn) => HttpClientFn;
 export type HttpClient = HttpClientFn & {
     with: (mw: HttpMiddleware) => HttpClient;
     stats: () => HttpClientStats;
+    adaptiveLimiter?: AdaptiveLimiter;
+    destroy?: () => void;
+    shutdown?: () => void;
 };
 
 const emptyStats = (): HttpClientStats => ({
@@ -119,16 +125,29 @@ const emptyStats = (): HttpClientStats => ({
     poolTimeouts: 0,
 });
 
-export const decorate = (run: HttpClientFn, stats: () => HttpClientStats = emptyStats): HttpClient =>
-    Object.assign(((req: HttpRequest) => run(req)) as HttpClientFn, {
-        with: (mw: HttpMiddleware) => decorate(mw(run), stats),
+type HttpClientMetadata = Pick<HttpClient, "adaptiveLimiter" | "destroy" | "shutdown">;
+
+export const decorate = (
+    run: HttpClientFn,
+    stats: () => HttpClientStats = emptyStats,
+    metadata: HttpClientMetadata = {},
+): HttpClient => {
+    const clientFn = ((req: HttpRequest) => run(req)) as HttpClientFn;
+    Object.assign(clientFn, metadata);
+    return Object.assign(clientFn, {
+        with: (mw: HttpMiddleware) => decorate(mw(clientFn), stats, metadata),
         stats,
-    });
+    }, metadata);
+};
 
 export const withMiddleware =
     (mw: HttpMiddleware) =>
         (c: HttpClient): HttpClient =>
-            decorate(mw(c), c.stats);
+            decorate(mw(c), c.stats, {
+                adaptiveLimiter: c.adaptiveLimiter,
+                destroy: c.destroy,
+                shutdown: c.shutdown,
+            });
 
 const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = emptyStats): HttpClientStream =>
     Object.assign(((req: HttpRequest) => run(req)) as HttpClientStreamFn, { stats });
@@ -136,7 +155,7 @@ const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = 
 const isTaggedHttpError = (e: unknown): e is HttpError => {
     if (typeof e !== "object" || e === null || !("_tag" in e)) return false;
     const tag = (e as any)._tag;
-    return tag === "Abort" || tag === "BadUrl" || tag === "FetchError" || tag === "Timeout" || tag === "PoolRejected" || tag === "PoolTimeout" || tag === "BatchSplitError";
+    return tag === "Abort" || tag === "BadUrl" || tag === "FetchError" || tag === "Timeout" || tag === "PoolRejected" || tag === "PoolTimeout" || tag === "PoolClosed" || tag === "BatchSplitError";
 };
 
 const isAbortError = (e: unknown): boolean =>
@@ -204,7 +223,10 @@ type MutableHttpStats = {
     lastDurationMs?: number;
 };
 
-const makeHttpStats = (pool: HttpConcurrencyPool | undefined) => {
+const makeHttpStats = (
+    pool: HttpConcurrencyPool | undefined,
+    adaptiveLimiter: AdaptiveLimiter | undefined,
+) => {
     const stats: MutableHttpStats = {
         inFlight: 0,
         started: 0,
@@ -263,6 +285,7 @@ const makeHttpStats = (pool: HttpConcurrencyPool | undefined) => {
     const snapshot = (): HttpClientStats => ({
         ...stats,
         ...(pool ? { pool: pool.stats() } : {}),
+        ...(adaptiveLimiter ? { adaptiveLimiter: adaptiveLimiter.stats() } : {}),
     });
 
     return { onStart, onFinish, snapshot };
@@ -295,6 +318,12 @@ const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError
     phase: "request",
     message: `HTTP ${req.method} ${url.origin} timed out after ${timeoutMs}ms`,
 });
+
+const requestPriority = (req: HttpRequest): number | undefined => {
+    const fromReq = (req as any).priority;
+    if (fromReq !== undefined) return fromReq;
+    return (req.init as any)?.priority;
+};
 
 const linkAbortSignals = (
     runtimeSignal: AbortSignal,
@@ -329,12 +358,14 @@ const linkAbortSignals = (
 };
 
 export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
+    validateMakeHttpConfig(cfg);
+
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
     const normalize = normalizeRequest(defaultHeaders);
     const adaptiveLimiter = makeAdaptiveLimiter(cfg);
     const pool = adaptiveLimiter ? undefined : makePool(cfg);
-    const metrics = makeHttpStats(pool);
+    const metrics = makeHttpStats(pool, adaptiveLimiter);
 
     const run: HttpClientStreamFn = (req0) => {
         const req = normalize(req0);
@@ -351,7 +382,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                 try {
                     if (adaptiveLimiter) {
                         const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
-                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal);
+                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
                     } else if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
                         lease = await pool.acquire(key, linkedSignal.signal);
@@ -377,7 +408,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                     // For streaming responses we release at headers to avoid leaking pool slots
                     // when the caller stores/drops the response without consuming the stream.
                     if (adaptiveLimiter && lease) {
-                        (lease as any).release(latencyMs);
+                        (lease as any).release(latencyMs, { status: res.status });
                     } else {
                         lease?.release();
                     }
@@ -396,7 +427,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                     }
                     if (lease) {
                         if (adaptiveLimiter) {
-                            (lease as any).release(0);
+                            (lease as any).release(0, { error: true });
                         } else {
                             lease.release();
                         }
@@ -418,12 +449,14 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
 }
 
 export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
+    validateMakeHttpConfig(cfg);
+
     const baseUrl = cfg.baseUrl ?? "";
     const defaultHeaders = cfg.headers ?? {};
     const normalize = normalizeRequest(defaultHeaders);
     const adaptiveLimiter = makeAdaptiveLimiter(cfg);
     const pool = adaptiveLimiter ? undefined : makePool(cfg);
-    const metrics = makeHttpStats(pool);
+    const metrics = makeHttpStats(pool, adaptiveLimiter);
 
     const run: HttpClientFn = (req0) => {
         const req = normalize(req0);
@@ -439,7 +472,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                 try {
                     if (adaptiveLimiter) {
                         const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
-                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal);
+                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
                     } else if (pool) {
                         const key = resolveHttpPoolKey(pool.keyResolver, req, url);
                         lease = await pool.acquire(key, linkedSignal.signal);
@@ -460,7 +493,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
 
                     // Release with latency for adaptive limiter
                     if (adaptiveLimiter && lease) {
-                        (lease as any).release(latencyMs);
+                        (lease as any).release(latencyMs, { status: res.status });
                         lease = undefined;
                     }
 
@@ -475,7 +508,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
                     linkedSignal.cleanup();
                     if (lease) {
                         if (adaptiveLimiter) {
-                            (lease as any).release(0);
+                            (lease as any).release(0, { error: true });
                         } else {
                             lease.release();
                         }
@@ -493,7 +526,11 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
         );
     };
 
-    return decorate(run, metrics.snapshot);
+    return decorate(run, metrics.snapshot, adaptiveLimiter ? {
+        adaptiveLimiter,
+        destroy: () => adaptiveLimiter.destroy(),
+        shutdown: () => adaptiveLimiter.shutdown(),
+    } : {});
 }
 
 export const withRetryStream =
@@ -517,7 +554,7 @@ export const withRetryStream =
           next(req),
           (e: HttpError) => {
             // Errores no-reintentables
-            if (e._tag === "Abort" || e._tag === "BadUrl" || e._tag === "PoolRejected") return asyncFail(e) as Out;
+            if (e._tag === "Abort" || e._tag === "BadUrl" || e._tag === "PoolRejected" || e._tag === "PoolClosed") return asyncFail(e) as Out;
 
             const canRetry =
               attempt < p.maxRetries &&

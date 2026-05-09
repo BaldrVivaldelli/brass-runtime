@@ -49,7 +49,7 @@ const result = await run(retry(effect, {
 For advanced use cases, use the Schedule type:
 
 ```ts
-import { recurs, exponential, jittered, elapsed, intersect, retryWithSchedule } from "brass-runtime";
+import { exponential, intersect, recurs, retryWithSchedule } from "brass-runtime";
 
 // Retry 5 times with exponential backoff, but stop after 30s total
 const policy = intersect(
@@ -63,14 +63,33 @@ const result = await run(retryWithSchedule(effect, policy));
 ### Schedule combinators
 
 ```ts
+import {
+  andThen,
+  elapsed,
+  exponential,
+  fibonacci,
+  fixed,
+  jitter,
+  jittered,
+  recurs,
+  take,
+  windowed,
+} from "brass-runtime";
+
 // Fixed delay between retries
 const fixed5s = fixed(5000);
 
 // Exponential: 100ms, 200ms, 400ms, 800ms... capped at 10s
 const expo = exponential(100, 10_000);
 
-// With jitter: random in [0, exponential_delay]
-const jitter = jittered(100, 10_000);
+// Fibonacci: 100ms, 100ms, 200ms, 300ms, 500ms... capped at 10s
+const fib = fibonacci(100, 10_000);
+
+// Full jitter: random in [0, exponential_delay]
+const fullJitter = jittered(100, 10_000);
+
+// Jitter any schedule by +/-20%
+const softJitter = jitter(expo, { factor: 0.2 });
 
 // Stop after N attempts
 const limited = take(expo, 5);
@@ -78,8 +97,26 @@ const limited = take(expo, 5);
 // Stop after elapsed time
 const budgeted = intersect(expo, elapsed(30_000));
 
+// Reset schedule state when the burst window expires
+const rolling = windowed(recurs(3), 60_000);
+
 // First use fast retries, then switch to slow
 const staged = andThen(take(fixed(100), 3), exponential(1000, 30_000));
+```
+
+Schedules also plug into HTTP retry middleware, so retry, polling, and
+supervisor restarts can share the same timing model:
+
+```ts
+import { exponential, jitter } from "brass-runtime";
+import { withRetry } from "brass-runtime/http";
+
+const retry = withRetry({
+  maxRetries: 5,
+  baseDelayMs: 100,
+  maxDelayMs: 5_000,
+  schedule: jitter(exponential(100, 5_000), { factor: 0.2 }),
+});
 ```
 
 ### Repeat (not just retry)

@@ -1,14 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Runtime } from "../../runtime/runtime";
-import { collectStream, fromArray } from "../stream";
+import { collectStream, fromArray, fromPull, uncons } from "../stream";
 import { debounce, drop, take, throttle } from "../operators";
 import { bounded } from "../queue";
+import { async, asyncSucceed } from "../../types/asyncEffect";
 
 const rt = Runtime.make({});
 const run = <A>(effect: any) => rt.toPromise(effect) as Promise<A>;
 const wait = () => new Promise((resolve) => setImmediate(resolve));
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -30,6 +32,27 @@ describe("stream operators edge coverage", () => {
   it("debounces synchronous streams to the last value and handles empty streams", async () => {
     await expect(run(collectStream(debounce(fromArray([1, 2, 3]), 1)))).resolves.toEqual([3]);
     await expect(run(collectStream(debounce(fromArray<number>([]), 1)))).resolves.toEqual([]);
+  });
+
+  it("debounce emits on timer and clears timers when cancelled", async () => {
+    vi.useFakeTimers();
+
+    const pendingTail = fromPull(async(() => () => undefined));
+    const source = fromPull(asyncSucceed([1, pendingTail] as any));
+    const firstPull = run<any>(uncons(debounce(source, 10)));
+
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(firstPull).resolves.toMatchObject([1, expect.any(Object)]);
+
+    const never = rt.fork(uncons(debounce(fromPull(async(() => () => undefined)), 10)) as any);
+    await vi.advanceTimersByTimeAsync(1);
+    never.interrupt();
+    await new Promise<void>((resolve) => never.join((exit) => {
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+      resolve();
+    }));
+
+    vi.useRealTimers();
   });
 });
 

@@ -6,15 +6,18 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 
 - **Lazy**: no se ejecuta nada hasta “correr” el effect.
 - **Cancelable**: la interrupción del fiber / effect cancela `fetch` vía `AbortController` (usando `fromPromiseAbortable`).
-- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`httpClient`, `makeHttpClient`, `httpClientWithMeta`, streaming).
+- **Componible**: un *wire client* simple (`makeHttp`) + helpers (`makeDefaultHttpClient`, `httpClient`, `makeHttpClient`, `httpClientWithMeta`, streaming).
 - **Sin magia**: los tipos principales son chicos y fáciles de debuggear.
 
 ---
 
 ## Qué API usar
 
-- `httpClient`: opción recomendada para consumo normal, con helpers `getText`, `getJson`, `postJson`, retry y `.toPromise`.
-- `makeHttpClient` / `makeLifecycleClient`: opción recomendada para clientes de producción que necesitan cache, dedup, prioridad, retry, eventos, stats o `cancelAll`.
+- `makeDefaultHttpClient`: opción recomendada para consumo normal. Integra helpers `getText`, `getJson`, `postJson` con lifecycle, retry, dedup, cache segura, prioridad, adaptive concurrency, compression, stats y `cancelAll`.
+- `s` / `schema`: validación JSON sin dependencias externas, integrada con `getJson` y `postJson`.
+- `httpClientBuilder`: builder discoverable para presets, headers, lifecycle, compression y middleware.
+- `httpClient`: helper liviano para consumo normal cuando no necesitás lifecycle integrado.
+- `makeHttpClient` / `makeLifecycleClient`: opción lower-level para componer cache, dedup, prioridad, retry, eventos, stats o `cancelAll` manualmente.
 - `makeHttp` / `makeHttpStream`: wire layer para middlewares, tests y casos avanzados.
 - `httpClientWithMeta`: helper de compatibilidad cuando querés respuesta + metadata.
 
@@ -25,7 +28,7 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 Este módulo se exporta desde `src/http/index.ts`:
 
 ```ts
-import { httpClient, makeHttpClient, makeLifecycleClient, makeHttp } from "../http";
+import { makeDefaultHttpClient, httpClient, makeHttpClient, makeLifecycleClient, makeHttp } from "../http";
 ```
 
 > En Node necesitás una versión con `fetch` global (Node 18+), o un polyfill.
@@ -88,11 +91,13 @@ const r = await http.getJson<Post>("/posts/1").toPromise({});
 ## Uso rápido (JSONPlaceholder)
 
 ```ts
-import { httpClient } from "../http";
+import { makeDefaultHttpClient } from "../http";
 
 type Post = { userId: number; id: number; title: string; body: string };
 
-const http = httpClient({ baseUrl: "https://jsonplaceholder.typicode.com" });
+const http = makeDefaultHttpClient({
+  baseUrl: "https://jsonplaceholder.typicode.com",
+});
 
 // GET JSON
 const r1 = await http.getJson<Post>("/posts/1").toPromise({});
@@ -109,6 +114,242 @@ const wire = await http
 
 console.log(wire.status, wire.bodyText);
 ```
+
+El preset por defecto (`default`) prende timeout, dedup, priority, retry,
+adaptive limiter `aggressive`, cache para métodos seguros y response
+compression. Si querés evitar cache por default, usá `preset: "balanced"`; si
+querés solo wire + DX, usá `preset: "minimal"`.
+
+El adaptive limiter mantiene estado por key con TTL (`stateTtlMs`), probe con
+jitter (`probeJitterRatio`), warmup explícito (`warmupRequests`), slow-start
+recovery y `headroomStrategy` fijo/proporcional/custom. También soporta
+`baselineStrategy` (`"min"`, `"p5"`, `"ema-low"`), cooldown de decreases con
+`decreaseCooldownSamples`, percentiles con decay (`windowDecayFactor`),
+multi-signal gradient con `errorWeight`, queue interna por prioridad
+(`queueStrategy`) con load shedding por eviction (`queueLoadShedding`),
+backoff hints en `PoolRejected.retryAfterMs`, historial consultable con
+`history(key)`, y diagnósticos de utilization/throughput/error rate en
+`stats()`, `snapshot()` y `dump()`.
+`makeHttp` expone `shutdown()` cuando el limiter está activo para limpiar
+timers, rechazar waiters pendientes y liberar state en tests o shutdown
+graceful.
+Los presets públicos del limiter son `conservative`, `balanced` y
+`aggressive`; podés usarlos con `{ preset: "balanced", maxLimit: 128 }`,
+`makeAdaptiveLimiterConfig("balanced", overrides)` o desde el builder con
+`.balancedLimiter(overrides)`.
+
+### JSON con schema propio
+
+No hay dependencia en Zod, Valibot ni similares. `brass-runtime/schema` trae
+una DSL chica, y HTTP reexporta `s` por comodidad:
+
+```ts
+import { makeDefaultHttpClient, s } from "brass-runtime/http";
+
+const User = s.object({
+  id: s.int(),
+  name: s.nonEmptyString(),
+  email: s.email(),
+  role: s.enum(["admin", "user"] as const).optional(),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+});
+
+const res = await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
+console.log(res.body.name);
+```
+
+`postJson` también puede validar el body antes de tocar la red:
+
+```ts
+const CreateUser = s.object({
+  name: s.nonEmptyString(),
+  email: s.email(),
+});
+
+await http.postJson(
+  "/users",
+  { name: "Ada" },
+  { bodySchema: CreateUser, schema: User }
+).unsafeRunPromise();
+```
+
+Si `bodySchema` falla, el effect falla con `phase: "request"` y no llama a
+`fetch`. El tipo del body también se infiere desde `bodySchema`.
+
+Los errores comunes se pueden manejar con helpers:
+
+```ts
+import { formatHttpError, isValidationError, matchHttpError } from "brass-runtime/http";
+
+try {
+  await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
+} catch (error) {
+  if (isValidationError(error)) console.error(error.issues);
+  console.error(formatHttpError(error));
+  matchHttpError(error, {
+    Timeout: (err) => console.error(err.timeoutMs),
+    PoolClosed: (err) => console.error(err.key),
+  });
+}
+```
+
+También podés usarla fuera de HTTP:
+
+```ts
+import { s } from "brass-runtime/schema";
+
+const Config = s.object({ port: s.int({ min: 1 }), callbackUrl: s.url() });
+const parsed = Config.parse({ port: 3000, callbackUrl: "https://example.com/cb" });
+```
+
+Si el JSON no parsea o no matchea el schema, el effect falla con:
+
+```ts
+{ _tag: "ValidationError", message, body, issues }
+```
+
+Esto evita tener un wrapper de `fetch` más un validador externo pegado a mano:
+schemas de response, schemas de request body, config validation, retry,
+compression, cancelación y observability corren en el mismo pipeline lazy.
+
+## HTTP server MVP
+
+El subpath HTTP también incluye un server pequeño para Node. El router ejecuta
+handlers como `Async`, valida `params`, `query`, `body` y `response` con el
+schema first-party, compone middleware effect-based, y el adapter puede registrar
+metrics/spans/logs con `makeObservability`.
+
+```ts
+import {
+  json,
+  makeHttpRouter,
+  makeNodeHttpServer,
+  route,
+  s,
+} from "brass-runtime/http";
+import { makeObservability } from "brass-runtime/observability";
+import { Async, Runtime } from "brass-runtime/core";
+
+const UserParams = s.object({ id: s.nonEmptyString() });
+const UserResponse = s.object({ id: s.string(), ok: s.boolean() });
+
+const router = makeHttpRouter([
+  route("GET", "/users/:id", {
+    params: UserParams,
+    response: UserResponse,
+  }, (ctx) =>
+    Async.succeed(json({ id: ctx.params.id, ok: true }))),
+]);
+
+const obs = makeObservability({ logs: false });
+const runtime = new Runtime({ env: {} });
+const server = await runtime.toPromise(makeNodeHttpServer({
+  router,
+  observability: obs,
+  port: 3000,
+}));
+
+console.log(server.url());
+await server.close();
+```
+
+Los params también se infieren desde el path aunque no declares schema:
+
+```ts
+route("GET", "/users/:id/books/:bookId", (ctx) =>
+  Async.succeed(json({
+    userId: ctx.params.id,
+    bookId: ctx.params.bookId,
+  }))
+);
+```
+
+`makeNodeHttpServer` starts the Node server as an effect. The resource variant
+`makeNodeHttpServerResource` closes it during release with a schedule-driven
+graceful shutdown poll, and will force-close connections after the configured
+deadline.
+Para un lifecycle más declarativo, el router expone `.listen()` como
+`Resource`:
+
+```ts
+await runtime.toPromise(
+  router.listen({
+    host: "127.0.0.1",
+    port: 3000,
+    observability: obs,
+  }).use((server) =>
+    Async.succeed(console.log(server.url()))
+  )
+);
+```
+
+Los probes de runtime/readiness se montan como rutas normales y reutilizan el
+modelo de observability health:
+
+```ts
+import {
+  makeHttpRouter,
+  makeRuntimeHealthRoute,
+  makeRuntimeReadinessRoute,
+} from "brass-runtime/http";
+
+const router = makeHttpRouter([
+  makeRuntimeHealthRoute({ runtime, registry: runtime.registry }),
+  makeRuntimeReadinessRoute({
+    runtime,
+    registry: runtime.registry,
+    adaptiveLimiters: { api: limiter },
+    readiness: { failOnDegraded: true },
+  }),
+]);
+```
+
+### Builder pattern
+
+```ts
+import { httpClientBuilder } from "brass-runtime/http";
+
+const http = httpClientBuilder()
+  .baseUrl("https://api.example.com")
+  .balanced()
+  .balancedLimiter({ maxLimit: 128 })
+  .header("authorization", `Bearer ${token}`)
+  .cache({ ttlSeconds: 30, maxEntries: 256 })
+  .retry({ maxRetries: 2, baseDelayMs: 100, maxDelayMs: 1_000 })
+  .build();
+```
+
+### Helpers de testing
+
+```ts
+import {
+  makeJsonHttpResponse,
+  makeMockHttpClient,
+  runHttpEffect,
+} from "brass-runtime/http/testing";
+
+const mock = makeMockHttpClient((req) => makeJsonHttpResponse({ url: req.url }));
+const res = await runHttpEffect(mock({ method: "GET", url: "/users/1" }));
+```
+
+Observability, auth u otros cross-cutting concerns entran por el mismo punto:
+
+```ts
+import { makeDefaultHttpClient } from "../http";
+import { withHttpObservability } from "../observability";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  middleware: [withHttpObservability(obs)],
+});
+```
+
+Si el cliente tiene adaptive limiter, `withHttpObservability` emite gauges de
+limit, in-flight, queue depth, utilization, error rate, throughput y rejection
+rate, y agrega el mismo snapshot a los eventos del span HTTP.
 
 ---
 

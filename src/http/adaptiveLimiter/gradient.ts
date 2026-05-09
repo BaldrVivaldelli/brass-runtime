@@ -13,8 +13,12 @@ export function computeGradient(minLatency: number, currentLatency: number): num
 /**
  * Computes the new concurrency limit based on the gradient.
  *
- * - If gradient < 1.0: newLimit = floor(currentLimit * gradient)
- * - If gradient >= 1.0: newLimit = currentLimit + headroom
+ * - If gradient < decreaseThreshold: decrease toward `currentLimit * gradient`
+ * - If gradient >= increaseThreshold: newLimit = currentLimit + headroom
+ * - Otherwise: hold the current limit
+ *
+ * Decreases are capped by `maxDecreaseRatio` so a single noisy latency sample
+ * cannot collapse concurrency.
  *
  * The result is clamped to [minBound, maxBound].
  */
@@ -24,12 +28,24 @@ export function computeNewLimit(
   headroom: number,
   minBound: number,
   maxBound: number,
+  options: {
+    readonly decreaseThreshold?: number;
+    readonly increaseThreshold?: number;
+    readonly maxDecreaseRatio?: number;
+  } = {},
 ): number {
+  const decreaseThreshold = options.decreaseThreshold ?? 1.0;
+  const increaseThreshold = options.increaseThreshold ?? 1.0;
+  const maxDecreaseRatio = options.maxDecreaseRatio ?? 1.0;
   let newLimit: number;
-  if (gradient < 1.0) {
-    newLimit = Math.floor(currentLimit * gradient);
-  } else {
+  if (gradient < decreaseThreshold) {
+    const rawLimit = Math.floor(currentLimit * gradient);
+    const maxDecrease = Math.max(1, Math.floor(currentLimit * maxDecreaseRatio));
+    newLimit = Math.max(rawLimit, currentLimit - maxDecrease);
+  } else if (gradient >= increaseThreshold) {
     newLimit = currentLimit + headroom;
+  } else {
+    newLimit = currentLimit;
   }
   return Math.max(minBound, Math.min(maxBound, newLimit));
 }

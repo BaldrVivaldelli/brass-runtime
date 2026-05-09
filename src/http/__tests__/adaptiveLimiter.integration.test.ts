@@ -49,6 +49,36 @@ describe("AdaptiveLimiter integration tests", () => {
       expect(fetchMock).toHaveBeenCalledTimes(1);
     });
 
+    it("exposes adaptive limiter stats through the HTTP client snapshot", async () => {
+      const fetchMock = mockFetch(200, "stats", 5);
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = makeHttp({
+        baseUrl: "https://api.example.com",
+        adaptiveLimiter: {
+          initialLimit: 4,
+          maxLimit: 4,
+          windowSize: 10,
+        },
+      });
+
+      expect(client.stats().adaptiveLimiter).toMatchObject({
+        limit: 4,
+        inFlight: 0,
+        queueDepth: 0,
+      });
+
+      const rt = Runtime.make({});
+      await rt.toPromise(client({ method: "GET", url: "/stats" }));
+
+      expect(client.stats().adaptiveLimiter).toMatchObject({
+        limit: 4,
+        inFlight: 0,
+        queueDepth: 0,
+        windowSize: 1,
+      });
+    });
+
     it("multiple concurrent requests are limited by adaptive limiter", async () => {
       let concurrent = 0;
       let maxConcurrent = 0;
@@ -84,6 +114,36 @@ describe("AdaptiveLimiter integration tests", () => {
       results.forEach((r) => expect(r.status).toBe(200));
       // Max concurrent should be limited to 2
       expect(maxConcurrent).toBeLessThanOrEqual(2);
+    });
+
+    it("feeds HTTP 5xx statuses into the adaptive error signal", async () => {
+      const fetchMock = mockFetch(500, "fail", 1);
+      vi.stubGlobal("fetch", fetchMock);
+
+      const client = makeHttp({
+        baseUrl: "https://api.example.com",
+        adaptiveLimiter: {
+          initialLimit: 10,
+          minLimit: 1,
+          maxLimit: 10,
+          minSamples: 2,
+          errorWeight: 1,
+          errorSmoothingFactor: 1,
+          smoothingFactor: 1,
+          probeInterval: 1000,
+          slowStartRecovery: false,
+        },
+      });
+
+      const rt = Runtime.make({});
+      await rt.toPromise(client({ method: "GET", url: "/first" }));
+      await rt.toPromise(client({ method: "GET", url: "/second" }));
+
+      expect(client.stats().adaptiveLimiter).toMatchObject({
+        errorRate: 1,
+        gradient: 0,
+      });
+      expect(client.stats().adaptiveLimiter!.limit).toBeLessThan(10);
     });
   });
 
@@ -162,6 +222,7 @@ describe("AdaptiveLimiter integration tests", () => {
         minLimit: 1,
         smoothingFactor: 1.0,
         windowSize: 10,
+        minSamples: 2,
         probeInterval: 100,
         onLimitChange: (e) => events.push(e),
       });
@@ -189,6 +250,8 @@ describe("AdaptiveLimiter integration tests", () => {
         previousLimit: expect.any(Number),
         newLimit: expect.any(Number),
         gradient: expect.any(Number),
+        latencyGradient: expect.any(Number),
+        errorRate: expect.any(Number),
         smoothedLatency: expect.any(Number),
         minLatency: expect.any(Number),
         timestamp: expect.any(Number),

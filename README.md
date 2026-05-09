@@ -18,6 +18,10 @@ npm i brass-runtime
 
 **HTTP client** — lazy/cancelable requests with a full middleware pipeline: adaptive concurrency, compression, batching, connection pre-warming, caching, deduplication, priority scheduling, and retry with backoff.
 
+**Schema validation** — dependency-free runtime schemas for JSON, config, and protocol boundaries, with typed inference and path-rich validation issues.
+
+**Observability export** — Prometheus metrics, OTLP metrics/traces/logs, structured logging, W3C trace-context propagation, request adapters, sampling, redaction, bounded exporters, and production flush/shutdown controls.
+
 **WASM engine** — optional Rust/WASM-backed state machines for strict scheduling and bounded queues.
 
 **Brass Agent** — experimental CLI coding agent with workspace inspection, LLM integration, and VS Code extension.
@@ -45,17 +49,112 @@ const runtime = Runtime.make({});
 const value = await runtime.toPromise(succeed(42));
 ```
 
-### HTTP client with lifecycle middleware
+### Recommended HTTP client
 
 ```ts
-import { makeLifecycleClient } from "brass-runtime/http";
+import { makeDefaultHttpClient, s } from "brass-runtime/http";
 
-const client = makeLifecycleClient({
+const User = s.object({
+  id: s.number({ int: true }),
+  name: s.string({ minLength: 1 }),
+  role: s.enum(["admin", "user"] as const).optional(),
+});
+
+const http = makeDefaultHttpClient({
   baseUrl: "https://api.example.com",
-  cache: { ttlSeconds: 60, maxEntries: 512 },
-  dedup: {},
-  priority: { concurrency: 8 },
-  retry: { maxAttempts: 3, baseDelayMs: 200 },
+  headers: { accept: "application/json" },
+});
+
+const user = await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
+
+console.log(user.body.name);
+console.log(http.stats());
+console.log(http.compression?.stats());
+```
+
+`makeDefaultHttpClient` is the batteries-included entrypoint: timeout,
+deduplication, priority scheduling, retry, adaptive concurrency, safe-method
+response cache, decompression, stats, `cancelAll`, and JSON/text helpers. Use
+`preset: "balanced"` to skip the default cache, or `preset: "minimal"` for a
+cheap wire client with the same helper API.
+
+The HTTP stack is meant to replace the usual `fetch` wrapper plus Zod/Valibot
+glue: schemas are dependency-free, responses and request bodies are validated in
+the same effect, config validation fails at construction time, and the client
+still owns cancellation, retries, compression, observability, and adaptive
+limits as one pipeline.
+
+The default adaptive limiter uses the `aggressive` preset: warmup sample floor,
+P5 baseline, error-rate signal, priority-aware queueing, jittered probes,
+proportional headroom, capped decreases, and TTL-evicted per-key state.
+Call `shutdown()` for explicit cleanup.
+
+The same schema DSL is available outside HTTP:
+
+```ts
+import { Schema } from "brass-runtime/schema";
+
+const Config = Schema.object({
+  port: Schema.int({ min: 1 }),
+  callbackUrl: Schema.url(),
+});
+
+const config = Config.parse({ port: 3000, callbackUrl: "https://example.com/cb" });
+```
+
+Schemas can validate request bodies before the HTTP request is sent:
+
+```ts
+const CreateUser = Schema.object({
+  name: Schema.string({ minLength: 1 }),
+});
+
+await http.postJson(
+  "/users",
+  { name: "Ada" },
+  { bodySchema: CreateUser, schema: User }
+).unsafeRunPromise();
+```
+
+The same validation machinery checks runtime, HTTP, and observability configs
+at construction time, so invalid values fail with field paths like
+`$.otlp.pipeline.batchSize` instead of surfacing later as ambiguous behavior.
+
+### Discoverable HTTP builder
+
+```ts
+import { httpClientBuilder } from "brass-runtime/http";
+
+declare const token: string;
+
+const http = httpClientBuilder()
+  .baseUrl("https://api.example.com")
+  .balanced()
+  .balancedLimiter({ maxLimit: 128 })
+  .header("authorization", `Bearer ${token}`)
+  .cache({ ttlSeconds: 30, maxEntries: 512 })
+  .retry({ maxRetries: 2, baseDelayMs: 100, maxDelayMs: 1_000 })
+  .build();
+```
+
+### HTTP test helpers
+
+```ts
+import {
+  makeJsonHttpResponse,
+  makeMockHttpClient,
+  runHttpEffect,
+} from "brass-runtime/http/testing";
+
+const mock = makeMockHttpClient((req) => makeJsonHttpResponse({ url: req.url }));
+const response = await runHttpEffect(mock({ method: "GET", url: "/users/1" }));
+```
+
+Domain-specific layers still fit in the same config:
+
+```ts
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
   batch: {
     windowMs: 50,
     maxBatchSize: 20,
@@ -67,24 +166,34 @@ const client = makeLifecycleClient({
   },
 });
 
-// All requests go through: dedup → batch → cache → retry → priority → wire
-const response = await runtime.toPromise(client({ method: "GET", url: "/users/1" }));
+const response = await http.getJson<User>("/users/1").unsafeRunPromise();
 ```
 
 ### Adaptive concurrency
 
 ```ts
-import { makeHttp } from "brass-runtime/http";
+import { makeAdaptiveLimiterConfig, makeHttp } from "brass-runtime/http";
 
 const http = makeHttp({
-  adaptiveLimiter: {
-    initialLimit: 10,
-    minLimit: 2,
+  adaptiveLimiter: makeAdaptiveLimiterConfig("balanced", {
     maxLimit: 100,
+    stateTtlMs: 300_000,
+    warmupRequests: 20,
+    minSamples: 25,
+    decreaseCooldownSamples: 3,
+    decreaseThreshold: 0.6,
+    maxDecreaseRatio: 0.15,
+    historySize: 64,
     onLimitChange: (event) => console.log(`limit: ${event.previousLimit} → ${event.newLimit}`),
-  },
+  }),
 });
+
+console.log(http.adaptiveLimiter?.dump());
+console.log(http.adaptiveLimiter?.history("https://api.example.com"));
+http.shutdown?.();
 ```
+
+More end-to-end examples live in [`docs/http-recipes.md`](docs/http-recipes.md).
 
 ### Connection pre-warming
 
@@ -110,6 +219,51 @@ const { middleware, stats } = makeCompressionMiddleware({ encodings: ["br", "gzi
 const client = baseClient.with(middleware);
 // Responses are transparently decompressed (gzip, brotli, deflate)
 ```
+
+### Production observability
+
+```ts
+import { Runtime, asyncSucceed } from "brass-runtime/core";
+import {
+  makeObservability,
+  runObservedHttpServerEffect,
+  withHttpObservability,
+} from "brass-runtime/observability";
+import { makeDefaultHttpClient } from "brass-runtime/http";
+
+const obs = makeObservability({
+  serviceName: "api",
+  logs: { minLevel: "info" },
+  sampling: { ratio: 0.25, respectRemoteSampled: true, forceSampleOnError: true },
+  redaction: {},
+  cardinality: { maxValuesPerLabel: 100 },
+  otlp: {
+    metricsUrl: "http://collector:4318/v1/metrics",
+    tracesUrl: "http://collector:4318/v1/traces",
+    logsUrl: "http://collector:4318/v1/logs",
+  },
+  flushIntervalMs: 10_000,
+});
+
+const runtime = new Runtime({ env: obs.env, hooks: obs.hooks });
+const client = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  middleware: [withHttpObservability(obs)],
+});
+
+await runObservedHttpServerEffect(
+  obs,
+  { method: "GET", route: "/users/:id" },
+  asyncSucceed("ok")
+);
+await runtime.toPromise(client.getText("/health"));
+await obs.shutdown();
+```
+
+HTTP client observability automatically reads adaptive limiter diagnostics when
+the wrapped client owns a limiter, exposing gauges for current limit, queue
+depth, utilization, error rate, request/completion rate, rejection rate, and
+state count.
 
 ### Structured concurrency
 
@@ -143,7 +297,10 @@ const result = await runtime.toPromise(doubled.runCollect());
 |--------|---------|
 | `brass-runtime` | Core runtime: effects, fibers, scheduler, streams, layers |
 | `brass-runtime/core` | Stable core surface (preferred for new code) |
-| `brass-runtime/http` | HTTP client, lifecycle middleware, compression, batching, prewarm, adaptive limiter |
+| `brass-runtime/http` | Default HTTP client factory, lifecycle middleware, compression, batching, prewarm, adaptive limiter |
+| `brass-runtime/http/testing` | Dependency-free mock clients, mock fetch, response factories, and effect runner helpers |
+| `brass-runtime/schema` | Dependency-free runtime schema DSL with type inference |
+| `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
 | `brass-runtime/agent` | Brass Agent core (experimental) |
 
 CLI: `brass-agent`
@@ -172,6 +329,10 @@ Each layer is independently optional. Set to `false` or omit to disable.
 | **Prewarm** | Proactive TCP+TLS connection establishment |
 
 All layers emit lifecycle events, track stats, and support cancellation.
+
+The recommended `makeDefaultHttpClient` factory wires the default preset
+for you and accepts extra middleware, so observability can be attached with
+`middleware: [withHttpObservability(obs)]` without coupling HTTP to exporters.
 
 ---
 
@@ -211,10 +372,19 @@ Docs: [Install](./docs/agent-install-and-configure.md) · [CLI](./docs/agent-cli
 ## Testing
 
 ```bash
-npm test              # 1198 tests via vitest
+npm test              # vitest suite
 npm run test:types    # TypeScript type checking
 npm run test:coverage # coverage with baseline gate
-npm run benchmark     # runtime & HTTP lifecycle benchmarks
+npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
+npm run benchmark -- http-concurrent # HTTP compare mode variants
+node --expose-gc --import tsx src/benchmarks/runner.ts http-concurrent # HTTP memory/limiter diagnostics
+npm run benchmark:adaptive
+npm run benchmark:adaptive:soak
+npm run benchmark:http:budget
+npm run benchmark:http:soak
+npm run benchmark:observability
+npm run benchmark:observability:budget
+npm run smoke:observability:collector # requires local OTEL collector
 ```
 
 Property-based tests use `fast-check` with 100+ iterations per property. Each HTTP middleware has dedicated property tests verifying correctness invariants.
@@ -227,7 +397,10 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Architecture](./docs/ARCHITECTURE.md)
 - [Cancellation & Interruption](./docs/cancellation.md)
 - [Observability: Hooks & Tracing](./docs/observability.md)
+- [Observability framework examples](./docs/observability-framework-examples.md)
+- [Observability collector smoke](./docs/observability-collector-smoke.md)
 - [HTTP module](./docs/http.md)
+- [Production readiness](./docs/production-readiness.md)
 - [Streams guide](./docs/guides/streams.md)
 - [Testing guide](./docs/guides/testing.md)
 - [WASM engine](./docs/wasm-fiber-engine.md)
@@ -259,6 +432,9 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 ### HTTP
 
 - [x] Lazy, cancelable HTTP client
+- [x] Schema-validated JSON helpers
+- [x] Discoverable builder API
+- [x] Test helper subpath
 - [x] Lifecycle client with middleware composition
 - [x] Response cache (LRU + TTL + SWR)
 - [x] Request deduplication (ref-counted)
@@ -268,8 +444,29 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [x] Request batching (time-window coalesce/split)
 - [x] Connection pre-warming (probes, auto-refresh)
 - [x] Adaptive concurrency (gradient-based)
+- [x] Adaptive limiter presets, diagnostics, observability gauges, and soak benchmark
 - [x] Circuit breaker
 - [x] Tracing & validation
+
+### Schema
+
+- [x] Dependency-free schema DSL
+- [x] Type inference via `InferSchema`
+- [x] Object, array, record, union, enum, literal, custom schemas
+- [x] Optional, nullable, refine, transform
+- [x] Path-rich validation issues
+
+### Observability
+
+- [x] Runtime metrics sink and Prometheus exporter
+- [x] OTLP JSON/HTTP exporters for metrics, traces, and logs
+- [x] Structured logging with context propagation and redaction
+- [x] W3C trace-context extract/inject helpers
+- [x] Client and server HTTP observability helpers
+- [x] Adaptive limiter metrics on HTTP client spans and Prometheus gauges
+- [x] Sampling, force-sample-on-error, and bounded trace retention
+- [x] Bounded exporter queues with retry, timeout, drop policy, and single-flight flush
+- [x] Fetch/Node/Express/Fastify/Nest-style examples and collector smoke script
 
 ---
 

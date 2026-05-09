@@ -1,4 +1,17 @@
-import { TraceContext } from "./contex";
+import { Baggage, TraceContext } from "./contex";
+
+export type TraceSamplingInput = {
+    readonly traceId: string;
+    readonly spanName?: string;
+    readonly parentSampled?: boolean;
+    readonly attributes?: Record<string, unknown>;
+};
+
+export type TraceSampler =
+    | ((input: TraceSamplingInput) => boolean)
+    | {
+        shouldSample(input: TraceSamplingInput): boolean;
+    };
 
 export interface Tracer {
     newTraceId(): string;
@@ -15,6 +28,10 @@ export type BrassEnv = {
   brass?: {
     tracer?: Tracer;
     traceSeed?: TraceContext;
+    baggage?: Baggage;
+    sampler?: TraceSampler;
+    respectRemoteSampled?: boolean;
+    forceSampleOnError?: boolean;
     childName?: (parentName?: string) => string | undefined;
   };
 };

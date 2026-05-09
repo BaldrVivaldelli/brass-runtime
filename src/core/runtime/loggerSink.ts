@@ -18,6 +18,7 @@ export function consoleJsonLogger(): RuntimeHooks {
         scopeId: ctx.scopeId,
         traceId: ctx.traceId,
         spanId: ctx.spanId,
+        parentSpanId: ctx.parentSpanId,
         ...(ev.fields ?? {}),
       };
 

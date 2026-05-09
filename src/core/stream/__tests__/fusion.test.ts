@@ -17,7 +17,8 @@ import {
   deserializeFusedPipeline,
   SerializedFusedPipeline,
 } from "../fusion";
-import { collectStream, fromArray, emptyStream } from "../stream";
+import { collectStream, fromArray, emptyStream, emitStream, fromPull } from "../stream";
+import { async, asyncSucceed } from "../../types/asyncEffect";
 import { mapP, filterP, takeP, dropP, andThen, via } from "../pipeline";
 import { Runtime } from "../../runtime/runtime";
 import type { ZPipeline } from "../pipeline";
@@ -82,6 +83,49 @@ describe("FusionEngine types and initState", () => {
     state1.counters[0] = 5;
     const state2 = factory();
     expect(state2.counters).toEqual([0, 0]);
+  });
+});
+
+describe("applyFused slow-path coverage", () => {
+  it("applies fused steps to effectful streams, including skip and halt results", async () => {
+    const source = fromPull(asyncSucceed([1, fromArray([2, 3, 4])] as any));
+    const fused: FusedPipelineRepr<number, number> = {
+      _tag: "FusedPipeline",
+      initState: () => ({ counters: [] }),
+      stats: {
+        fusedSteps: 1,
+        steps: [{ kind: "filter" }],
+        hasTake: true,
+        hasDrop: false,
+      },
+      step: (value) => {
+        if (value === 1) return { tag: "skip" };
+        if (value === 4) return { tag: "halt" };
+        return { tag: "emit", value: value * 10 };
+      },
+    };
+
+    await expect(run(collectStream(applyFused(source, fused)))).resolves.toEqual([20, 30]);
+  });
+
+  it("falls back to the slow path for non-synchronous emits and returns null for unknown serialized steps", async () => {
+    const source = emitStream(async((_env, cb) => {
+      queueMicrotask(() => cb({ _tag: "Success", value: 2 }));
+    }));
+    const fused: FusedPipelineRepr<number, number> = {
+      _tag: "FusedPipeline",
+      initState: () => ({ counters: [] }),
+      stats: {
+        fusedSteps: 1,
+        steps: [{ kind: "map" }],
+        hasTake: false,
+        hasDrop: false,
+      },
+      step: (value) => ({ tag: "emit", value: value + 1 }),
+    };
+
+    await expect(run(collectStream(applyFused(source, fused)))).resolves.toEqual([3]);
+    expect(deserializeFusedPipeline({ version: 1, steps: [{ kind: "unknown" } as any] })).toBeNull();
   });
 });
 

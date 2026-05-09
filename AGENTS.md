@@ -25,23 +25,44 @@ npm run context -- --module http
 
 - Core describes and interprets effects: `src/core/types`, `src/core/runtime`.
 - Streams are library code on top of core: `src/core/stream`.
+- Schema is a tiny first-party validation module: `src/schema`.
 - HTTP is a high-level module on top of effects/fibers: `src/http`.
 - Brass Agent is an application/library layer: `src/agent`.
 - WASM is an optional strict engine/accelerator: `crates/brass-runtime-wasm-engine`, `wasm/pkg`.
 
 Core must not know about HTTP, agent, VS Code, or docs tooling.
 
+## Schema module
+
+`src/schema` is first-party and dependency-free by design. Do not add Zod,
+Valibot, Yup, Ajv, or other validation dependencies for package runtime
+validation unless the task explicitly changes that product decision.
+
+Key public exports:
+
+- `Schema` / `s`: schema builders.
+- `InferSchema`: static inference from first-party schemas.
+- Common shortcuts include `email`, `url`, `uuid`, `int`, `positive`,
+  `nonEmptyString`, and `dateIso`.
+- `validateValue`, `formatIssues`: reusable validation helpers.
+- `parseConfig`, `ConfigValidationError`: construction-time config validation.
+
+Schema is exported as `brass-runtime/schema` and re-exported through HTTP
+validation for the HTTP DX path.
+
 ## HTTP module structure
 
 The HTTP module (`src/http`) is composed of several sub-modules:
 
 - **Wire client** (`client.ts`, `httpClient.ts`): Low-level fetch wrapper with pool, timeout, typed errors.
+- **Default client** (`defaultClient.ts`): Recommended one-stop HTTP factory with DX helpers, lifecycle defaults, compression, stats, and middleware integration.
 - **Lifecycle** (`lifecycle/`): Middleware composition — dedup, batch, cache, priority, retry, stats.
 - **Compression** (`compression/`): Response decompression middleware (gzip, br, deflate) with environment detection.
 - **Adaptive Limiter** (`adaptiveLimiter/`): Gradient-based adaptive concurrency control per-key.
 - **Prewarm** (`prewarm/`): Connection pre-warming with probes, auto-refresh, and lifecycle integration.
 - **Retry** (`retry/`): Retry middleware with backoff, circuit breaker awareness, priority boost.
 - **Optics** (`optics/`): Response lenses and transformers.
+- **Schema validation** (`validation.ts`): First-party JSON response/request validation integrated with DX helpers.
 
 ### Lifecycle middleware stack (innermost to outermost)
 
@@ -50,6 +71,9 @@ Wire → Priority → Retry → Cache → Batch → Dedup
 ```
 
 Each layer is independently optional. Set to `false` or omit to disable.
+`makeDefaultHttpClient` applies preset defaults over this lifecycle stack,
+adds response compression outside it, and accepts user middleware such as
+observability as the outermost layer.
 
 ### Key patterns
 
@@ -58,6 +82,34 @@ Each layer is independently optional. Set to `false` or omit to disable.
 - Cancellation is ref-counted: cancel functions returned by `register` propagate through the stack.
 - Stats are tracked via `LifecycleStatsTracker` and exposed as frozen snapshots.
 - Events are emitted via `onEvent` callbacks threaded through config.
+- Default HTTP adaptive limiter settings are conservative: warmup samples,
+  deadband, capped decreases, and non-1 minimum limits in user-facing presets.
+  It also supports per-key TTL eviction, probe jitter, explicit warmup,
+  slow-start recovery, proportional/custom headroom, circuit-breaker feedback,
+  and explicit `destroy()`/`shutdown()` cleanup. Check adaptive stats before
+  treating low throughput as a memory leak.
+
+### HTTP + schema patterns
+
+- `getJson` and `postJson` accept `{ schema }` for runtime response validation.
+  The returned `HttpResponse.body` type is inferred from the schema.
+- `postJson` accepts `{ bodySchema }` to validate request bodies before calling
+  `fetch`; the body argument should be inferred from `bodySchema`. Body
+  validation failures are `ValidationError` with `phase: "request"` and must
+  not touch the network.
+- Response parse/schema failures are `ValidationError` with
+  `phase: "response"`.
+- Error helpers (`isHttpError`, `isValidationError`, `matchHttpError`,
+  `formatHttpError`) live in `src/http/errors.ts`.
+- Keep legacy custom validator callbacks compatible with the same validation
+  path; first-party schemas are preferred for new code.
+- Strip `schema`, `schemaName`, `bodySchema`, and `bodySchemaName` before
+  passing request init through to `fetch`.
+- Config validation uses the schema module at construction boundaries:
+  runtime options, HTTP client configs, lifecycle/default-client configs, and
+  observability options should fail with `ConfigValidationError` and clear field
+  paths when invalid.
+- Keep `docs/http-recipes.md` current when adding high-level HTTP workflows.
 
 ## Editing rules
 
@@ -92,6 +144,7 @@ The repo intentionally contains multiple products:
 
 - Runtime package exported at `brass-runtime`.
 - HTTP subpath exported at `brass-runtime/http`.
+- Schema subpath exported at `brass-runtime/schema`.
 - Agent subpath and CLI exported at `brass-runtime/agent` and `brass-agent`.
 - Rust/WASM engine sources under `crates/`.
 
@@ -102,6 +155,7 @@ the same change.
 
 | Module | Path | Key export | Purpose |
 |--------|------|-----------|---------|
+| Default Client | `src/http/defaultClient.ts` | `makeDefaultHttpClient` | One-stop HTTP client with default presets and JSON/text helpers |
 | Compression | `src/http/compression/` | `makeCompressionMiddleware` | Transparent gzip/br/deflate decompression |
 | Batching | `src/http/lifecycle/batch.ts` | `withBatch` | Time-window request coalescing with split |
 | Prewarm | `src/http/prewarm/` | `makePrewarmManager` | Proactive TCP+TLS connection establishment |
@@ -118,4 +172,3 @@ the same change.
 - Use `registerHttpEffect` from `src/http/effectRunner.ts` to run `Async` effects in tests.
 - Mock `globalThis.fetch` for integration tests involving the wire client.
 - Each middleware has its own test directory close to the source.
-

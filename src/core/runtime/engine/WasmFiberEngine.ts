@@ -9,7 +9,11 @@ import type { EngineEvent, FiberEngine, FiberEngineKind, FiberEngineStats, WasmB
 import { EngineFiberHandle } from "./FiberHandleImpl";
 import { WasmPackFiberBridge } from "./bridge/WasmPackFiberBridge";
 import { WasmFiberRegistryBridge } from "./bridge/WasmFiberRegistryBridge";
-import { makeFiberReadyQueue, type FiberReadyQueue } from "./bridge/WasmFiberReadyQueueBridge";
+import {
+  makeFiberReadyQueue,
+  type FiberReadyQueue,
+  type FiberReadyQueueOptions,
+} from "./bridge/WasmFiberReadyQueueBridge";
 import { makeWasmTimerWheel, type WasmTimerWheelBridge, type TimerEvent } from "./bridge/WasmTimerWheelBridge";
 
 type WasmFiberState<R, E = unknown, A = unknown> = {
@@ -33,6 +37,7 @@ type PendingResume =
 export type WasmFiberEngineOptions = {
   readonly bridge?: WasmBridge;
   readonly modulePath?: string;
+  readonly readyQueue?: Omit<FiberReadyQueueOptions, "engine">;
 };
 
 const DEFAULT_BUDGET = 4096;
@@ -67,7 +72,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     }
     this.kind = this.bridge.kind;
     this.fiberRegistry = new WasmFiberRegistryBridge();
-    this.readyQueue = makeFiberReadyQueue({ engine: "wasm" });
+    this.readyQueue = makeFiberReadyQueue({ engine: "wasm", ...options.readyQueue });
     this.timerWheel = makeWasmTimerWheel({ onExpired: (events) => this.onTimerExpired(events) });
   }
 

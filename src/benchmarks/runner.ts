@@ -39,6 +39,14 @@ export interface BenchmarkResult {
     p95: number;
     p99: number;
   };
+  /** Optional suite-specific measurements, for example memory counters. */
+  details?: Record<string, unknown>;
+  /** Optional derived throughput based on work units completed per benchmark iteration. */
+  throughput?: {
+    unit: string;
+    unitsPerRun: number;
+    perSecond: number;
+  };
 }
 
 export interface BenchmarkSuite {
@@ -59,7 +67,7 @@ export interface BenchmarkReport {
 // Benchmark definition helpers (used by individual bench files)
 // ---------------------------------------------------------------------------
 
-export type BenchFn = () => void | Promise<void>;
+export type BenchFn = () => void | Promise<void> | Record<string, unknown> | Promise<Record<string, unknown> | void>;
 
 export interface BenchmarkDef {
   name: string;
@@ -68,6 +76,10 @@ export interface BenchmarkDef {
   iterations?: number;
   /** Warmup iterations (not measured). Defaults to 50. */
   warmup?: number;
+  /** Number of work units completed by each measured benchmark iteration. */
+  unitsPerRun?: number;
+  /** Unit name for throughput display, for example "req", "task", or "item". */
+  unit?: string;
 }
 
 /**
@@ -82,18 +94,18 @@ export async function runBenchmark(def: BenchmarkDef): Promise<BenchmarkResult> 
 
   // Warmup
   for (let i = 0; i < warmup; i++) {
-    const r = def.fn();
-    if (r instanceof Promise) await r;
+    await runBenchFn(def.fn);
   }
 
   // Measured runs
   const samples: number[] = new Array(iterations);
+  let details: Record<string, unknown> | undefined;
 
   for (let i = 0; i < iterations; i++) {
     const start = performance.now();
-    const r = def.fn();
-    if (r instanceof Promise) await r;
+    const returnedDetails = await runBenchFn(def.fn);
     samples[i] = performance.now() - start;
+    if (returnedDetails) details = returnedDetails;
   }
 
   // Sort for percentile computation
@@ -101,17 +113,22 @@ export async function runBenchmark(def: BenchmarkDef): Promise<BenchmarkResult> 
 
   const totalMs = samples.reduce((s, v) => s + v, 0);
 
+  const perOpMs = totalMs / iterations;
+  const throughput = makeThroughput(def, details, perOpMs);
+
   return {
     operation: def.name,
     iterations,
     totalMs: round(totalMs),
-    perOpMs: round(totalMs / iterations),
+    perOpMs: round(perOpMs),
     percentiles: {
       p50: round(percentile(samples, 0.5)),
       p90: round(percentile(samples, 0.9)),
       p95: round(percentile(samples, 0.95)),
       p99: round(percentile(samples, 0.99)),
     },
+    ...(details ? { details } : {}),
+    ...(throughput ? { throughput } : {}),
   };
 }
 
@@ -127,6 +144,68 @@ function percentile(sorted: number[], p: number): number {
 
 function round(n: number): number {
   return Math.round(n * 1000) / 1000;
+}
+
+async function runBenchFn(fn: BenchFn): Promise<Record<string, unknown> | undefined> {
+  const value = fn();
+  const result = value instanceof Promise ? await value : value;
+  return isDetails(result) ? result : undefined;
+}
+
+function isDetails(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function makeThroughput(
+  def: BenchmarkDef,
+  details: Record<string, unknown> | undefined,
+  perOpMs: number
+): BenchmarkResult["throughput"] | undefined {
+  const units = def.unitsPerRun ?? readNumericDetail(details, "units");
+  const durationMs = readNumericDetail(details, "throughputDurationMs") ?? perOpMs;
+  if (units === undefined || units <= 0 || durationMs <= 0) return undefined;
+
+  const unit = def.unit ?? readStringDetail(details, "unit") ?? "op";
+  return {
+    unit,
+    unitsPerRun: units,
+    perSecond: round(units / (durationMs / 1000)),
+  };
+}
+
+function readNumericDetail(details: Record<string, unknown> | undefined, key: string): number | undefined {
+  const value = details?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function readStringDetail(details: Record<string, unknown> | undefined, key: string): string | undefined {
+  const value = details?.[key];
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function formatDetails(details: Record<string, unknown> | undefined): string {
+  if (!details) return "";
+  const entries = Object.entries(details)
+    .filter(([key]) => key !== "unit" && key !== "units" && key !== "throughputDurationMs")
+    .filter(([, value]) => value === null || ["string", "number", "boolean"].includes(typeof value))
+    .slice(0, 6)
+    .map(([key, value]) => `${key}=${formatDetailValue(value)}`);
+  return entries.length > 0 ? `  ${entries.join(" ")}` : "";
+}
+
+function formatThroughput(throughput: BenchmarkResult["throughput"]): string {
+  if (!throughput) return "";
+  return `  ${throughput.unit}/s=${formatRate(throughput.perSecond)}`;
+}
+
+function formatRate(value: number): string {
+  if (value >= 1_000_000) return `${round(value / 1_000_000)}M`;
+  if (value >= 1_000) return `${round(value / 1_000)}k`;
+  return String(round(value));
+}
+
+function formatDetailValue(value: unknown): string {
+  return typeof value === "number" ? String(round(value)) : String(value);
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +277,9 @@ async function main() {
         const status = r.perOpMs < 1 ? "✓" : "⚠";
         console.log(
           `  ${status} ${r.operation}: ${r.perOpMs}ms/op  (total ${r.totalMs}ms, ${r.iterations} iters)  ` +
-            `p50=${r.percentiles.p50}ms p99=${r.percentiles.p99}ms`
+            `p50=${r.percentiles.p50}ms p99=${r.percentiles.p99}ms` +
+            formatThroughput(r.throughput) +
+            formatDetails(r.details)
         );
       }
       console.log();

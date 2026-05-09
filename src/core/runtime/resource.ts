@@ -142,6 +142,85 @@ export function ensuring<R, E, A>(
 }
 
 // ---------------------------------------------------------------------------
+// Resource — composable acquire/use/release descriptor
+// ---------------------------------------------------------------------------
+
+/**
+ * A Resource describes a scoped value. It is acquired for each `use`, released
+ * in LIFO order, and can be composed with `map`, `flatMap`, and `zip`.
+ */
+export type Resource<R, E, A> = {
+  readonly _tag: "Resource";
+  readonly use: <R2, E2, B>(
+    body: (resource: A) => Async<R2, E2, B>
+  ) => Async<R & R2, E | E2, B>;
+  readonly map: <B>(f: (resource: A) => B) => Resource<R, E, B>;
+  readonly flatMap: <R2, E2, B>(
+    f: (resource: A) => Resource<R2, E2, B>
+  ) => Resource<R & R2, E | E2, B>;
+  readonly zip: <R2, E2, B>(
+    that: Resource<R2, E2, B>
+  ) => Resource<R & R2, E | E2, [A, B]>;
+};
+
+export function resource<R, E, A>(
+  acquire: Async<R, E, A>,
+  release: (resource: A, exit: Exit<any, any>) => Async<R, any, void>
+): Resource<R, E, A> {
+  return makeResourceFromUse((body) => bracket(acquire, body as any, release as any) as any);
+}
+
+export const makeResource = resource;
+
+export function resourceSucceed<A>(value: A): Resource<unknown, never, A> {
+  return makeResourceFromUse((body) => body(value));
+}
+
+export function resourceFromManaged<R, E, A>(m: Managed<R, E, A>): Resource<R, E, A> {
+  return makeResourceFromUse((body) => useManaged(m, body as any) as any);
+}
+
+export function useResource<R, E, A, R2, E2, B>(
+  res: Resource<R, E, A>,
+  body: (resource: A) => Async<R2, E2, B>
+): Async<R & R2, E | E2, B> {
+  return res.use(body);
+}
+
+export function resourceAll<R, E, Resources extends readonly any[]>(
+  resources: { [K in keyof Resources]: Resource<R, E, Resources[K]> }
+): Resource<R, E, Resources> {
+  const build = (index: number): Resource<R, E, any[]> => {
+    if (index >= resources.length) return resourceSucceed([]);
+    return resources[index]!.flatMap((head) =>
+      build(index + 1).map((tail) => [head, ...tail])
+    );
+  };
+  return build(0).map((values) => values as unknown as Resources);
+}
+
+export const Resource = Object.freeze({
+  make: resource,
+  succeed: resourceSucceed,
+  fromManaged: resourceFromManaged,
+  all: resourceAll,
+  use: useResource,
+});
+
+function makeResourceFromUse<R, E, A>(
+  use: Resource<R, E, A>["use"]
+): Resource<R, E, A> {
+  const self: Resource<R, E, A> = {
+    _tag: "Resource",
+    use,
+    map: (f) => makeResourceFromUse((body) => self.use((a) => body(f(a)))),
+    flatMap: (f) => makeResourceFromUse((body) => self.use((a) => f(a).use(body))),
+    zip: (that) => self.flatMap((a) => that.map((b) => [a, b] as [A, typeof b])),
+  };
+  return self;
+}
+
+// ---------------------------------------------------------------------------
 // Managed — a reusable resource descriptor
 // ---------------------------------------------------------------------------
 

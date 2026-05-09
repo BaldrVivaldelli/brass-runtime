@@ -1,5 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { bracket, ensuring, managed, useManaged, managedAll } from "../resource";
+import {
+  Resource,
+  bracket,
+  ensuring,
+  managed,
+  makeResource,
+  resourceAll,
+  useManaged,
+  useResource,
+  managedAll,
+} from "../resource";
 import { async, asyncFail, asyncFlatMap, asyncSucceed, unit } from "../../types/asyncEffect";
 import type { Async } from "../../types/asyncEffect";
 import { Exit } from "../../types/effect";
@@ -268,5 +278,98 @@ describe("managedAll", () => {
     expect(log).toContain("acquire:B-fail");
     expect(log).not.toContain("acquire:C");
     expect(log).toContain("release:A");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Resource
+// ---------------------------------------------------------------------------
+describe("Resource", () => {
+  it("composes with map/flatMap and releases in reverse acquisition order", async () => {
+    const log: string[] = [];
+    const connection = makeResource(
+      asyncSucceed("conn"),
+      (conn) => { log.push(`release:${conn}`); return unit(); },
+    );
+    const statement = (conn: string) => makeResource(
+      asyncSucceed(`${conn}:stmt`),
+      (stmt) => { log.push(`release:${stmt}`); return unit(); },
+    );
+
+    const program = connection
+      .flatMap((conn) => statement(conn))
+      .map((stmt) => `${stmt}:mapped`);
+
+    const result = await run(useResource(program, (stmt) => {
+      log.push(`use:${stmt}`);
+      return asyncSucceed(stmt.length);
+    }));
+
+    expect(result).toBe("conn:stmt:mapped".length);
+    expect(log).toEqual([
+      "use:conn:stmt:mapped",
+      "release:conn:stmt",
+      "release:conn",
+    ]);
+  });
+
+  it("releases every acquired resource when the body fails", async () => {
+    const log: string[] = [];
+    const first = Resource.make(
+      asyncSucceed("a"),
+      (value) => { log.push(`release:${value}`); return unit(); },
+    );
+    const second = Resource.make(
+      asyncSucceed("b"),
+      (value) => { log.push(`release:${value}`); return unit(); },
+    );
+
+    await expect(run(Resource.all([first, second] as const).use(() => asyncFail("boom"))))
+      .rejects
+      .toBe("boom");
+
+    expect(log).toEqual(["release:b", "release:a"]);
+  });
+
+  it("adapts existing Managed resources", async () => {
+    const log: string[] = [];
+    const m = managed(
+      asyncSucceed("managed"),
+      (value) => { log.push(`release:${value}`); return unit(); },
+    );
+
+    await expect(run(Resource.fromManaged(m).zip(Resource.succeed("value")).use(([left, right]) =>
+      asyncSucceed(`${left}:${right}`)
+    ))).resolves.toBe("managed:value");
+
+    expect(log).toEqual(["release:managed"]);
+  });
+
+  it("resourceAll acquires in order and releases in reverse", async () => {
+    const log: string[] = [];
+    const mk = (name: string) => makeResource(
+      async((_env, cb) => {
+        log.push(`acquire:${name}`);
+        cb(Exit.succeed(name));
+      }),
+      (value) => {
+        log.push(`release:${value}`);
+        return unit();
+      },
+    );
+
+    const result = await run(resourceAll([mk("a"), mk("b"), mk("c")] as const).use((values) =>
+      asyncSucceed(values.join(","))
+    ));
+
+    expect(result).toBe("a,b,c");
+    expect(log).toEqual([
+      "acquire:a",
+      "acquire:b",
+      "acquire:c",
+      "release:c",
+      "release:b",
+      "release:a",
+    ]);
   });
 });

@@ -28,11 +28,15 @@ export function ctxToObject(ctx: ContextNode): Record<string, JSONValue> {
     return out;
 }
 
+export type Baggage = Record<string, string>;
+
 export type TraceContext = {
     traceId: string;
     spanId: string;
     parentSpanId?: string;
     sampled?: boolean;
+    traceState?: string;
+    baggage?: Baggage;
 };
 
 export type FiberContext = {

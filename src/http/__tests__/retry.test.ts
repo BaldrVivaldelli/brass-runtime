@@ -191,4 +191,49 @@ describe("WASM planner drop on cancellation", () => {
     expect(mockDrop).toHaveBeenCalledTimes(1);
     expect(mockDrop).toHaveBeenCalledWith(42);
   });
+
+  it("uses declarative schedules for retry delays", async () => {
+    const scheduleInputs: any[] = [];
+    const retryEvents: any[] = [];
+    const schedule = {
+      _tag: "Schedule" as const,
+      initial: () => 0,
+      step: (state: number, input: any) => {
+        scheduleInputs.push(input);
+        return [{ continue: state < 1, delayMs: 0 }, state + 1, state + 1] as const;
+      },
+    };
+    let requestCount = 0;
+    const client: HttpClientFn = (_req: HttpRequest) => {
+      requestCount++;
+      return asyncSucceed(makeResponse(requestCount === 1 ? 503 : 200));
+    };
+
+    const retryClient = withRetry({
+      maxRetries: 3,
+      baseDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      engine: "ts",
+      schedule,
+      onRetry: (event) => retryEvents.push(event),
+    })(client);
+
+    const exit = await new Promise<Exit<HttpError, HttpWireResponse>>((resolve) => {
+      rt.unsafeRunAsync(retryClient(makeRequest()), resolve);
+    });
+
+    expect(exit._tag).toBe("Success");
+    if (exit._tag === "Success") expect(exit.value.status).toBe(200);
+    expect(requestCount).toBe(2);
+    expect(scheduleInputs).toEqual([
+      expect.objectContaining({
+        attempt: 0,
+        status: 503,
+        request: expect.objectContaining({ url: "https://example.com/api" }),
+      }),
+    ]);
+    expect(retryEvents).toEqual([
+      expect.objectContaining({ attempt: 0, delayMs: 0, status: 503 }),
+    ]);
+  });
 });

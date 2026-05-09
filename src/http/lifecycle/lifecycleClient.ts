@@ -21,6 +21,8 @@ import { computeDedupKey } from "./dedupKey";
 import { LifecycleStatsTracker } from "./stats";
 import { registerHttpEffect } from "../effectRunner";
 import { makePrewarmManager, type PrewarmManager } from "../prewarm/prewarmManager";
+import { validateLifecycleClientConfig } from "../configValidation";
+import type { AdaptiveLimiter } from "../adaptiveLimiter/adaptiveLimiter";
 import type {
   LifecycleClient,
   LifecycleClientConfig,
@@ -110,6 +112,8 @@ function extractWireConfig(config: LifecycleClientConfig): MakeHttpConfig {
  * ```
  */
 export function makeLifecycleClient(config: LifecycleClientConfig = {}): LifecycleClient {
+  validateLifecycleClientConfig(config);
+
   // Validate globals at construction time
   validateGlobals();
 
@@ -153,7 +157,9 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
       cacheInvalidate: noopInvalidate,
       cacheClear: noopClear,
       cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
+      shutdown: () => shutdownClient(activeControllers, prewarmMgr, wireClient.shutdown),
       activeControllers,
+      adaptiveLimiter: wireClient.adaptiveLimiter,
       prewarmManager: prewarmMgr,
       afterResponse: hasPrewarm ? (config.prewarm as PrewarmLifecycleConfig).afterResponse : undefined,
     });
@@ -289,7 +295,9 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
     cacheInvalidate: cacheLayer?.invalidate ?? noopInvalidate,
     cacheClear: cacheLayer?.clear ?? noopClear,
     cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
+    shutdown: () => shutdownClient(activeControllers, prewarmMgr, wireClient.shutdown),
     activeControllers,
+    adaptiveLimiter: wireClient.adaptiveLimiter,
     queueDepth: priorityMiddleware?.queueDepth,
     prewarmManager: prewarmMgr,
     afterResponse: hasPrewarm ? (config.prewarm as PrewarmLifecycleConfig).afterResponse : undefined,
@@ -319,7 +327,9 @@ type LifecycleClientInternals = {
   cacheInvalidate: (key: string) => void;
   cacheClear: () => void;
   cancelAll: () => Async<unknown, never, void>;
+  shutdown: () => Async<unknown, never, void>;
   activeControllers: Set<AbortController>;
+  adaptiveLimiter?: AdaptiveLimiter;
   queueDepth?: () => number;
   prewarmManager?: PrewarmManager;
   afterResponse?: (response: HttpWireResponse, request: HttpRequest) => string[];
@@ -343,7 +353,7 @@ function buildLifecycleClient(
 
   const withMw = (mw: HttpMiddleware): LifecycleClient => {
     // Apply middleware outermost (wraps the composed fn)
-    const wrappedFn = mw(fn);
+    const wrappedFn = mw(withLifecycleMetadata(fn, internals));
     return buildLifecycleClient(wrappedFn, tracker, internals);
   };
 
@@ -351,6 +361,8 @@ function buildLifecycleClient(
     with: withMw,
     stats,
     cancelAll: internals.cancelAll,
+    shutdown: internals.shutdown,
+    adaptiveLimiter: internals.adaptiveLimiter,
     cache: {
       invalidate: internals.cacheInvalidate,
       clear: internals.cacheClear,
@@ -358,6 +370,16 @@ function buildLifecycleClient(
   });
 
   return lifecycleClient;
+}
+
+function withLifecycleMetadata(
+  fn: HttpClientFn,
+  internals: LifecycleClientInternals,
+): HttpClientFn {
+  if (!internals.adaptiveLimiter) return fn;
+  return Object.assign(((req: HttpRequest) => fn(req)) as HttpClientFn, {
+    adaptiveLimiter: internals.adaptiveLimiter,
+  });
 }
 
 function cancelControllers(activeControllers: Set<AbortController>, prewarmMgr?: PrewarmManager): Async<unknown, never, void> {
@@ -372,6 +394,16 @@ function cancelControllers(activeControllers: Set<AbortController>, prewarmMgr?:
   if (prewarmMgr) {
     prewarmMgr.cancelAll();
   }
+  return asyncSucceed(undefined) as Async<unknown, never, void>;
+}
+
+function shutdownClient(
+  activeControllers: Set<AbortController>,
+  prewarmMgr?: PrewarmManager,
+  wireShutdown?: () => void,
+): Async<unknown, never, void> {
+  cancelControllers(activeControllers, prewarmMgr);
+  wireShutdown?.();
   return asyncSucceed(undefined) as Async<unknown, never, void>;
 }
 

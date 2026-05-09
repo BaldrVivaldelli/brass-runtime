@@ -9,6 +9,9 @@ Defined in `package.json`:
 - `brass-runtime` -> `dist/index.*`
 - `brass-runtime/core` -> `dist/core/index.*`
 - `brass-runtime/http` -> `dist/http/index.*`
+- `brass-runtime/http/testing` -> `dist/http/testing.*`
+- `brass-runtime/schema` -> `dist/schema/index.*`
+- `brass-runtime/observability` -> `dist/observability/index.*`
 - `brass-runtime/agent` -> `dist/agent/index.*`
 - `brass-runtime/package.json`
 - `brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js`
@@ -33,9 +36,10 @@ Primary categories:
 
 - effect/core types: `Effect`, `Async`, `Exit`, `Option`, cancel types
 - runtime execution: `Runtime`, `fork`, `toPromise`, scheduler/fiber/scope
-- resources and structured concurrency helpers
-- semaphore, circuit breaker, ref, schedule, shutdown, testing
-- layers, worker pool, tracing, metrics
+- resources and structured concurrency helpers: `Resource`, `managed`,
+  `Supervisor`, `makeSupervisor`, `joinSupervised`
+- semaphore, circuit breaker, ref, declarative `Schedule`, shutdown, testing
+- layers, worker pool, tracing, metrics, runtime observability hooks/events
 - typed errors
 - runtime engines and capabilities
 - streams, buffers, queues, hubs, pipelines, chunks, operators
@@ -55,13 +59,33 @@ exports effect/runtime/resource/layer/schedule/observability helpers without
 the lower-level engine, scheduler queue, ring-buffer, and WASM bridge internals
 that remain available from the root export for compatibility.
 
+Observability helpers include `RuntimeHooks`, `RuntimeEvent`,
+`RuntimeEventRecord`, `EventBus`, `consoleJsonLogger`, `RuntimeRegistry`,
+`dumpAllFibers`, and `InMemoryTracer`. Core also exposes `Resource`,
+`makeResource`, `resourceAll`, `Schedule` constructors/combinators, and
+supervisor APIs.
+
 ## HTTP export: `brass-runtime/http`
 
 Source: `src/http/index.ts`
 
 Recommended API order:
 
+- `makeDefaultHttpClient` for the one-stop default client with JSON/text
+  helpers, lifecycle defaults, compression, stats, cache controls, `cancelAll`,
+  and middleware integration.
+- `makeHttpRouter`, `route` / `httpRoute`, and `makeNodeHttpServerResource`
+  for the first-party HTTP server MVP: Node adapter, simple router,
+  effect-based middleware, schema validation, observability, runtime
+  health/readiness probes, typed path params, and managed `.listen()`
+  lifecycle.
 - `httpClient` for day-to-day typed text/JSON calls.
+- `s` / `schema` and `validatedJson` for dependency-free HTTP JSON
+  validation with typed validation errors.
+- `httpClientBuilder` / `makeHttpClientBuilder` for a discoverable builder
+  API over the default client presets and lifecycle layers.
+- `adaptiveLimiterPresets` / `makeAdaptiveLimiterConfig` for documented
+  `conservative`, `balanced`, and `aggressive` adaptive concurrency baselines.
 - `makeHttpClient` / `makeLifecycleClient` for cache, deduplication, priority
   queues, retry, lifecycle events, stats, and bulk cancellation.
 - `makeHttp` / `makeHttpStream` for low-level wire behavior and middleware
@@ -72,19 +96,109 @@ Primary categories:
 
 - low-level HTTP client and request/response types
 - ergonomic HTTP client helpers
+- HTTP server router, Node adapter, response helpers, and server resources
+- HTTP runtime probe helpers: `makeRuntimeHealthRoute` and
+  `makeRuntimeReadinessRoute`
+- production HTTP client presets (`minimal`, `balanced`, `default`)
+- dependency-free schema validation for JSON responses
+- builder API for default HTTP client configuration
+- adaptive limiter presets, diagnostics, and public config helper
 - pool, circuit breaker, tracing, validation
 - lifecycle cache/dedup/priority/stats APIs
 - retry middleware
+- retry middleware accepts an optional declarative `Schedule` for retry delays
+  while preserving `Retry-After`, max retries, and elapsed-budget behavior
 - response and request compression middleware
 - request batching middleware
 - connection pre-warming utilities and middleware
+
+## HTTP testing export: `brass-runtime/http/testing`
+
+Source: `src/http/testing.ts`
+
+Dependency-free helpers for users' test suites:
+
+- `makeMockHttpClient`, `makeSequenceHttpClient`
+- `makeHttpResponse`, `makeTextHttpResponse`, `makeJsonHttpResponse`
+- `runHttpEffect`
+- `installMockFetch`, `withMockFetch`
+- `makeFetchResponse`, `makeJsonFetchResponse`
+
+## Schema export: `brass-runtime/schema`
+
+Source: `src/schema/index.ts`
+
+Dependency-free validation DSL shared by HTTP and any future package area that
+needs runtime data validation:
+
+- `s` / `schema` / `Schema`
+- `Schema`, `InferSchema`, `SchemaResult`, `SchemaIssue`
+- primitive/object/array/record/union/literal/enum/custom schemas
+- shortcuts: `email`, `url`, `uuid`, `int`, `positive`, `nonEmptyString`, `dateIso`
+- `optional`, `nullable`, `refine`, `transform`
+- `formatIssues`, `validateValue`, `parseConfig`
+- `SchemaValidationException`, `ConfigValidationError`
 
 When changing HTTP API:
 
 - Keep wire/content/meta separation clear.
 - Keep lazy execution and cancellation semantics.
+- `postJson(..., body, { bodySchema })` should infer the request body type from
+  `bodySchema` and validate it before network I/O.
+- Public error helpers live in `src/http/errors.ts` and are exported from
+  `brass-runtime/http`.
+- `AdaptiveLimiter` exposes per-key TTL eviction, explicit warmup,
+  `probeJitterRatio`, slow-start recovery, `headroomStrategy`,
+  `baselineStrategy`, `decreaseCooldownSamples`, limit-change `history(key)`,
+  weighted windows via `windowDecayFactor`, multi-signal error gradients via
+  `errorWeight`, priority queue/load-shedding knobs, `PoolRejected.retryAfterMs`
+  backoff hints, `markCircuitOpen(key)`, diagnostics (`keys`, `snapshot`,
+  `dump`) with utilization/throughput/error rate, and `destroy()`/`shutdown()`.
+- `AdaptiveLimiterConfig.preset` accepts `conservative`, `balanced`, and
+  `aggressive`; caller overrides apply on top of the selected preset.
 - Update `docs/http.md` and `src/http/README.md` for user-visible behavior.
 - Add focused tests under `src/http/__tests__`.
+
+## Observability export: `brass-runtime/observability`
+
+Source: `src/observability/index.ts`
+
+This is the preferred production export surface for taking runtime signals out
+of process without adding mandatory vendor dependencies.
+
+Primary categories:
+
+- Prometheus text formatting and registry exporters for `MetricsRegistry`
+- OTLP JSON/HTTP exporters for metrics and spans
+- runtime metrics sink for `EventBus.subscribeHooks`
+- structured log sink plus effect-level logging helpers
+- `withSpan` and `spanEvent` for trace spans across effect composition
+- `makeObservability` production preset with `flush()` and `shutdown()`
+- `withHttpObservability` middleware for HTTP client metrics, logs, spans, and
+  W3C `traceparent` injection
+- adaptive limiter gauges and HTTP span attributes when the wrapped client
+  exposes an owned limiter
+- W3C trace-context helpers (`parseTraceparent`, `extractTraceContext`,
+  `formatTraceparent`, `injectTraceContext`) plus request adapters for seeding
+  runtime traces from incoming headers
+- production hardening helpers for exporter pipelines, sampling, redaction,
+  metric-cardinality limiting, environment presets, no-op setup, and inbound
+  adapters for Fetch/Node/Express/Fastify-style request objects
+- OTLP log export, server-side HTTP request metrics/spans, span retention
+  pruning, single-flight flush behavior, collector smoke script, and
+  observability benchmark budgets
+- runtime health helpers: `makeRuntimeHealth`, `runtimeHealth`, `readiness`,
+  and `healthToHttpResponse` for runtime/fiber/scope/scheduler plus registered
+  circuit breaker/adaptive limiter health
+- runtime supervisor events are counted by runtime metrics sinks and are
+  available to structured log/tracing sinks via `RuntimeHooks`
+
+When changing observability API:
+
+- Keep exporters dependency-free and backend-neutral.
+- Do not let sink/exporter failures affect effect semantics.
+- Keep high-cardinality labels opt-in.
+- Add tests under `src/observability/__tests__`.
 
 ## Agent export: `brass-runtime/agent`
 

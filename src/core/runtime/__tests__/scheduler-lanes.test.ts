@@ -69,6 +69,48 @@ describe("Scheduler lanes, bounded queues and budgets", () => {
     expect(lane?.droppedTasks).toBe(1);
   });
 
+  it("single-lane mode runs accepted tasks without creating caller lanes", async () => {
+    const scheduler = new Scheduler({ engine: "ts", laneMode: "single", initialCapacity: 4, maxCapacity: 4, flushBudget: 8 });
+    const ran: number[] = [];
+
+    expect(scheduler.schedule(() => ran.push(1), "lane:A|1")).toBe("accepted");
+    expect(scheduler.schedule(() => ran.push(2), "lane:B|2")).toBe("accepted");
+
+    await wait();
+
+    expect(ran).toEqual([1, 2]);
+    expect(scheduler.stats().data.lanes).toEqual([
+      expect.objectContaining({
+        key: "single",
+        enqueuedTasks: 2,
+        executedTasks: 2,
+        droppedTasks: 0,
+      }),
+    ]);
+  });
+
+  it("single-lane mode drops tasks when its direct queue is full", async () => {
+    const scheduler = new Scheduler({ engine: "ts", laneMode: "single", initialCapacity: 2, maxCapacity: 2, flushBudget: 8 });
+    const ran: number[] = [];
+
+    const r1 = scheduler.schedule(() => ran.push(1), "lane:A|1");
+    const r2 = scheduler.schedule(() => ran.push(2), "lane:B|2");
+    const r3 = scheduler.schedule(() => ran.push(3), "lane:C|3");
+
+    expect([r1, r2, r3]).toEqual(["accepted", "accepted", "dropped"]);
+
+    await wait();
+
+    expect(ran).toEqual([1, 2]);
+    expect(scheduler.stats().data.droppedTasks).toBe(1);
+    expect(scheduler.stats().data.lanes?.[0]).toMatchObject({
+      key: "single",
+      enqueuedTasks: 3,
+      executedTasks: 2,
+      droppedTasks: 1,
+    });
+  });
+
   for (const engine of availableEngines()) {
     it(`${engine}: rotates lanes after the per-lane budget`, async () => {
       const scheduler = new Scheduler({ engine, laneBudget: 2, laneCapacity: 8, flushBudget: 8 });

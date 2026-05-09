@@ -88,19 +88,19 @@ npm publish
 ## Benchmark
 
 ```bash
+npm run benchmark heap-suspended-fiber
+```
+
+The direct benchmark script is still available when you want a specific engine
+or longer suspension window:
+
+```bash
 node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspended-fiber.ts \
-  --engine wasm-reference \
+  --engine wasm \
   --mode host-action \
   --fibers 10000 \
   --delayMs 2000
-```
-
-Compará contra:
-
-```bash
-node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspended-fiber.ts --engine js --mode closure
-node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspended-fiber.ts --engine wasm-reference --mode closure
-node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspended-fiber.ts --engine wasm-reference --mode host-action
+node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspended-fiber.ts --engine ts --mode closure
 ```
 
 ## WASM fiber registry + wakeups

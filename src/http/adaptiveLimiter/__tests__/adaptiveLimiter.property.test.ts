@@ -28,6 +28,8 @@ describe("AdaptiveLimiter property tests", () => {
               maxLimit: 500,
               minLimit: 1,
               probeInterval,
+              probeJitterRatio: 0,
+              minSamples: 1,
               smoothingFactor: 1.0, // no smoothing for predictability
               windowSize: 200,
             });
@@ -252,6 +254,7 @@ describe("AdaptiveLimiter property tests", () => {
               minLimit: 1,
               smoothingFactor: 0.5,
               windowSize: 50,
+              minSamples: 2,
               probeInterval: 100, // high to avoid probe interference
               onLimitChange: (event) => events.push(event),
             });

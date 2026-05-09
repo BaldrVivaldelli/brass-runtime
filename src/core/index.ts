@@ -7,6 +7,14 @@ export * from "./runtime/combinators";
 export {
   bracket,
   ensuring,
+  resource,
+  makeResource,
+  resourceSucceed,
+  resourceFromManaged,
+  useResource,
+  resourceAll,
+  Resource,
+  type Resource as ResourceDescriptor,
   managed,
   useManaged,
   managedAll,
@@ -15,6 +23,7 @@ export {
 export * from "./runtime/runtime";
 export * from "./runtime/fiber";
 export * from "./runtime/scope";
+export * from "./runtime/supervisor";
 export * from "./runtime/semaphore";
 export * from "./runtime/circuitBreaker";
 export * from "./runtime/ref";
@@ -24,13 +33,19 @@ export {
   recurs,
   fixed,
   exponential,
+  fibonacci,
   jittered,
+  jitter,
+  jitteredSchedule,
+  windowed,
   elapsed,
   whileInput,
   intersect,
   union,
   retryWithSchedule,
   repeatWithSchedule,
+  map as mapSchedule,
+  contramap as contramapSchedule,
   andThen as andThenSchedule,
   take as takeSchedule,
 } from "./runtime/schedule";
@@ -50,6 +65,26 @@ export {
 export * from "./runtime/workerPool";
 export * from "./runtime/tracing";
 export * from "./runtime/metrics";
+export * from "./runtime/events";
+export * from "./runtime/eventBus";
+export * from "./runtime/loggerSink";
+export * from "./runtime/registry";
+export * from "./runtime/dump";
+export * from "./runtime/tracingSink";
+export {
+  defaultTracer,
+  type BrassEnv,
+  type Tracer as RuntimeTraceIdGenerator,
+} from "./runtime/tracer";
+export {
+  ctxExtend,
+  ctxToObject,
+  emptyContext,
+  type ContextNode,
+  type FiberContext,
+  type JSONValue,
+  type TraceContext,
+} from "./runtime/contex";
 export {
   type TaggedError,
   catchTag,
@@ -58,4 +93,3 @@ export {
   tagError,
   orElse,
 } from "./types/typedError";
-

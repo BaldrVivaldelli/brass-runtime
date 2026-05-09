@@ -15,6 +15,7 @@ Guides for each feature of brass-runtime, organized by topic.
 - [Queue & Hub](./queue-and-hub.md) — Bounded queues, pub/sub
 - [Semaphore & Rate Limiting](./semaphore.md) — Concurrency control
 - [Circuit Breaker](./circuit-breaker.md) — Failure protection
+- [Supervisors](./supervisors.md) — Restart and escalation policies for child fibers
 
 ## Resilience
 

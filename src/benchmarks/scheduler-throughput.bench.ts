@@ -1,8 +1,8 @@
 /**
- * Benchmark: Scheduler throughput — 100k tasks, target < 50ms total.
+ * Benchmark: Scheduler throughput — 1M tasks.
  *
  * Validates Requirement 11.2: throughput of the Scheduler processing
- * 100,000 tasks, with a target of less than 50ms total.
+ * 1,000,000 tasks.
  *
  * Two scenarios are measured:
  *
@@ -17,65 +17,91 @@
  */
 
 import type { BenchmarkDef } from "./runner";
-import { Scheduler } from "../core/runtime/scheduler";
+import { Scheduler, type SchedulerLaneMode } from "../core/runtime/scheduler";
 
-const TASK_COUNT = 100_000;
+const TASK_COUNT = 1_000_000;
 const CONCURRENCY = 100; // number of parallel chains for the fan-out variant
-const TASKS_PER_CHAIN = TASK_COUNT / CONCURRENCY; // 1000 each
+const TASKS_PER_CHAIN = TASK_COUNT / CONCURRENCY; // 10,000 each
+const DEFAULT_FLUSH_BUDGET = 2_048;
+const THROUGHPUT_FLUSH_BUDGET = 8_192;
 
-export const benchmarks: BenchmarkDef[] = [
-  // --- Scenario 1: sequential re-enqueue (single chain) ---
-  {
-    name: `scheduler sequential (${TASK_COUNT.toLocaleString()} tasks)`,
-    iterations: 50,
-    warmup: 10,
-    fn: () => {
-      return new Promise<void>((resolve) => {
-        const scheduler = new Scheduler();
-        let remaining = TASK_COUNT;
+function makeScheduler(laneMode: SchedulerLaneMode, flushBudget: number): Scheduler {
+  return new Scheduler({ laneMode, flushBudget });
+}
 
-        function step(): void {
-          remaining--;
-          if (remaining > 0) {
-            scheduler.schedule(step, "bench");
-          } else {
+function sequential(flushBudget: number, laneMode: SchedulerLaneMode): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const scheduler = makeScheduler(laneMode, flushBudget);
+    let remaining = TASK_COUNT;
+
+    function step(): void {
+      remaining--;
+      if (remaining > 0) {
+        scheduler.schedule(step, "bench");
+      } else {
+        resolve();
+      }
+    }
+
+    scheduler.schedule(step, "bench-start");
+  });
+}
+
+function fanOut(flushBudget: number, laneMode: SchedulerLaneMode): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const scheduler = makeScheduler(laneMode, flushBudget);
+    let chainsComplete = 0;
+
+    function makeChain(tasksLeft: number): void {
+      scheduler.schedule(function chainStep() {
+        if (tasksLeft > 1) {
+          scheduler.schedule(chainStep, "bench-chain");
+          tasksLeft--;
+        } else {
+          chainsComplete++;
+          if (chainsComplete === CONCURRENCY) {
             resolve();
           }
         }
+      }, "bench-chain");
+    }
 
-        scheduler.schedule(step, "bench-start");
-      });
-    },
+    for (let c = 0; c < CONCURRENCY; c++) {
+      makeChain(TASKS_PER_CHAIN);
+    }
+  });
+}
+
+export const benchmarks: BenchmarkDef[] = [
+  {
+    name: `scheduler fair sequential (${TASK_COUNT.toLocaleString()} tasks, flush=${DEFAULT_FLUSH_BUDGET})`,
+    iterations: 20,
+    warmup: 5,
+    fn: () => sequential(DEFAULT_FLUSH_BUDGET, "fair"),
+  },
+  {
+    name: `scheduler single-lane sequential (${TASK_COUNT.toLocaleString()} tasks, flush=${DEFAULT_FLUSH_BUDGET})`,
+    iterations: 20,
+    warmup: 5,
+    fn: () => sequential(DEFAULT_FLUSH_BUDGET, "single"),
+  },
+  {
+    name: `scheduler single-lane sequential (${TASK_COUNT.toLocaleString()} tasks, flush=${THROUGHPUT_FLUSH_BUDGET})`,
+    iterations: 20,
+    warmup: 5,
+    fn: () => sequential(THROUGHPUT_FLUSH_BUDGET, "single"),
   },
 
-  // --- Scenario 2: concurrent fan-out (multiple chains) ---
   {
-    name: `scheduler fan-out (${CONCURRENCY} chains × ${TASKS_PER_CHAIN.toLocaleString()} tasks)`,
-    iterations: 50,
-    warmup: 10,
-    fn: () => {
-      return new Promise<void>((resolve) => {
-        const scheduler = new Scheduler();
-        let chainsComplete = 0;
-
-        function makeChain(tasksLeft: number): void {
-          scheduler.schedule(function chainStep() {
-            if (tasksLeft > 1) {
-              scheduler.schedule(chainStep, "bench-chain");
-              tasksLeft--;
-            } else {
-              chainsComplete++;
-              if (chainsComplete === CONCURRENCY) {
-                resolve();
-              }
-            }
-          }, "bench-chain");
-        }
-
-        for (let c = 0; c < CONCURRENCY; c++) {
-          makeChain(TASKS_PER_CHAIN);
-        }
-      });
-    },
+    name: `scheduler fair fan-out (${CONCURRENCY} chains x ${TASKS_PER_CHAIN.toLocaleString()} tasks, flush=${DEFAULT_FLUSH_BUDGET})`,
+    iterations: 20,
+    warmup: 5,
+    fn: () => fanOut(DEFAULT_FLUSH_BUDGET, "fair"),
+  },
+  {
+    name: `scheduler single-lane fan-out (${CONCURRENCY} chains x ${TASKS_PER_CHAIN.toLocaleString()} tasks, flush=${THROUGHPUT_FLUSH_BUDGET})`,
+    iterations: 20,
+    warmup: 5,
+    fn: () => fanOut(THROUGHPUT_FLUSH_BUDGET, "single"),
   },
 ];

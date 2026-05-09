@@ -6,6 +6,7 @@ This is the compact map for understanding `brass-runtime` quickly.
 
 - `src/index.ts` -> package root export `brass-runtime`.
 - `src/http/index.ts` -> subpath export `brass-runtime/http`.
+- `src/observability/index.ts` -> subpath export `brass-runtime/observability`.
 - `src/agent/index.ts` -> subpath export `brass-runtime/agent`.
 - `src/agent/cli/main.ts` -> CLI binary `brass-agent`.
 - `tsup.config.ts` -> CJS, ESM, and JS bundle entries.
@@ -24,7 +25,8 @@ Purpose:
 - Define `Effect`, `Async`, `Exit`, `Cause`, and cancellation types.
 - Interpret `Async` values in fibers.
 - Own scheduler, scopes, finalizers, runtime hooks, layers, metrics, tracing,
-  schedules, semaphores, resources, worker pools, and engine selection.
+  schedules, supervisors, semaphores, resources, worker pools, and engine
+  selection.
 
 Read first:
 
@@ -33,6 +35,9 @@ Read first:
 - `src/core/runtime/fiber.ts`
 - `src/core/runtime/scope.ts`
 - `src/core/runtime/scheduler.ts`
+- `src/core/runtime/supervisor.ts`
+- `src/core/runtime/resource.ts`
+- `src/core/runtime/schedule.ts`
 
 Tests:
 
@@ -45,6 +50,9 @@ Docs:
 - `docs/cancellation.md`
 - `docs/observability.md`
 - `docs/guides/testing.md`
+- `docs/guides/resource-management.md`
+- `docs/guides/retry.md`
+- `docs/guides/supervisors.md`
 
 ## Streams
 
@@ -79,6 +87,8 @@ Docs:
 Paths:
 
 - `src/http`
+- `src/http/defaultClient.ts`
+- `src/http/server.ts`
 - `src/http/retry`
 - `src/http/lifecycle`
 - `src/http/compression`
@@ -89,13 +99,19 @@ Paths:
 Purpose:
 
 - Provide a lazy, cancelable HTTP client on top of `Async`.
+- Expose `makeDefaultHttpClient` as the one-stop default entrypoint.
+- Provide a first-party HTTP server MVP with a Node adapter, effect router,
+  schema validation, observability integration, and `Resource` lifecycle.
 - Keep wire, content, metadata, lifecycle, retry, compression, batching,
-  pre-warming, adaptive concurrency, tracing, and validation concerns separated.
+  pre-warming, adaptive concurrency, tracing, server, and validation concerns
+  separated.
 
 Read first:
 
 - `src/http/client.ts`
 - `src/http/httpClient.ts`
+- `src/http/defaultClient.ts`
+- `src/http/server.ts`
 - `src/http/index.ts`
 - `src/http/lifecycle/lifecycleClient.ts`
 - `src/http/lifecycle/batch.ts`
@@ -114,9 +130,51 @@ Tests:
 Docs:
 
 - `docs/http.md`
+- `docs/production-readiness.md`
 - `src/http/README.md`
 - `src/http/lifecycle/README.md`
 - `src/http/prewarm/README.md`
+
+## Observability Export
+
+Paths:
+
+- `src/observability`
+- `src/core/runtime/events.ts`
+- `src/core/runtime/tracingSink.ts`
+
+Purpose:
+
+- Export runtime metrics, logs, and spans out of process.
+- Keep Prometheus/OTLP formatting dependency-free and backend-neutral.
+- Provide effect-level span/log-context helpers on top of fiber context.
+
+Read first:
+
+- `src/observability/index.ts`
+- `src/observability/metrics.ts`
+- `src/observability/logs.ts`
+- `src/observability/traces.ts`
+- `src/observability/traceContext.ts`
+- `src/observability/request.ts`
+- `src/observability/exportPipeline.ts`
+- `src/observability/sampling.ts`
+- `src/observability/redaction.ts`
+- `src/observability/cardinality.ts`
+- `src/observability/adapters.ts`
+- `src/observability/config.ts`
+- `src/observability/server.ts`
+
+Tests:
+
+- `src/observability/__tests__`
+
+Docs:
+
+- `docs/observability.md`
+- `docs/observability-framework-examples.md`
+- `docs/observability-collector-smoke.md`
+- `docs/otel-collector-smoke.yaml`
 
 ## Brass Agent
 
@@ -183,6 +241,8 @@ Paths:
 Purpose:
 
 - Track runtime and HTTP lifecycle overhead.
+- Run the standard benchmark surface, including heap-per-suspended-fiber, from
+  `npm run benchmark`.
 - Keep benchmark thresholds separate from correctness tests.
 
 Commands:

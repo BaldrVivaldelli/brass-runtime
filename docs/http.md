@@ -106,6 +106,259 @@ console.log(result.status);
 console.log(result.body.title);
 ```
 
+## Dependency-free JSON schemas
+
+`brass-runtime/schema` includes a small schema DSL so callers can validate JSON
+responses without bringing Zod, Valibot, or any runtime dependency. HTTP
+reexports `s` for convenience.
+
+```ts
+import { makeDefaultHttpClient, s } from "brass-runtime/http";
+
+const Post = s.object({
+  id: s.number({ int: true }),
+  title: s.string({ minLength: 1 }),
+  tags: s.array(s.string()).optional(),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+});
+
+const result = await http.getJson("/posts/1", { schema: Post }).unsafeRunPromise();
+console.log(result.body.title);
+```
+
+Validation failures reject with `{ _tag: "ValidationError", message, body,
+issues }`, where each issue includes the schema path that failed.
+
+This makes the HTTP layer more than a typed `fetch` wrapper: response schemas,
+request-body schemas, construction-time config validation, cancellation,
+retry/cache/dedup/compression, and observability all stay in the same lazy
+effect pipeline. Callers can adopt schema validation without adding a second
+runtime validator dependency.
+
+Request bodies can be validated before a request is sent:
+
+```ts
+const CreatePost = s.object({
+  title: s.string({ minLength: 1 }),
+});
+
+await http.postJson(
+  "/posts",
+  { title: "Hello" },
+  { bodySchema: CreatePost, schema: Post }
+).unsafeRunPromise();
+```
+
+The body argument is inferred from `bodySchema`. If `bodySchema` fails, the
+effect rejects with `phase: "request"` and `fetch` is never called.
+
+HTTP also exports error helpers:
+
+```ts
+import { formatHttpError, isValidationError, matchHttpError } from "brass-runtime/http";
+
+try {
+  await http.getJson("/posts/1", { schema: Post }).unsafeRunPromise();
+} catch (error) {
+  if (isValidationError(error)) console.error(error.issues);
+  console.error(formatHttpError(error));
+  matchHttpError(error, {
+    Timeout: (err) => console.error(err.timeoutMs),
+    PoolClosed: (err) => console.error(err.key),
+  });
+}
+```
+
+The same schema module can be used outside HTTP:
+
+```ts
+import { s } from "brass-runtime/schema";
+
+const Config = s.object({ port: s.int({ min: 1 }), callbackUrl: s.url() });
+const parsed = Config.parse({ port: 3000, callbackUrl: "https://example.com/cb" });
+```
+
+## Adaptive Limiter
+
+`adaptiveLimiter` keeps per-key state bounded with `stateTtlMs` and supports
+explicit ramp-up controls:
+
+```ts
+import { makeAdaptiveLimiterConfig, makeHttp } from "brass-runtime/http";
+
+const http = makeHttp({
+  adaptiveLimiter: makeAdaptiveLimiterConfig("balanced", {
+    maxLimit: 256,
+    stateTtlMs: 300_000,
+    warmupRequests: 25,
+    decreaseCooldownSamples: 3,
+    historySize: 64,
+  }),
+});
+
+console.log(http.adaptiveLimiter?.dump());
+console.log(http.adaptiveLimiter?.history("https://api.example.com"));
+http.shutdown?.();
+```
+
+`destroy()`/`shutdown()` clears queue-timeout and TTL timers, rejects queued
+waiters with `PoolClosed`, and drops limiter state. Circuit breaker feedback can
+call `markCircuitOpen(key)` directly; `withCircuitBreaker` also forwards open
+signals when it receives an `adaptiveLimiter` or wraps a `makeHttp` client that
+owns one.
+For changing latency floors, `baselineStrategy` can use the exact min, P5, or a
+low-percentile EMA. Diagnostics expose per-key limit-change `history`, current
+utilization, throughput, rejection rate, and monotonic activity timestamps plus
+wall-clock timestamps for logs.
+`windowDecayFactor` weights percentiles toward recent samples, while
+`errorWeight` blends 5xx/failure rate into the gradient so fast-failing
+downstreams can lower concurrency before latency rises. The internal limiter
+queue can honor request priority and, when full, evict lower-priority waiters;
+sustained `PoolRejected` errors may include `retryAfterMs` as a client-side
+backoff hint.
+
+Named presets are available as `conservative`, `balanced`, and `aggressive`.
+The default HTTP client uses `balanced` for `preset: "balanced"` and
+`aggressive` for `preset: "default"`. Use `adaptiveLimiterPresets` or
+`makeAdaptiveLimiterConfig(preset, overrides)` when you want a documented
+baseline with a few local overrides.
+
+When `withHttpObservability` wraps a client that owns an adaptive limiter, it
+records limiter gauges such as limit, in-flight, queue depth, utilization,
+error rate, request/completion rate, rejection rate, and state count. The same
+snapshot is attached to HTTP client span events.
+
+See [`http-recipes.md`](http-recipes.md) for typed API client, testing,
+observability, retry, adaptive limiter, and config validation recipes.
+
+## HTTP Server
+
+`brass-runtime/http` includes a first server MVP for Node. It uses a simple
+router, effect-based middleware, first-party schema validation for
+`params`/`query`/`body`/`response`, and optional observability integration.
+
+```ts
+import {
+  Async,
+  Runtime,
+} from "brass-runtime/core";
+import {
+  json,
+  makeHttpRouter,
+  makeNodeHttpServer,
+  route,
+  s,
+} from "brass-runtime/http";
+import { makeObservability } from "brass-runtime/observability";
+
+const Params = s.object({ id: s.nonEmptyString() });
+const Response = s.object({ id: s.string(), ok: s.boolean() });
+
+const router = makeHttpRouter([
+  route("GET", "/users/:id", {
+    params: Params,
+    response: Response,
+  }, (ctx) => Async.succeed(json({ id: ctx.params.id, ok: true }))),
+]);
+
+const obs = makeObservability({ logs: false });
+const runtime = new Runtime({ env: {} });
+const server = await runtime.toPromise(makeNodeHttpServer({
+  router,
+  observability: obs,
+  port: 3000,
+}));
+
+console.log(server.url());
+await server.close();
+```
+
+Path params are inferred from the route string even without a params schema:
+
+```ts
+route("GET", "/users/:id/books/:bookId", (ctx) =>
+  Async.succeed(json({
+    userId: ctx.params.id,
+    bookId: ctx.params.bookId,
+  }))
+);
+```
+
+`makeNodeHttpServerResource` exposes the same adapter as a `Resource` for
+scoped lifecycle. Release uses a schedule-driven graceful shutdown poll and
+can force-close remaining connections after `gracefulShutdownMs`.
+For declarative server lifecycle, routers also expose `listen()`:
+
+```ts
+await runtime.toPromise(
+  router.listen({
+    host: "127.0.0.1",
+    port: 3000,
+    observability: obs,
+  }).use((server) =>
+    Async.succeed(console.log(server.url()))
+  )
+);
+```
+
+Runtime health/readiness probes can be mounted as ordinary routes. They reuse
+the observability health model and return `200` when ready or `503` when not:
+
+```ts
+import {
+  makeHttpRouter,
+  makeRuntimeHealthRoute,
+  makeRuntimeReadinessRoute,
+} from "brass-runtime/http";
+
+const router = makeHttpRouter([
+  makeRuntimeHealthRoute({ runtime, registry: runtime.registry }),
+  makeRuntimeReadinessRoute({
+    runtime,
+    registry: runtime.registry,
+    adaptiveLimiters: { api: limiter },
+    readiness: { failOnDegraded: true },
+  }),
+]);
+```
+
+## Builder API
+
+For discoverability, the default client also has a fluent builder:
+
+```ts
+import { httpClientBuilder } from "brass-runtime/http";
+
+const http = httpClientBuilder()
+  .baseUrl("https://api.example.com")
+  .balanced()
+  .balancedLimiter({ maxLimit: 128 })
+  .header("authorization", `Bearer ${token}`)
+  .cache({ ttlSeconds: 30, maxEntries: 512 })
+  .retry({ maxRetries: 2, baseDelayMs: 100, maxDelayMs: 1_000 })
+  .build();
+```
+
+## Test helpers subpath
+
+The `brass-runtime/http/testing` subpath exposes dependency-free helpers for
+adopters' tests:
+
+```ts
+import {
+  makeJsonHttpResponse,
+  makeMockHttpClient,
+  runHttpEffect,
+  withMockFetch,
+} from "brass-runtime/http/testing";
+
+const mock = makeMockHttpClient((req) => makeJsonHttpResponse({ url: req.url }));
+const wire = await runHttpEffect(mock({ method: "GET", url: "/users/1" }));
+```
+
 ---
 
 ## With metadata (observability)
@@ -237,7 +490,7 @@ Errores nuevos:
 
 ```ts
 { _tag: "Timeout", timeoutMs, phase: "request", message }
-{ _tag: "PoolRejected", key, limit, message }
+{ _tag: "PoolRejected", key, limit, message, retryAfterMs? }
 { _tag: "PoolTimeout", key, timeoutMs, message }
 ```
 

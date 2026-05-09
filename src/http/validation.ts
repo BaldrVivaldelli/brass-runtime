@@ -1,57 +1,153 @@
-import type { HttpClientFn, HttpMiddleware, HttpWireResponse, HttpError } from "./client";
-import { asyncFail, asyncFold, asyncSucceed } from "../core/types/asyncEffect";
+import type { HttpClientFn, HttpWireResponse, HttpError } from "./client";
+import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../core/types/asyncEffect";
 import type { Async } from "../core/types/asyncEffect";
+import {
+  formatIssues,
+  isSchema,
+  makeSchemaIssue,
+  validateValue,
+  type JsonSchemaLike,
+  type SchemaIssue,
+  type SchemaResult,
+} from "../schema";
+
+export * from "../schema";
 
 export type ValidationError = {
-  _tag: "ValidationError";
-  message: string;
-  body: string;
-  schema?: string;
+  readonly _tag: "ValidationError";
+  readonly message: string;
+  readonly body: string;
+  readonly issues: readonly SchemaIssue[];
+  readonly phase?: "request" | "response";
+  readonly schema?: string;
 };
 
-export type JsonValidator<A> = (data: unknown) => { success: true; data: A } | { success: false; error: string };
+export type JsonDecodeResult<A> =
+  | { readonly success: true; readonly data: A }
+  | { readonly success: false; readonly error: ValidationError };
 
-/**
- * Creates a validated JSON getter that checks the response body against a schema.
- * 
- * Usage:
- * ```ts
- * const getUser = validatedJson<User>(client, (data) => {
- *   if (typeof data === "object" && data !== null && "id" in data) {
- *     return { success: true, data: data as User };
- *   }
- *   return { success: false, error: "Invalid user shape" };
- * });
- * 
- * const user = await run(getUser({ method: "GET", url: "/users/1" }));
- * ```
- */
+export function decodeJsonBody<A = unknown>(
+  bodyText: string,
+  validator?: JsonSchemaLike<A>,
+  options: { readonly schemaName?: string } = {},
+): JsonDecodeResult<A> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    return {
+      success: false,
+      error: {
+        _tag: "ValidationError",
+        message: `JSON parse error: ${error instanceof Error ? error.message : String(error)}`,
+        body: bodyText,
+        phase: "response",
+        schema: options.schemaName,
+        issues: [makeSchemaIssue([], "valid JSON", bodyText, "Response body is not valid JSON")],
+      },
+    };
+  }
+
+  if (!validator) return { success: true, data: parsed as A };
+
+  let legacyMessage: string | undefined;
+  const validation: SchemaResult<A> = isSchema(validator) ? validator.safeParse(parsed) as SchemaResult<A> : (() => {
+    const result = validator(parsed);
+    if (result.success) return { success: true, data: result.data };
+    legacyMessage = result.error;
+    return {
+      success: false,
+      issues: result.issues ?? [makeSchemaIssue([], "valid JSON shape", parsed, result.error)],
+    };
+  })();
+  if (validation.success) return { success: true, data: validation.data };
+
+  return {
+    success: false,
+    error: {
+      _tag: "ValidationError",
+      message: legacyMessage ?? `JSON response failed validation: ${formatIssues(validation.issues)}`,
+      body: bodyText,
+      phase: "response",
+      schema: options.schemaName,
+      issues: validation.issues,
+    },
+  };
+}
+
+export function encodeJsonBodyEffect(
+  bodyObj: unknown,
+  validator?: JsonSchemaLike<any>,
+  options: { readonly schemaName?: string } = {},
+): Async<unknown, ValidationError, string> {
+  if (validator) {
+    const validation = validateValue(bodyObj, validator);
+    if (!validation.success) {
+      return asyncFail({
+        _tag: "ValidationError",
+        message: `JSON request body failed validation: ${formatIssues(validation.issues)}`,
+        body: previewJson(bodyObj),
+        phase: "request",
+        schema: options.schemaName,
+        issues: validation.issues,
+      });
+    }
+  }
+
+  try {
+    return asyncSucceed(JSON.stringify(bodyObj ?? {}));
+  } catch (error) {
+    return asyncFail({
+      _tag: "ValidationError",
+      message: `JSON request body could not be serialized: ${error instanceof Error ? error.message : String(error)}`,
+      body: "",
+      phase: "request",
+      schema: options.schemaName,
+      issues: [
+        makeSchemaIssue([], "JSON-serializable value", bodyObj, "Request body could not be serialized to JSON"),
+      ],
+    });
+  }
+}
+
+export function decodeJsonBodyEffect<A = unknown>(
+  bodyText: string,
+  validator?: JsonSchemaLike<A>,
+  options?: { readonly schemaName?: string },
+): Async<unknown, ValidationError, A> {
+  const result = decodeJsonBody(bodyText, validator, options);
+  return result.success ? asyncSucceed(result.data) : asyncFail(result.error);
+}
+
 export function validatedJson<A>(
   client: HttpClientFn,
-  validator: JsonValidator<A>
+  validator: JsonSchemaLike<A>,
 ): (req: Parameters<HttpClientFn>[0]) => Async<unknown, HttpError | ValidationError, A> {
   return (req) => asyncFold(
     client(req) as any,
     (error: HttpError) => asyncFail(error) as any,
-    (response: any) => {
-      try {
-        const parsed = JSON.parse(response.bodyText);
-        const result = validator(parsed);
-        if (result.success) {
-          return asyncSucceed(result.data) as any;
-        }
-        return asyncFail({
-          _tag: "ValidationError" as const,
-          message: result.error,
-          body: response.bodyText,
-        }) as any;
-      } catch (e) {
-        return asyncFail({
-          _tag: "ValidationError" as const,
-          message: `JSON parse error: ${String(e)}`,
-          body: response.bodyText,
-        }) as any;
-      }
-    }
+    (response: HttpWireResponse) => decodeJsonBodyEffect(response.bodyText, validator) as any,
   );
+}
+
+export function validatedJsonResponse<A>(
+  client: HttpClientFn,
+  validator: JsonSchemaLike<A>,
+): (req: Parameters<HttpClientFn>[0]) => Async<unknown, HttpError | ValidationError, HttpWireResponse & { readonly body: A }> {
+  return (req) => asyncFold(
+    client(req) as any,
+    (error: HttpError) => asyncFail(error) as any,
+    (response: HttpWireResponse) =>
+      asyncFlatMap(decodeJsonBodyEffect(response.bodyText, validator), (body) =>
+        asyncSucceed({ ...response, body }),
+      ) as any,
+  );
+}
+
+function previewJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
 }

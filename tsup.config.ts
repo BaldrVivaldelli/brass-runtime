@@ -20,6 +20,9 @@ const entry = {
   index: "src/index.ts",
   "core/index": "src/core/index.ts",
   "http/index": "src/http/index.ts",
+  "http/testing": "src/http/testing.ts",
+  "schema/index": "src/schema/index.ts",
+  "observability/index": "src/observability/index.ts",
   "agent/index": "src/agent/index.ts",
   "agent/cli/main": "src/agent/cli/main.ts",
 };

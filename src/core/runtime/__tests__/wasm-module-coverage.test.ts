@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   resetWasmModuleCache,
   resolveWasmModule,
@@ -8,6 +8,9 @@ import {
 
 describe("wasm module resolution helpers", () => {
   afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.doUnmock("node:module");
+    vi.resetModules();
     resetWasmModuleCache();
   });
 
@@ -45,5 +48,23 @@ describe("wasm module resolution helpers", () => {
 
     expect(resolveWasmModule()).toBe(first);
     expect(wasmModuleResolutionErrors()).not.toContain("mutated outside");
+  });
+
+  it("reports no compatible require when eval and createRequire are unavailable", async () => {
+    vi.resetModules();
+    vi.stubGlobal("eval", () => {
+      throw new Error("eval disabled");
+    });
+    vi.doMock("node:module", () => ({
+      createRequire: () => {
+        throw new Error("createRequire disabled");
+      },
+    }));
+
+    const fresh = await import("../wasmModule");
+    expect(fresh.resolveWasmModule()).toBeNull();
+    expect(fresh.wasmModuleResolutionErrors()).toEqual([
+      "no CommonJS-compatible require/createRequire was available",
+    ]);
   });
 });

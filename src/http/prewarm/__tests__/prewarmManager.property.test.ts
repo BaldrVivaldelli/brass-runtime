@@ -20,10 +20,14 @@ describe("PrewarmManager Property Tests", () => {
   });
 
   /** Generator for valid origin strings. */
+  const hostLabelArb = fc
+    .stringMatching(/^[a-z](?:[a-z0-9-]{0,18}[a-z0-9])$/)
+    .filter((label) => !label.startsWith("xn--"));
   const validOriginArb = fc.tuple(
     fc.constantFrom("https", "http"),
-    fc.stringMatching(/^[a-z][a-z0-9-]{1,20}\.[a-z]{2,6}$/),
-  ).map(([scheme, host]) => `${scheme}://${host}`);
+    hostLabelArb,
+    fc.stringMatching(/^[a-z]{2,6}$/),
+  ).map(([scheme, label, tld]) => `${scheme}://${label}.${tld}`);
 
   /** Generator for a set of unique valid origins. */
   const originsArb = fc.uniqueArray(validOriginArb, { minLength: 1, maxLength: 8 });

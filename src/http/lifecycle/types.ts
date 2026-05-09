@@ -13,6 +13,7 @@ import type { RetryPolicy } from "../retry/retry";
 import type { BatchConfig } from "./batch";
 import type { PrewarmEvent } from "../prewarm/types";
 import type { AdaptiveLimiterConfig } from "../adaptiveLimiter/types";
+import type { AdaptiveLimiter } from "../adaptiveLimiter/adaptiveLimiter";
 
 /**
  * Configuration for the prewarm layer within the lifecycle client.
@@ -171,6 +172,10 @@ export type LifecycleClient = HttpClientFn & {
   stats: () => LifecycleStats;
   /** Cancel all in-flight and queued requests. Returns an Async_Effect that resolves when complete. */
   cancelAll: () => Async<unknown, never, void>;
+  /** Cancel active work and release owned resources such as adaptive limiter timers. */
+  shutdown: () => Async<unknown, never, void>;
+  /** Adaptive limiter owned by the underlying wire client, when enabled. */
+  adaptiveLimiter?: AdaptiveLimiter;
   /** Cache management methods. */
   cache: {
     /** Invalidate a specific cache entry by Cache_Key. */

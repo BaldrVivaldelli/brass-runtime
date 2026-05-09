@@ -20,11 +20,11 @@ export function validateOrigin(origin: string): string {
     throw new Error(`validateOrigin: origin must be a non-empty string, got "${origin}"`);
   }
 
-  // Strip trailing slashes for normalization
-  const stripped = trimmed.replace(/\/+$/, "");
+  const stripped = stripTrailingSlashes(trimmed);
 
   // Must have a scheme
-  if (!/^https?:\/\//i.test(stripped)) {
+  const lower = stripped.toLowerCase();
+  if (!lower.startsWith("http://") && !lower.startsWith("https://")) {
     throw new Error(
       `validateOrigin: invalid origin "${origin}" — must start with http:// or https://`,
     );
@@ -63,4 +63,12 @@ export function validateOrigin(origin: string): string {
 
   // Return the normalized origin (scheme + host + port)
   return parsed.origin;
+}
+
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value.charCodeAt(end - 1) === 47) {
+    end--;
+  }
+  return end === value.length ? value : value.slice(0, end);
 }
