@@ -2,7 +2,7 @@
 import zlib from "node:zlib";
 import { isNodeEnvironment } from "./environment";
 import type { Decompressor } from "./types";
-import { createNodeDecompressor } from "./decompressorNode";
+import { createNodeDecompressor } from "./decompressor.node.js";
 import { createNoopDecompressor } from "./decompressor.noop";
 
 /**

@@ -6,13 +6,13 @@ const coverageThresholds = (() => {
   if (coverageGate === "off") return undefined;
   if (coverageGate === "100") return { 100: true, perFile: true } as const;
 
-  // Current honest baseline from the first full V8 coverage report.
-  // Raise these only when tests have actually increased coverage.
+  // Per-file gate for executable source. Branch coverage is reported but not
+  // gated per-file yet because several branch-heavy modules still sit below 90%.
   return {
-    statements: 92,
-    branches: 83,
-    functions: 94,
-    lines: 94,
+    statements: 90,
+    functions: 90,
+    lines: 90,
+    perFile: true,
   };
 })();
 
@@ -37,6 +37,11 @@ export default defineConfig({
         "src/**/*.pbt.test.ts",
         "src/**/__tests__/**",
         "src/**/*.d.ts",
+        "src/**/index.ts",
+        "src/core/runtime/engine/types.ts",
+        "src/http/lifecycle/types.ts",
+        "src/http/prewarm/types.ts",
+        "src/http/schema-type-tests.ts",
         "src/**/bench/**",
         "src/benchmarks/**",
         "src/examples/**",

@@ -64,30 +64,20 @@ export function timeout<R, E, A>(
     // Since we're inside an Async register, we have access to env.
     const runtime = unsafeGetCurrentRuntime();
 
-    if (runtime) {
-      const fiber = runtime.fork(effect as any);
-      fiber.join((exit: any) => {
-        if (done) return;
-        done = true;
-        clearTimeout(timerId!);
-        cb(exit);
-      });
+    const fiber = runtime.fork(effect as any);
+    fiber.join((exit: any) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timerId!);
+      cb(exit);
+    });
 
-      // Return canceler that interrupts the fiber and clears the timer
-      return () => {
-        if (done) return;
-        done = true;
-        clearTimeout(timerId!);
-        fiber.interrupt();
-      };
-    }
-
-    // Fallback: if no runtime available, just clear timer
-    // This shouldn't happen in practice
+    // Return canceler that interrupts the fiber and clears the timer
     return () => {
       if (done) return;
       done = true;
       clearTimeout(timerId!);
+      fiber.interrupt();
     };
   });
 }

@@ -355,6 +355,127 @@ describe("WasmFiberEngine", () => {
     await expect(joinExit(asyncDying)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Die", defect: expect.any(Error) } });
   });
 
+  it("covers wakeups, budget yields, bridge defects, host value/decode errors, and async interrupts", async () => {
+    const bridge = new FakeBridge();
+    const { runtime } = makeRuntime();
+    const engine = new WasmFiberEngine(runtime, { bridge });
+
+    const pending = engine.fork(async(() => () => undefined));
+    expect(engine.stats()).toMatchObject({
+      hostRegistryRefs: expect.any(Number),
+      hostRegistryStats: {
+        capacity: expect.any(Number),
+        allocated: expect.any(Number),
+      },
+    });
+
+    (engine as any).fiberRegistry = undefined;
+    expect((engine as any).scheduleWakeup((pending as any).id)).toBeUndefined();
+    (engine as any).fiberRegistry = {
+      registerFiber: () => undefined,
+      addJoiner: () => undefined,
+      wake: () => false,
+      drainWakeups: () => [],
+      markQueued: () => undefined,
+      markRunning: () => undefined,
+      markSuspended: () => undefined,
+      markDone: () => undefined,
+      dropFiber: () => undefined,
+      stats: () => ({ fake: "registry" }),
+    };
+    expect((engine as any).scheduleWakeup((pending as any).id)).toBeUndefined();
+    (engine as any).fiberRegistry = {
+      registerFiber: () => undefined,
+      addJoiner: () => undefined,
+      wake: () => true,
+      drainWakeups: () => [(pending as any).id],
+      markQueued: () => undefined,
+      markRunning: () => undefined,
+      markSuspended: () => undefined,
+      markDone: () => undefined,
+      dropFiber: () => undefined,
+      stats: () => ({ fake: "registry" }),
+    };
+    (engine as any).drainWakeups();
+
+    mockReadyQueueState.dropEnqueue = true;
+    (engine as any).enqueueFiber((engine as any).states.get((pending as any).id), "forced-drop");
+    await expect(joinExit(pending)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Die" } });
+    mockReadyQueueState.dropEnqueue = false;
+
+    const hostValue = engine.fork({ _tag: "HostAction", action: { kind: "custom", target: "value" } } as any);
+    hostValue.schedule?.("host-value");
+    await wait();
+    await expect(joinExit(hostValue)).resolves.toEqual(Exit.succeed("host-ok"));
+
+    const hostDecodeThrows = engine.fork({
+      _tag: "HostAction",
+      action: { kind: "custom", target: "decode" },
+      decode: () => { throw new Error("decode exploded"); },
+    } as any);
+    hostDecodeThrows.schedule?.("host-decode-throws");
+    await wait();
+    await expect(joinExit(hostDecodeThrows)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: expect.any(Error) },
+    });
+
+    const asyncInterrupted = engine.fork(async((_env, cb) => {
+      cb(Exit.failCause(Cause.interrupt()));
+    }));
+    asyncInterrupted.schedule?.("async-interrupt");
+    await expect(joinExit(asyncInterrupted)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Interrupt" },
+    });
+
+    class ContinueBridge extends FakeBridge {
+      driveBatch(fiberId: FiberId) {
+        return [{ kind: "Continue", fiberId } as EngineEvent];
+      }
+    }
+    const yielding = new WasmFiberEngine(runtime, { bridge: new ContinueBridge() });
+    const yielded = yielding.fork(asyncSucceed("eventually"));
+    mockReadyQueueState.dropEnqueue = true;
+    (yielding as any).drive((yielding as any).states.get((yielded as any).id), [{ kind: "Continue", fiberId: (yielded as any).id }]);
+    await expect(joinExit(yielded)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Die" } });
+    mockReadyQueueState.dropEnqueue = false;
+
+    class ThrowingBridge extends FakeBridge {
+      poll(): EngineEvent {
+        throw new Error("bridge poll exploded");
+      }
+    }
+    const throwing = new WasmFiberEngine(runtime, { bridge: new ThrowingBridge() });
+    const broken = throwing.fork(asyncSucceed("never"));
+    broken.schedule?.("bridge-throws");
+    await expect(joinExit(broken)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: expect.any(Error) },
+    });
+
+    runtime.fork.mockImplementationOnce(() => {
+      throw new Error("fork exploded");
+    });
+    const forkThrows = engine.fork({ _tag: "Fork", effect: asyncSucceed("child") } as any);
+    forkThrows.schedule?.("fork-throws");
+    await expect(joinExit(forkThrows)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: expect.any(Error) },
+    });
+
+    const foldSuccessThrows = engine.fork(asyncFold(
+      asyncSucceed("ok"),
+      asyncSucceed,
+      () => { throw new Error("fold success exploded"); },
+    ));
+    foldSuccessThrows.schedule?.("fold-success-throws");
+    await expect(joinExit(foldSuccessThrows)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: expect.any(Error) },
+    });
+  });
+
   it("maps host action errors and rejected host actions through the engine", async () => {
     const bridge = new FakeBridge();
     const { runtime } = makeRuntime();

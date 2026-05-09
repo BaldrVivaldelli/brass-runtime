@@ -38,6 +38,8 @@ export class LifecycleStatsTracker {
   private _requestsCompleted = 0;
   private _requestsFailed = 0;
   private _retries = 0;
+  private _batchDispatches = 0;
+  private _batchedRequests = 0;
   private readonly _onEvent: ((event: LifecycleEvent) => void) | undefined;
   private readonly _wireStats: () => HttpClientStats;
 
@@ -214,6 +216,21 @@ export class LifecycleStatsTracker {
     this._retries++;
   }
 
+  /**
+   * Records a batch dispatch. Increments the batch dispatches counter by 1.
+   */
+  batchDispatch(): void {
+    this._batchDispatches++;
+  }
+
+  /**
+   * Records requests that were coalesced into a batch.
+   * @param count - The number of individual requests in the batch.
+   */
+  batchedRequests(count: number): void {
+    this._batchedRequests += count;
+  }
+
   // --- Event emission ---
 
   /**
@@ -242,6 +259,8 @@ export class LifecycleStatsTracker {
     extra?: {
       cacheKey?: string;
       priority?: number;
+      batchKey?: string;
+      batchSize?: number;
       attempt?: number;
       delayMs?: number;
       status?: number;
@@ -296,6 +315,8 @@ export class LifecycleStatsTracker {
       requestsCompleted: this._requestsCompleted,
       requestsFailed: this._requestsFailed,
       retries: this._retries,
+      batchDispatches: this._batchDispatches,
+      batchedRequests: this._batchedRequests,
       wire: this._wireStats(),
     });
   }

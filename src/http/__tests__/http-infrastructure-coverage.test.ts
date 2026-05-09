@@ -13,6 +13,7 @@ import { withCircuitBreaker } from "../circuitBreaker";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
 import { HttpConcurrencyPool, resolveHttpPoolKey } from "../pool";
+import { AdaptiveLimiter } from "../adaptiveLimiter";
 
 const rt = Runtime.make({});
 const run = <A>(eff: any) => rt.toPromise(eff) as Promise<A>;
@@ -140,6 +141,28 @@ describe("withCircuitBreaker", () => {
 
     await expect(run(client({ ...req, url: "not a url" }))).rejects.toMatchObject({ _tag: "FetchError" });
     await expect(run(client({ ...req, url: "not a url" }))).rejects.toMatchObject({ _tag: "CircuitBreakerOpen" });
+  });
+
+  it("drops adaptive limiter limit to minLimit when the circuit opens", async () => {
+    const limiter = new AdaptiveLimiter({
+      initialLimit: 10,
+      minLimit: 2,
+      maxLimit: 20,
+    });
+    const downstream: HttpClientFn = () =>
+      asyncFail({ _tag: "FetchError", message: "down" } as HttpError);
+    const client = withCircuitBreaker({
+      failureThreshold: 1,
+      adaptiveLimiter: limiter,
+      adaptiveLimiterKey: () => "api",
+    })(downstream);
+
+    await expect(run(client(req))).rejects.toMatchObject({ _tag: "FetchError" });
+
+    expect(limiter.stats("api")).toMatchObject({
+      limit: 2,
+      slowStart: true,
+    });
   });
 });
 

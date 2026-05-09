@@ -25,6 +25,15 @@ export type HistogramBuckets = {
   count: number;
   min: number;
   max: number;
+  exemplars?: Array<MetricExemplar | undefined>;
+};
+
+export type MetricExemplar = {
+  readonly value: number;
+  readonly timestamp: number;
+  readonly traceId?: string;
+  readonly spanId?: string;
+  readonly labels?: Record<string, string>;
 };
 
 export type MetricsRegistry = {
@@ -53,7 +62,7 @@ export type Gauge = {
 };
 
 export type Histogram = {
-  readonly observe: (value: number) => void;
+  readonly observe: (value: number, exemplar?: Omit<MetricExemplar, "value"> | MetricExemplar) => void;
   readonly buckets: () => HistogramBuckets;
   readonly percentile: (p: number) => number;
 };
@@ -130,23 +139,34 @@ export function makeMetrics(): MetricsRegistry {
     }
     const entry = histograms.get(k)!;
     return {
-      observe: (value) => {
+      observe: (value, exemplar) => {
         entry.data.sum += value;
         entry.data.count++;
         entry.data.min = Math.min(entry.data.min, value);
         entry.data.max = Math.max(entry.data.max, value);
         // Find bucket
         let placed = false;
+        let bucketIndex = entry.boundaries.length;
         for (let i = 0; i < entry.boundaries.length; i++) {
           if (value <= entry.boundaries[i]!) {
             entry.data.counts[i]!++;
+            bucketIndex = i;
             placed = true;
             break;
           }
         }
         if (!placed) entry.data.counts[entry.boundaries.length]!++;
+        if (exemplar) {
+          const exemplars = entry.data.exemplars ?? new Array(entry.boundaries.length + 1).fill(undefined);
+          exemplars[bucketIndex] = {
+            ...exemplar,
+            value,
+            timestamp: exemplar.timestamp,
+          };
+          entry.data.exemplars = exemplars;
+        }
       },
-      buckets: () => ({ ...entry.data }),
+      buckets: () => ({ ...entry.data, counts: [...entry.data.counts], exemplars: entry.data.exemplars ? [...entry.data.exemplars] : undefined }),
       percentile: (p) => {
         const target = Math.ceil(entry.data.count * (p / 100));
         let cumulative = 0;

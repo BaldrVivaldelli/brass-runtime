@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { async, asyncSucceed, asyncSync, unit } from "../../types/asyncEffect";
+import { async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed, asyncSync, unit } from "../../types/asyncEffect";
 import { Cause, Exit, succeed } from "../../types/effect";
 import { ctxExtend, ctxToObject, emptyContext } from "../contex";
 import { dumpAllFibers } from "../dump";
@@ -7,6 +7,7 @@ import { EventBus } from "../eventBus";
 import { getBenchmarkBudget, getCurrentFiber, setBenchmarkBudget, unsafeGetCurrentRuntime, withCurrentFiber } from "../fiber";
 import { consoleJsonLogger } from "../loggerSink";
 import { RuntimeRegistry } from "../registry";
+import { withScopeAsync } from "../scope";
 import {
   Runtime,
   abortablePromiseStats,
@@ -30,6 +31,8 @@ afterEach(() => {
 });
 
 const wait = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+const joinFiber = (fiber: { join: (cb: (exit: any) => void) => void }) =>
+  new Promise<any>((resolve) => fiber.join(resolve));
 
 describe("runtime helpers and observability coverage", () => {
   it("materializes fiber context patches from newest to oldest", () => {
@@ -48,6 +51,30 @@ describe("runtime helpers and observability coverage", () => {
     expect(provided.scheduler).toBe(scheduler);
     expect(provided.hooks).toBe(bus);
     await expect(provided.toPromise(asyncSync((env: { a: number; b: number }) => env.a + env.b))).resolves.toBe(3);
+  });
+
+  it("rejects invalid strict engines and exposes runtime utility helpers", async () => {
+    expect(() => new Runtime({ env: {}, engine: "other" as any })).toThrow(/RuntimeOptions failed validation/);
+
+    const rt = Runtime.make({});
+    expect(rt.capabilities()).toMatchObject({ wasmAvailable: expect.any(Boolean) });
+    expect(rt.stats()).toMatchObject({ engine: "ts", fallbackUsed: false });
+    expect(rt.shutdown()).toBeUndefined();
+
+    let unsafeRan = false;
+    rt.unsafeRun(asyncSync(() => { unsafeRan = true; }));
+    await wait();
+    expect(unsafeRan).toBe(true);
+
+    await expect(rt.toPromise(rt.delay(1, asyncSucceed("later")))).resolves.toBe("later");
+
+    const delayed = rt.fork(rt.delay(50, asyncSucceed("cancelled")));
+    await wait();
+    delayed.interrupt();
+    await new Promise<void>((resolve) => delayed.join((exit) => {
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+      resolve();
+    }));
   });
 
   it("top-level fork, toPromise, unsafeRunAsync and unsafeRunFoldWithEnv work", async () => {
@@ -141,6 +168,152 @@ describe("runtime helpers and observability coverage", () => {
     });
   });
 
+  it("fromPromiseAbortable tolerates legacy AbortController behavior", async () => {
+    const rt = Runtime.make({});
+    const originalAbort = AbortController.prototype.abort;
+
+    vi.spyOn(AbortController.prototype, "abort").mockImplementation(function (this: AbortController, reason?: unknown) {
+      if (typeof reason === "object" && reason !== null && (reason as any)._tag === "Timeout") {
+        throw new Error("abort reason unsupported");
+      }
+      return originalAbort.call(this, reason);
+    });
+    await expect(rt.toPromise(fromPromiseAbortable(
+      () => new Promise<string>(() => undefined),
+      (u) => u as any,
+      { timeoutMs: 1 },
+    ))).rejects.toMatchObject({ _tag: "Timeout" });
+
+    vi.restoreAllMocks();
+    vi.spyOn(AbortController.prototype, "abort").mockImplementation(() => {
+      throw new Error("abort unsupported");
+    });
+    const fiber = rt.fork(fromPromiseAbortable(
+      () => new Promise<string>(() => undefined),
+      String,
+    ));
+    await wait();
+    fiber.interrupt();
+    await new Promise<void>((resolve) => fiber.join((exit) => {
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+      resolve();
+    }));
+  });
+
+  it("covers fiber edge paths for finalizers, scheduler drops, and unusual exits", async () => {
+    const rt = Runtime.make({});
+    let resume!: (exit: Exit<never, string>) => void;
+    const finalizerEvents: string[] = [];
+    const suspended = async<{}, never, string>((_env, cb) => {
+      resume = cb as any;
+      return () => undefined;
+    });
+    const fiber = rt.fork(suspended);
+    fiber.addFinalizer(() => asyncSync(() => { finalizerEvents.push("async-finalizer"); }));
+    fiber.addFinalizer(() => { throw new Error("ignored finalizer"); });
+    await wait();
+    resume(Exit.succeed("done"));
+    await new Promise<void>((resolve) => fiber.join((exit) => {
+      expect(exit).toEqual(Exit.succeed("done"));
+      resolve();
+    }));
+    expect(finalizerEvents).toEqual(["async-finalizer"]);
+    expect(fiber.status()).toBe("Done");
+
+    await expect(rt.toPromise(asyncFlatMap(asyncSucceed(1), () => {
+      throw new Error("flatMap boom");
+    }))).rejects.toThrow("flatMap boom");
+    await expect(rt.toPromise(asyncFlatMap(asyncSync(() => {
+      throw new Error("sync first boom");
+    }), () => asyncSucceed("never")))).rejects.toThrow("sync first boom");
+    await expect(rt.toPromise(asyncFlatMap(
+      async((_env, cb) => cb(Exit.succeed(1))),
+      () => { throw new Error("sync async continuation boom"); },
+    ))).rejects.toThrow("sync async continuation boom");
+    await expect(rt.toPromise(asyncFlatMap(
+      { _tag: "CustomFirst" } as any,
+      () => asyncSucceed("never"),
+    ))).rejects.toThrow(/Unknown opcode/);
+
+    await expect(rt.toPromise(asyncFold(
+      asyncSucceed(1),
+      () => asyncSucceed("nope"),
+      () => { throw new Error("fold success boom"); },
+    ))).rejects.toThrow("fold success boom");
+
+    await expect(rt.toPromise(asyncFold(
+      asyncFail("domain-error"),
+      () => { throw "mapped-error"; },
+      () => asyncSucceed("nope"),
+    ))).rejects.toBe("mapped-error");
+
+    const syncAsyncFail = async<{}, string, number>((_env, cb) => {
+      cb(Exit.failCause(Cause.fail("sync fail")));
+    });
+    await expect(rt.toPromise(asyncFlatMap(syncAsyncFail, () => asyncSucceed(1)))).rejects.toBe("sync fail");
+
+    const syncAsyncDie = async<{}, never, number>((_env, cb) => {
+      cb(Exit.failCause(Cause.die(new Error("sync die"))));
+    });
+    await expect(rt.toPromise(asyncFlatMap(syncAsyncDie, () => asyncSucceed(1)))).rejects.toThrow("sync die");
+
+    const asyncInterrupt = rt.fork(async<{}, never, string>((_env, cb) => {
+      setImmediate(() => cb(Exit.failCause(Cause.interrupt())));
+    }));
+    await expect(joinFiber(asyncInterrupt)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+    expect(asyncInterrupt.status()).toBe("Interrupted");
+
+    const asyncDie = rt.fork(async<{}, never, string>((_env, cb) => {
+      setImmediate(() => cb(Exit.failCause(Cause.die(new Error("async die")))));
+    }));
+    await expect(joinFiber(asyncDie)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Die" } });
+
+    const cancelThrows = async<{}, never, number>(() => () => {
+      throw new Error("cancel ignored");
+    });
+    const cancelFiber = rt.fork(asyncFlatMap(cancelThrows, () => asyncSucceed(1)));
+    await wait();
+    cancelFiber.interrupt();
+    await new Promise<void>((resolve) => cancelFiber.join((exit) => {
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+      resolve();
+    }));
+
+    const droppingRuntime = new Runtime({
+      env: {},
+      scheduler: { schedule: () => "dropped" } as any,
+    });
+    const dropped = droppingRuntime.fork(asyncSucceed("never"));
+    await new Promise<void>((resolve) => dropped.join((exit) => {
+      expect(exit).toMatchObject({ _tag: "Failure", cause: { _tag: "Die" } });
+      resolve();
+    }));
+
+    await expect(rt.toPromise({ _tag: "UnknownOpcode" } as any)).rejects.toThrow(/Unknown opcode/);
+  });
+
+  it("closes scopes with failing finalizers and interrupts on external cancellation", async () => {
+    const rt = Runtime.make({});
+    await expect(rt.toPromise(withScopeAsync(rt, (scope: any) => {
+      scope.addFinalizer(() => asyncFail("ignored finalizer"));
+      return asyncSucceed("scoped");
+    }))).resolves.toBe("scoped");
+
+    let started!: () => void;
+    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
+    const scoped = rt.fork(withScopeAsync(rt, (scope: any) => {
+      scope.fork(async(() => () => undefined));
+      started();
+      return async(() => () => undefined);
+    }));
+    await startedPromise;
+    scoped.interrupt();
+    await expect(joinFiber(scoped)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Interrupt" },
+    });
+  });
+
   it("keeps caller lanes stable across helpers and derived runtimes", async () => {
     const scheduledTags: string[] = [];
     const scheduler = {
@@ -199,9 +372,49 @@ describe("runtime helpers and observability coverage", () => {
     const trace = await rt.toPromise(asyncSync(() => (getCurrentFiber() as any).fiberContext.trace));
     expect(trace).toEqual({ traceId: "trace-seed", spanId: "span-seed", sampled: false });
     expect(events.some((e) => e.ev.type === "fiber.start" && e.ev.name === "root")).toBe(true);
+    expect(events.find((e) => e.ev.type === "fiber.start")?.ctx).toMatchObject({
+      fiberId: expect.any(Number),
+      traceId: "trace-seed",
+      spanId: "span-seed",
+    });
 
     expect(defaultTracer.newTraceId()).toBeTypeOf("string");
     expect(defaultTracer.newSpanId()).toBeTypeOf("string");
+  });
+
+  it("EventBus can fan out runtime hooks without losing fiber trace spans", async () => {
+    let spanId = 0;
+    const bus = new EventBus();
+    const tracer = new InMemoryTracer();
+    const registry = new RuntimeRegistry();
+
+    bus.subscribeHooks(tracer);
+    bus.subscribeHooks(registry);
+
+    const rt = new Runtime({
+      env: {
+        brass: {
+          tracer: {
+            newTraceId: () => "trace-runtime",
+            newSpanId: () => `span-${++spanId}`,
+          },
+          childName: () => "root",
+        },
+      },
+      hooks: bus,
+    });
+
+    await rt.toPromise(asyncSucceed("ok"));
+    await wait();
+
+    const finished = tracer.exportFinished();
+    expect(finished).toHaveLength(1);
+    expect(finished[0]).toMatchObject({
+      traceId: "trace-runtime",
+      spanId: "span-1",
+      name: "root",
+    });
+    expect(Array.from(registry.fibers.values()).find((fiber) => fiber.name === "root")?.traceId).toBe("trace-runtime");
   });
 
   it("RuntimeRegistry records fiber and scope events and dumpAllFibers renders them", () => {

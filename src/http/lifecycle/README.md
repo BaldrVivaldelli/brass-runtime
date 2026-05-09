@@ -398,6 +398,9 @@ All public exports from `src/http/lifecycle/index.ts`:
 | [`CacheConfig`](#cacheconfig) | Configuration for the response cache layer (TTL, max entries, SWR, policy). |
 | [`CachePolicyResult`](#cacheconfig) | Result of a custom cache policy evaluation (cacheable flag and optional TTL). |
 | [`PriorityConfig`](#priorityconfig) | Configuration for the priority scheduler layer (concurrency, queue timeout). |
+| [`PrewarmLifecycleConfig`](#api-reference) | Configuration for the prewarm layer within the lifecycle client. |
+| [`BatchFunction`](#api-reference) | Developer-provided batch function type defining coalesce and split operations. |
+| [`BatchConfig`](#api-reference) | Configuration for the batch middleware (batch function, window, max size, key). |
 | [`CacheKeyComponents`](#cache-key) | Parsed components of a deterministic cache key (method, URL, headers, body). |
 | [`LogEvent`](#middleware) | Event object passed to the `withLogging` middleware logger callback. |
 | [`LRUCacheConfig`](#api-reference) | Configuration for the standalone LRU cache (maxEntries, onEvict callback). |
@@ -415,6 +418,7 @@ All public exports from `src/http/lifecycle/index.ts`:
 | [`withLogging`](#middleware) | Creates middleware that logs request, response, and error events via a callback. |
 | [`withResponseTransform`](#middleware) | Creates middleware that transforms HTTP responses after retrieval. |
 | [`withDedup`](#dedupconfig) | Creates dedup middleware that collapses identical in-flight requests into one call. |
+| [`withBatch`](#api-reference) | Creates batch middleware that coalesces requests by key during a time window. |
 | [`withCache`](#cacheconfig) | Creates cache middleware with LRU eviction, TTL, and stale-while-revalidate support. |
 | [`withPriority`](#priorityconfig) | Creates priority scheduler middleware that reorders queued requests by priority. |
 | [`clampPriority`](#api-reference) | Clamps a priority value to the valid integer range [0, 9], defaulting to 5. |

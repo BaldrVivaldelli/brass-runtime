@@ -66,28 +66,6 @@ export function getBenchmarkBudget(): number | undefined {
   return __benchmarkBudget;
 }
 
-// evita que un flatMap "left-associated" empuje N frames antes de correr
-function reassociateFlatMap<R, E, A>(cur: Async<R, E, A>): Async<R, E, A> {
-    let current: any = cur;
-
-    while (current._tag === "FlatMap" && current.first?._tag === "FlatMap") {
-        const inner = current.first;
-        const g = current.andThen;
-
-        current = {
-            _tag: "FlatMap",
-            first: inner.first,
-            andThen: (a: any) => ({
-                _tag: "FlatMap",
-                first: inner.andThen(a),
-                andThen: g,
-            }),
-        };
-    }
-
-    return current as any;
-}
-
 export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
     readonly id: FiberId;
 
@@ -218,6 +196,10 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             scopeId: this.scopeId,
             traceId: this.fiberContext?.trace?.traceId,
             spanId: this.fiberContext?.trace?.spanId,
+            parentSpanId: this.fiberContext?.trace?.parentSpanId,
+            traceState: this.fiberContext?.trace?.traceState,
+            baggage: this.fiberContext?.trace?.baggage,
+            sampled: this.fiberContext?.trace?.sampled,
         });
     }
 

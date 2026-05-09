@@ -18,10 +18,25 @@
       "import": "./dist/http/index.mjs",
       "require": "./dist/http/index.cjs"
     },
+    "./http/testing": {
+      "types": "./dist/http/testing.d.ts",
+      "import": "./dist/http/testing.mjs",
+      "require": "./dist/http/testing.cjs"
+    },
+    "./schema": {
+      "types": "./dist/schema/index.d.ts",
+      "import": "./dist/schema/index.mjs",
+      "require": "./dist/schema/index.cjs"
+    },
     "./core": {
       "types": "./dist/core/index.d.ts",
       "import": "./dist/core/index.mjs",
       "require": "./dist/core/index.cjs"
+    },
+    "./observability": {
+      "types": "./dist/observability/index.d.ts",
+      "import": "./dist/observability/index.mjs",
+      "require": "./dist/observability/index.cjs"
     },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
@@ -91,6 +106,17 @@
     "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global",
     "benchmark": "tsx src/benchmarks/runner.ts",
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
+    "benchmark:http": "tsx src/benchmarks/runner.ts http-concurrent",
+    "benchmark:http:soak": "BRASS_HTTP_BENCH_MODE=soak tsx src/benchmarks/runner.ts http-concurrent",
+    "benchmark:http:budget": "node scripts/check-http-benchmark-budget.mjs",
+    "benchmark:adaptive": "tsx src/benchmarks/runner.ts adaptive-limiter-soak",
+    "benchmark:adaptive:soak": "BRASS_ADAPTIVE_BENCH_MODE=soak tsx src/benchmarks/runner.ts adaptive-limiter-soak",
+    "benchmark:observability": "tsx src/benchmarks/runner.ts observability-overhead",
+    "benchmark:observability:budget": "node scripts/check-observability-benchmark-budget.mjs",
+    "example:observability:express": "tsx src/examples/observabilityExpress.ts",
+    "example:observability:fastify": "tsx src/examples/observabilityFastify.ts",
+    "example:observability:nest": "tsx src/examples/observabilityNest.ts",
+    "smoke:observability:collector": "node scripts/observability-collector-smoke.mjs",
     "context": "node scripts/context-pack.mjs",
     "test:coverage:html": "COVERAGE_GATE=off vitest run --coverage --reporter=default",
     "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg",

@@ -5,7 +5,7 @@ import type { EngineStats } from "./engineStats";
 
 export type Task = () => void;
 export type ScheduleResult = "accepted" | "dropped";
-type QueuedTask = { task: Task; tag: string };
+export type SchedulerLaneMode = "fair" | "single";
 
 const FLUSH_BUDGET = 2048;
 const MICRO_THRESHOLD = 4096;
@@ -49,6 +49,8 @@ export type SchedulerStatsData = {
 export type SchedulerStats = EngineStats<SchedulerStatsData>;
 export type SchedulerOptions = RingBufferOptions & {
     engine?: SchedulerEngine;
+    /** fair keeps per-lane round-robin scheduling; single uses one direct TS queue for maximum throughput. */
+    laneMode?: SchedulerLaneMode;
     initialCapacity?: number;
     maxCapacity?: number;
     flushBudget?: number;
@@ -89,19 +91,53 @@ function resolveWasmScheduler(): WasmSchedulerStateMachineCtor | null {
 }
 
 class LaneState {
-    readonly queue: BoundedRingBuffer<QueuedTask>;
+    readonly queue: BoundedRingBuffer<Task>;
+    private tagQueue: BoundedRingBuffer<string> | undefined;
+    private sharedTag: string | undefined;
     enqueuedTasks = 0;
     executedTasks = 0;
     droppedTasks = 0;
 
-    constructor(readonly key: string, initial: number, max: number) {
-        this.queue = makeBoundedRingBuffer<QueuedTask>(initial, max, { engine: "ts" });
+    constructor(readonly key: string, private readonly initial: number, private readonly max: number) {
+        this.queue = makeBoundedRingBuffer<Task>(initial, max, { engine: "ts" });
+    }
+
+    recordTag(tag: string, queuedBefore: number): void {
+        if (this.tagQueue) {
+            this.tagQueue.push(tag);
+            return;
+        }
+        if (queuedBefore === 0 || this.sharedTag === undefined) {
+            this.sharedTag = tag;
+            return;
+        }
+        if (this.sharedTag === tag) return;
+
+        const tags = makeBoundedRingBuffer<string>(this.initial, this.max, { engine: "ts" });
+        for (let i = 0; i < queuedBefore; i++) tags.push(this.sharedTag);
+        tags.push(tag);
+        this.tagQueue = tags;
+    }
+
+    shiftTag(): string {
+        if (this.tagQueue) {
+            const tag = this.tagQueue.shift() ?? this.sharedTag ?? this.key;
+            if (this.queue.length === 0) {
+                this.tagQueue = undefined;
+                this.sharedTag = undefined;
+            }
+            return tag;
+        }
+
+        const tag = this.sharedTag ?? this.key;
+        if (this.queue.length === 0) this.sharedTag = undefined;
+        return tag;
     }
 }
 
 class JsSchedulerState {
     readonly lanes = new Map<string, LaneState>();
-    readonly laneOrder: string[] = [];
+    readonly laneOrder: LaneState[] = [];
     rrIndex = 0;
     rrRemaining = 0;
     flushing = false;
@@ -120,6 +156,27 @@ class JsSchedulerState {
         let n = 0;
         for (const lane of this.lanes.values()) n += lane.queue.capacity;
         return n;
+    }
+}
+
+class JsSingleSchedulerState {
+    readonly queue: BoundedRingBuffer<Task>;
+    flushing = false;
+    scheduled = false;
+    scheduledFlushes = 0;
+    completedFlushes = 0;
+    enqueuedTasks = 0;
+    executedTasks = 0;
+    droppedTasks = 0;
+    yieldedByBudget = 0;
+    totalLength = 0;
+
+    constructor(readonly options: SchedulerOptions) {
+        this.queue = makeBoundedRingBuffer<Task>(
+            options.initialCapacity ?? 1024,
+            options.maxCapacity ?? SCHEDULER_QUEUE_CAPACITY,
+            { engine: "ts" },
+        );
     }
 }
 
@@ -429,6 +486,7 @@ function firstSeparatorIndex(value: string): number {
 export class Scheduler {
     private readonly engine: "ts" | "wasm";
     private readonly js?: JsSchedulerState;
+    private readonly jsSingle?: JsSingleSchedulerState;
     private readonly wasm?: WasmSchedulerState;
     private readonly flushBudget: number;
     private readonly microThreshold: number;
@@ -437,6 +495,7 @@ export class Scheduler {
     private readonly maxLanes: number;
     private readonly fallbackUsed: boolean;
     private readonly boundFlush = () => this.flush();
+    private shiftedTag = "anonymous";
 
     constructor(options: SchedulerOptions = {}) {
         this.flushBudget = options.flushBudget ?? FLUSH_BUDGET;
@@ -453,7 +512,11 @@ export class Scheduler {
             return;
         }
         if (requested === "ts") {
-            this.js = new JsSchedulerState({ ...options, engine: "ts" });
+            if (options.laneMode === "single") {
+                this.jsSingle = new JsSingleSchedulerState({ ...options, engine: "ts" });
+            } else {
+                this.js = new JsSchedulerState({ ...options, engine: "ts" });
+            }
             this.engine = "ts";
             this.fallbackUsed = false;
             return;
@@ -464,16 +527,44 @@ export class Scheduler {
     schedule(task: Task, tag: string = "anonymous"): ScheduleResult {
         if (typeof task !== "function") return "dropped";
         if (this.wasm) return this.scheduleWasm(task, tag);
+        if (this.jsSingle) return this.scheduleJsSingle(task);
         return this.scheduleJs(task, tag);
     }
 
     scheduleBatch(tasks: Array<{ fn: Task; tag: string }>): ScheduleResult[] {
         if (this.wasm) return this.scheduleBatchWasm(tasks);
+        if (this.jsSingle) return this.scheduleBatchJsSingle(tasks);
         return tasks.map(({ fn, tag }) => this.schedule(fn, tag));
     }
 
     stats(): SchedulerStats {
         if (this.wasm) return this.wasm.stats();
+        if (this.jsSingle) {
+            const js = this.jsSingle;
+            return {
+                engine: "ts",
+                fallbackUsed: false,
+                data: {
+                    len: js.totalLength,
+                    capacity: js.queue.capacity,
+                    phase: js.flushing ? "flushing" : js.scheduled ? "scheduled" : "idle",
+                    scheduledFlushes: js.scheduledFlushes,
+                    completedFlushes: js.completedFlushes,
+                    enqueuedTasks: js.enqueuedTasks,
+                    executedTasks: js.executedTasks,
+                    droppedTasks: js.droppedTasks,
+                    yieldedByBudget: js.yieldedByBudget,
+                    lanes: [{
+                        key: "single",
+                        len: js.queue.length,
+                        capacity: js.queue.capacity,
+                        enqueuedTasks: js.enqueuedTasks,
+                        executedTasks: js.executedTasks,
+                        droppedTasks: js.droppedTasks,
+                    }],
+                },
+            };
+        }
         const js = this.js!;
         const lanes = Array.from(js.lanes.values()).map((lane) => ({ key: lane.key, len: lane.queue.length, capacity: lane.queue.capacity, enqueuedTasks: lane.enqueuedTasks, executedTasks: lane.executedTasks, droppedTasks: lane.droppedTasks }));
         return { engine: "ts", fallbackUsed: false, data: { len: js.totalLength, capacity: js.totalCapacity, phase: js.flushing ? "flushing" : js.scheduled ? "scheduled" : "idle", scheduledFlushes: js.scheduledFlushes, completedFlushes: js.completedFlushes, enqueuedTasks: js.enqueuedTasks, executedTasks: js.executedTasks, droppedTasks: js.droppedTasks, yieldedByBudget: js.yieldedByBudget, lanes } };
@@ -538,18 +629,17 @@ export class Scheduler {
         const js = this.js!;
         const lane = new LaneState(key, this.laneCapacity, this.laneCapacity);
         js.lanes.set(key, lane);
-        js.laneOrder.push(key);
+        js.laneOrder.push(lane);
         return lane;
     }
 
-    private scheduleJs(task: Task, tag: string): ScheduleResult {
-        const js = this.js!;
-        const lane = this.getOrCreateLane(inferLane(tag));
-        const status = lane.queue.push({ task, tag });
-        lane.enqueuedTasks++; js.enqueuedTasks++;
+    private scheduleJsSingle(task: Task): ScheduleResult {
+        const js = this.jsSingle!;
+        const status = js.queue.push(task);
+        js.enqueuedTasks++;
 
         if ((status & 2) !== 0) {
-            lane.droppedTasks++; js.droppedTasks++;
+            js.droppedTasks++;
             if (!js.flushing && !js.scheduled && js.totalLength > 0) {
                 js.scheduled = true;
                 js.scheduledFlushes++;
@@ -569,11 +659,54 @@ export class Scheduler {
         return "accepted";
     }
 
+    private scheduleBatchJsSingle(tasks: Array<{ fn: Task; tag: string }>): ScheduleResult[] {
+        const results: ScheduleResult[] = new Array(tasks.length);
+        for (let i = 0; i < tasks.length; i++) {
+            const task = tasks[i].fn;
+            results[i] = typeof task === "function" ? this.scheduleJsSingle(task) : "dropped";
+        }
+        return results;
+    }
+
+    private scheduleJs(task: Task, tag: string): ScheduleResult {
+        const js = this.js!;
+        const lane = this.getOrCreateLane(inferLane(tag));
+        const queuedBefore = lane.queue.length;
+        const status = lane.queue.push(task);
+        lane.enqueuedTasks++; js.enqueuedTasks++;
+
+        if ((status & 2) !== 0) {
+            lane.droppedTasks++; js.droppedTasks++;
+            if (!js.flushing && !js.scheduled && js.totalLength > 0) {
+                js.scheduled = true;
+                js.scheduledFlushes++;
+                this.requestFlush(js.totalLength > this.microThreshold ? "macro" : "micro");
+            }
+            return "dropped";
+        }
+
+        lane.recordTag(tag, queuedBefore);
+        js.totalLength++;
+
+        if (js.flushing) return "accepted";
+        if (!js.scheduled) {
+            js.scheduled = true;
+            js.scheduledFlushes++;
+            this.requestFlush(js.totalLength > this.microThreshold ? "macro" : "micro");
+        }
+        return "accepted";
+    }
+
     private requestFlush(kind: "micro" | "macro"): void {
         if (kind === "micro") queueMicrotask(this.boundFlush);
         else scheduleMacro(this.boundFlush);
     }
-    private flush(): void { if (this.wasm) return this.flushWasm(); this.flushJs(); }
+
+    private flush(): void {
+        if (this.wasm) return this.flushWasm();
+        if (this.jsSingle) return this.flushJsSingle();
+        this.flushJs();
+    }
 
     private flushWasm(): void {
         const wasm = this.wasm!;
@@ -594,27 +727,62 @@ export class Scheduler {
         }
     }
 
-    private shiftFromNextLane(): QueuedTask | undefined {
+    private flushJsSingle(): void {
+        const js = this.jsSingle!;
+        if (js.flushing) return;
+        js.flushing = true;
+        js.scheduled = false;
+        let ran = 0;
+        try {
+            while (ran < this.flushBudget) {
+                const task = js.queue.shift();
+                if (!task) break;
+                js.totalLength--;
+                ran++;
+                js.executedTasks++;
+                try { task(); } catch (e) { console.error("[Scheduler] task threw (laneMode=single)", e); }
+            }
+        } finally {
+            js.flushing = false;
+            js.completedFlushes++;
+            if (js.totalLength > 0 && !js.scheduled) {
+                js.scheduled = true;
+                js.scheduledFlushes++;
+                const kind = ran >= this.flushBudget || js.totalLength > this.microThreshold ? "macro" : "micro";
+                if (ran >= this.flushBudget) js.yieldedByBudget++;
+                this.requestFlush(kind);
+            }
+        }
+    }
+
+    private shiftFromNextLane(): Task | undefined {
         const js = this.js!;
         const n = js.laneOrder.length;
         if (n === 0) return undefined;
         if (js.rrRemaining > 0) {
             const currentIdx = (js.rrIndex + n - 1) % n;
-            const currentLane = js.lanes.get(js.laneOrder[currentIdx]);
-            const next = currentLane?.queue.shift();
-            if (next) { js.rrRemaining--; currentLane!.executedTasks++; js.totalLength--; return next; }
+            const currentLane = js.laneOrder[currentIdx];
+            const next = currentLane.queue.shift();
+            if (next) {
+                this.shiftedTag = currentLane.shiftTag();
+                js.rrRemaining--;
+                currentLane.executedTasks++;
+                js.totalLength--;
+                return next;
+            }
             js.rrRemaining = 0;
         }
         for (let scanned = 0; scanned < n; scanned++) {
             const idx = js.rrIndex % n;
-            const key = js.laneOrder[idx];
+            const lane = js.laneOrder[idx];
             js.rrIndex = (idx + 1) % n;
-            const lane = js.lanes.get(key);
-            if (!lane || lane.queue.length === 0) continue;
+            if (lane.queue.length === 0) continue;
             js.rrRemaining = Math.max(0, this.laneBudget - 1);
             lane.executedTasks++;
             js.totalLength--;
-            return lane.queue.shift();
+            const next = lane.queue.shift();
+            if (next) this.shiftedTag = lane.shiftTag();
+            return next;
         }
         return undefined;
     }
@@ -630,7 +798,7 @@ export class Scheduler {
                 const next = this.shiftFromNextLane();
                 if (!next) break;
                 ran++; js.executedTasks++;
-                try { next.task(); } catch (e) { console.error(`[Scheduler] task threw (tag=${next.tag})`, e); }
+                try { next(); } catch (e) { console.error(`[Scheduler] task threw (tag=${this.shiftedTag})`, e); }
             }
         } finally {
             js.flushing = false;

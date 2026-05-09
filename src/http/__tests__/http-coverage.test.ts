@@ -115,6 +115,92 @@ describe("makeHttp and decorators", () => {
     await expect(run(client.with(mw)({ method: "GET", url: "/a" }))).resolves.toMatchObject({ bodyText: "/a?mw=1" });
     await expect(run(withMiddleware(mw)(client)({ method: "GET", url: "/b" }))).resolves.toMatchObject({ bodyText: "/b?mw=1" });
   });
+
+  it("records pool rejection, queue timeout, request timeout, and adaptive cleanup stats", async () => {
+    let releaseFetch!: () => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+      releaseFetch = () => resolve(new Response("ok", { status: 200 }));
+    })));
+
+    const rejectedClient = makeHttp({
+      baseUrl: "https://example.test",
+      pool: { concurrency: 1, maxQueue: 0, key: "global" },
+    });
+    const first = run<HttpWireResponse>(rejectedClient({ method: "GET", url: "/slow" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    await expect(run(rejectedClient({ method: "GET", url: "/rejected" }))).rejects.toMatchObject({
+      _tag: "PoolRejected",
+      key: "global",
+    });
+    expect(rejectedClient.stats()).toMatchObject({ poolRejected: 1, failed: 1 });
+    releaseFetch();
+    await expect(first).resolves.toMatchObject({ bodyText: "ok" });
+
+    let releaseTimeoutHolder!: () => void;
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>((resolve) => {
+      releaseTimeoutHolder = () => resolve(new Response("done", { status: 200 }));
+    })));
+    const timeoutPoolClient = makeHttp({
+      baseUrl: "https://example.test",
+      pool: { concurrency: 1, maxQueue: 1, queueTimeoutMs: 1, key: "global" },
+    });
+    const holder = run<HttpWireResponse>(timeoutPoolClient({ method: "GET", url: "/holder" }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await expect(run(timeoutPoolClient({ method: "GET", url: "/queued" }))).rejects.toMatchObject({
+      _tag: "PoolTimeout",
+      key: "global",
+    });
+    expect(timeoutPoolClient.stats()).toMatchObject({ poolTimeouts: 1, failed: 1 });
+    releaseTimeoutHolder();
+    await holder;
+
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    const requestTimeoutClient = makeHttp({ baseUrl: "https://example.test", timeoutMs: 1 });
+    await expect(run(requestTimeoutClient({ method: "GET", url: "/timeout" }))).rejects.toMatchObject({
+      _tag: "Timeout",
+      phase: "request",
+      message: expect.stringContaining("timed out after 1ms"),
+    });
+    expect(requestTimeoutClient.stats()).toMatchObject({ timedOut: 1 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw { _tag: "Timeout", timeoutMs: 3, message: "upstream timeout" } satisfies HttpError;
+    }));
+    const adaptiveClient = makeHttp({
+      baseUrl: "https://example.test",
+      adaptiveLimiter: { initialLimit: 1, minLimit: 1, maxLimit: 1 },
+    });
+    await expect(run(adaptiveClient({ method: "GET", url: "/adaptive-error" }))).rejects.toMatchObject({
+      _tag: "Timeout",
+    });
+    expect(adaptiveClient.stats()).toMatchObject({ timedOut: 1, adaptiveLimiter: expect.any(Object) });
+    adaptiveClient.destroy?.();
+    adaptiveClient.shutdown?.();
+  });
+
+  it("falls back when aborting a linked request signal with a reason is unsupported", async () => {
+    const requestController = new AbortController();
+    const originalAbort = AbortController.prototype.abort;
+    vi.spyOn(AbortController.prototype, "abort").mockImplementation(function (this: AbortController, reason?: unknown) {
+      if (this !== requestController && reason instanceof Error && reason.message === "legacy abort reason") {
+        throw new Error("abort reason unsupported");
+      }
+      return originalAbort.call(this, reason);
+    });
+    vi.stubGlobal("fetch", vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      requestController.abort(new Error("legacy abort reason"));
+      if (init?.signal?.aborted) throw new DOMException("aborted", "AbortError");
+      return new Response("unexpected", { status: 200 });
+    }));
+
+    const client = makeHttp({ baseUrl: "https://example.test" });
+    await expect(run(client({
+      method: "GET",
+      url: "/abort-reason",
+      init: { signal: requestController.signal } as any,
+    }))).rejects.toEqual({ _tag: "Abort" });
+  });
 });
 
 describe("retry middleware", () => {
@@ -142,6 +228,45 @@ describe("retry middleware", () => {
     const retriedAbort = withRetry({ maxRetries: 2, baseDelayMs: 0, maxDelayMs: 0 })(nextAbort);
     await expect(run(retriedAbort({ method: "GET", url: "/abort" }))).rejects.toEqual({ _tag: "Abort" });
     expect(nextAbort).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries streaming failures and stops immediately for non-retryable streaming errors", async () => {
+    const emptyStats = {
+      inFlight: 0,
+      started: 0,
+      succeeded: 0,
+      failed: 0,
+      aborted: 0,
+      timedOut: 0,
+      poolRejected: 0,
+      poolTimeouts: 0,
+    };
+    const retriedNext = Object.assign(
+      vi.fn(() => retriedNext.mock.calls.length === 1
+        ? asyncFail({ _tag: "FetchError", message: "temporary" } satisfies HttpError)
+        : asyncSucceed({
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          body: { _tag: "Empty" },
+          ms: 1,
+        } as HttpWireResponseStream)),
+      { stats: () => emptyStats },
+    ) as HttpClientStream;
+    const onRetry = vi.fn();
+    const retried = withRetryStream({ maxRetries: 1, baseDelayMs: 0, maxDelayMs: 0, onRetry })(retriedNext);
+
+    await expect(run(retried({ method: "GET", url: "/stream-error" }))).resolves.toMatchObject({ status: 200 });
+    expect(retriedNext).toHaveBeenCalledTimes(2);
+    expect(onRetry).toHaveBeenCalledWith(expect.objectContaining({ error: { _tag: "FetchError", message: "temporary" } }));
+
+    const closedNext = Object.assign(
+      vi.fn(() => asyncFail({ _tag: "PoolClosed", key: "api", message: "closed" } satisfies HttpError)),
+      { stats: () => emptyStats },
+    ) as HttpClientStream;
+    const closed = withRetryStream({ maxRetries: 3, baseDelayMs: 0, maxDelayMs: 0 })(closedNext);
+    await expect(run(closed({ method: "GET", url: "/closed" }))).rejects.toMatchObject({ _tag: "PoolClosed" });
+    expect(closedNext).toHaveBeenCalledTimes(1);
   });
 
   it("respects retry-after headers", async () => {
@@ -311,6 +436,48 @@ describe("HTTP streaming and sleep", () => {
 
     await expect(pending).rejects.toMatchObject({ _tag: "Abort" });
     expect(cancelCalled).toBe(true);
+  });
+
+  it("makeHttpStream covers adaptive limiter, pool cleanup on fetch errors, and request timeout", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(new Uint8Array([9]), { status: 200, statusText: "OK" })));
+    const adaptiveStream = makeHttpStream({
+      baseUrl: "https://example.test",
+      adaptiveLimiter: { initialLimit: 1, minLimit: 1, maxLimit: 1 },
+    });
+    const response = await run<HttpWireResponseStream>(adaptiveStream({ method: "GET", url: "/adaptive-stream" }));
+    await expect(run<Uint8Array[]>(collectStream(response.body))).resolves.toHaveLength(1);
+    expect(adaptiveStream.stats().adaptiveLimiter).toMatchObject({ limit: 1 });
+
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("stream failed");
+    }));
+    const adaptiveFailure = makeHttpStream({
+      baseUrl: "https://example.test",
+      adaptiveLimiter: { initialLimit: 1, minLimit: 1, maxLimit: 1 },
+    });
+    await expect(run(adaptiveFailure({ method: "GET", url: "/adaptive-failure" }))).rejects.toMatchObject({
+      _tag: "FetchError",
+      message: "Error: stream failed",
+    });
+    expect(adaptiveFailure.stats()).toMatchObject({ failed: 1, adaptiveLimiter: expect.any(Object) });
+
+    const pooledFailure = makeHttpStream({
+      baseUrl: "https://example.test",
+      pool: { concurrency: 1, maxQueue: 0, key: "global" },
+    });
+    await expect(run(pooledFailure({ method: "GET", url: "/pooled-failure" }))).rejects.toMatchObject({
+      _tag: "FetchError",
+    });
+    expect(pooledFailure.stats().pool).toMatchObject({ acquired: 1, released: 1, running: 0 });
+
+    vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => undefined)));
+    const timedOut = makeHttpStream({ baseUrl: "https://example.test", timeoutMs: 1 });
+    await expect(run(timedOut({ method: "GET", url: "/stream-timeout" }))).rejects.toMatchObject({
+      _tag: "Timeout",
+      phase: "request",
+      message: expect.stringContaining("timed out after 1ms"),
+    });
+    expect(timedOut.stats()).toMatchObject({ timedOut: 1 });
   });
 
   it("httpClientStream supports middleware, retry and default get alias", async () => {

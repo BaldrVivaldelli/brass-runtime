@@ -1,5 +1,7 @@
 # .gitignore
 .kiro/
+.codex/
+.agents/
 .idea/
 # Logs
 logs
@@ -64,6 +66,9 @@ web_modules/
 
 # Output of 'npm pack'
 *.tgz
+
+# Rust build output
+crates/**/target/
 
 # Yarn Integrity file
 .yarn-integrity

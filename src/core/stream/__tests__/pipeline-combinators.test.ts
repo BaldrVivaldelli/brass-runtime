@@ -11,6 +11,8 @@ import {
   takeP,
   dropP,
   groupedP,
+  chunksP,
+  mapChunksEffectP,
   mapEffectP,
   tapEffectP,
   bufferP,
@@ -60,6 +62,23 @@ describe("mapP", () => {
       collectStream(via(fromArray([42]), mapP((x: number) => String(x))))
     );
     expect(result).toEqual(["42"]);
+  });
+});
+
+describe("chunk and buffer pipelines", () => {
+  it("chunks, maps chunks effectfully, and buffers through pipeline helpers", async () => {
+    await expect(run(collectStream(via(fromArray([1, 2, 3]), chunksP<number>(2)))))
+      .resolves
+      .toEqual([[1, 2], [3]]);
+
+    await expect(run(collectStream(via(
+      fromArray([1, 2, 3, 4]),
+      mapChunksEffectP(2, (chunk: readonly number[]) => asyncSucceed(chunk.map((value) => value * 10))),
+    )))).resolves.toEqual([10, 20, 30, 40]);
+
+    await expect(run(collectStream(via(fromArray([1, 2]), bufferP<number>(2, "backpressure")))))
+      .resolves
+      .toEqual([1, 2]);
   });
 });
 

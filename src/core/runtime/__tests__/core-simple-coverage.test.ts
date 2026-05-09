@@ -6,14 +6,18 @@ import {
   andThen,
   elapsed,
   exponential,
+  fibonacci,
   fixed,
   intersect,
+  jitter,
   jittered,
+  map as mapSchedule,
   recurs,
   repeatWithSchedule,
   retryWithSchedule,
   take,
   union,
+  windowed,
   whileInput,
 } from "../schedule";
 import {
@@ -148,6 +152,36 @@ describe("Schedule", () => {
     const either = union(recurs(0), fixed(4));
     expect(either.initial()).toEqual({ left: 0, right: 0 });
     expect(either.step({ left: 0, right: 0 }, "x")[0]).toEqual({ continue: true, delayMs: 0 });
+
+    const fib = fibonacci(10, 100);
+    let fibState = fib.initial();
+    const fibDelays: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const [decision, nextState] = fib.step(fibState, "x");
+      fibDelays.push(decision.delayMs);
+      fibState = nextState;
+    }
+    expect(fibDelays).toEqual([10, 10, 20, 30, 50]);
+
+    const stableJitter = jitter(fixed(100), { factor: 0.2, random: () => 1 });
+    expect(stableJitter.step(stableJitter.initial(), "x")[0].delayMs).toBe(120);
+    const fullJitter = jittered(100, 1000);
+    vi.spyOn(Math, "random").mockReturnValueOnce(0.5);
+    expect(fullJitter.step(fullJitter.initial(), "x")[0].delayMs).toBe(50);
+    vi.restoreAllMocks();
+
+    let now = 0;
+    const rolling = windowed(recurs(2), 100, () => now);
+    let rollingState = rolling.initial();
+    const first = rolling.step(rollingState, "x");
+    expect(first[0].continue).toBe(true);
+    rollingState = first[1];
+    expect(rolling.step(rollingState, "x")[0].continue).toBe(false);
+    now = 101;
+    expect(rolling.step(rollingState, "x")[0].continue).toBe(true);
+
+    const mapped = mapSchedule(fixed(1), (n) => `attempt-${n}`);
+    expect(mapped.step(mapped.initial(), "x")[2]).toBe("attempt-1");
   });
 
   it("retries and repeats effects according to schedules", async () => {

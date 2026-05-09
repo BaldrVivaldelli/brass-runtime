@@ -1,8 +1,21 @@
 import { PushStatus } from "./ringBuffer";
 import { makeBoundedRingBuffer, type BoundedRingBuffer, type RingBufferOptions } from "./boundedRingBuffer";
-import type { RuntimeEmitContext, RuntimeEvent, RuntimeEventRecord, RuntimeHooks } from "./events";
+import {
+  makeRuntimeEventRecord,
+  runtimeEventRecordContext,
+  type RuntimeEmitContext,
+  type RuntimeEvent,
+  type RuntimeEventRecord,
+  type RuntimeHooks,
+} from "./events";
 
 export type EventHandler = (ev: RuntimeEventRecord) => void;
+
+export function runtimeHooksToEventHandler(hooks: RuntimeHooks): EventHandler {
+  return (record) => {
+    hooks.emit(record as RuntimeEvent, runtimeEventRecordContext(record));
+  };
+}
 
 type Subscriber = {
   handler: EventHandler;
@@ -26,13 +39,7 @@ export class EventBus implements RuntimeHooks {
     if (this.subs.length === 0) return;
 
     // 2.2.2: construir RuntimeEventRecord solo si hay suscriptores
-    const full: RuntimeEventRecord = {
-      ...ev,
-      ...ctx,
-      seq: this.seq++,
-      ts: typeof performance !== "undefined" ? performance.now() : Date.now(),
-      wallTs: Date.now(),
-    };
+    const full = makeRuntimeEventRecord(ev, ctx, this.seq++);
 
     for (const s of this.subs) {
       const st = s.q.push(full);
@@ -58,6 +65,10 @@ export class EventBus implements RuntimeHooks {
     };
   }
 
+  subscribeHooks(hooks: RuntimeHooks, perSubscriberCapacity = 2048) {
+    return this.subscribe(runtimeHooksToEventHandler(hooks), perSubscriberCapacity);
+  }
+
   flush(budget = 4096) {
     this.flushScheduled = false;
 
@@ -66,15 +77,16 @@ export class EventBus implements RuntimeHooks {
 
       if (s.dropped > 0) {
         // avisar drop como evento "log" del modelo nuevo
-        const dropEv: RuntimeEventRecord = {
-          seq: 0,
-          ts: typeof performance !== "undefined" ? performance.now() : Date.now(),
-          wallTs: Date.now(),
-          type: "log",
-          level: "warn",
-          message: "eventbus.dropped",
-          fields: { dropped: s.dropped },
-        };
+        const dropEv = makeRuntimeEventRecord(
+          {
+            type: "log",
+            level: "warn",
+            message: "eventbus.dropped",
+            fields: { dropped: s.dropped },
+          },
+          {},
+          0
+        );
 
         try { s.handler(dropEv); } catch {}
         s.dropped = 0;

@@ -11,6 +11,7 @@ import { WasmFiberEngine, type WasmFiberEngineOptions } from "./engine/WasmFiber
 import type { FiberEngine, RuntimeEngineMode } from "./engine/types";
 import type { EngineStats } from "./engineStats";
 import { runtimeCapabilities } from "./capabilities";
+import { Schema, parseConfig } from "../../schema";
 
 // fallback hooks (no-op)
 export const NoopHooks: RuntimeHooks = {
@@ -25,6 +26,13 @@ function normalizeRuntimeEngineMode(value: unknown): RuntimeEngineMode {
 function unreachableEngine(value: never): never {
     throw new Error(`brass-runtime unsupported engine '${String(value)}'`);
 }
+
+const runtimeOptionsSchema = Schema.object({
+    env: Schema.any(),
+    lane: Schema.string({ minLength: 1 }).optional(),
+    inferLane: Schema.boolean().optional(),
+    engine: Schema.enum(["ts", "wasm"] as const).optional(),
+}, { unknownKeys: "passthrough" });
 
 /**
  * --- Runtime como objeto único (ZIO-style) ---
@@ -71,6 +79,8 @@ export class Runtime<R> {
     registry?: RuntimeRegistry;
 
     constructor(args: RuntimeOptions<R>) {
+        parseConfig("RuntimeOptions", runtimeOptionsSchema, args);
+
         this.env = args.env;
         this.scheduler = args.scheduler ?? globalScheduler;
         this.lane = args.lane;
@@ -145,6 +155,10 @@ export class Runtime<R> {
             scopeId: f?.scopeId, // ✅ FIX: era f?.scope
             traceId: f?.fiberContext?.trace?.traceId,
             spanId: f?.fiberContext?.trace?.spanId,
+            parentSpanId: f?.fiberContext?.trace?.parentSpanId,
+            traceState: f?.fiberContext?.trace?.traceState,
+            baggage: f?.fiberContext?.trace?.baggage,
+            sampled: f?.fiberContext?.trace?.sampled,
         };
 
         this.hooks.emit(ev, ctx);

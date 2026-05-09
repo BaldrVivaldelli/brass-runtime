@@ -9,12 +9,26 @@ import {
 } from "./client";
 
 import { toPromise as runToPromise } from "../core/runtime/runtime";
-import { Async, AsyncWithPromise, mapTryAsync, withAsyncPromise } from "../core/types/asyncEffect";
+import { Async, AsyncWithPromise, asyncFlatMap, asyncSucceed, mapTryAsync, withAsyncPromise } from "../core/types/asyncEffect";
 
 import { mergeHeaders, setHeaderIfMissing } from "./optics/request";
 import {RetryPolicy, withRetry} from "./retry/retry";
+import {
+    decodeJsonBodyEffect,
+    encodeJsonBodyEffect,
+    type AnyJsonSchemaLike,
+    type InferJsonSchema,
+    type ValidationError,
+} from "./validation";
 
 type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & { timeoutMs?: number; poolKey?: string; headers?: any };
+type JsonInitNoSchema = InitNoMethodBody & { schema?: undefined; schemaName?: string };
+type JsonInitWithSchema<Validator extends AnyJsonSchemaLike> = InitNoMethodBody & { schema: Validator; schemaName?: string };
+type PostJsonInitNoSchema = AnyInitWithHeaders & { schema?: undefined; schemaName?: string; bodySchema?: undefined; bodySchemaName?: string };
+type PostJsonInitWithBodySchema<BodyValidator extends AnyJsonSchemaLike> = AnyInitWithHeaders & { schema?: undefined; schemaName?: string; bodySchema: BodyValidator; bodySchemaName?: string };
+type PostJsonInitWithSchema<Validator extends AnyJsonSchemaLike> = AnyInitWithHeaders & { schema: Validator; schemaName?: string; bodySchema?: undefined; bodySchemaName?: string };
+type PostJsonInitWithSchemaAndBody<Validator extends AnyJsonSchemaLike, BodyValidator extends AnyJsonSchemaLike> = AnyInitWithHeaders & { schema: Validator; schemaName?: string; bodySchema: BodyValidator; bodySchemaName?: string };
+type AnyJsonInit = InitNoMethodBody & { schema?: AnyJsonSchemaLike; schemaName?: string };
 
 
 // -------------------------------------------------------------------------------------------------
@@ -65,7 +79,7 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
     const requestRaw = (req: HttpRequest) => wire(req);
 
     const splitInit = (init?: AnyInitWithHeaders) => {
-        const { headers, timeoutMs, poolKey, ...rest } = (init ?? {}) as any;
+        const { headers, timeoutMs, poolKey, schema, schemaName, bodySchema, bodySchemaName, ...rest } = (init ?? {}) as any;
         return {
             headers: normalizeHeadersInit(headers),
             timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
@@ -99,6 +113,16 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
         body,
     });
 
+    const decodeResponse = <A>(
+        w: HttpWireResponse,
+        validator?: AnyJsonSchemaLike,
+        schemaName?: string,
+    ): Async<unknown, ValidationError, HttpResponse<A>> =>
+        asyncFlatMap(
+            decodeJsonBodyEffect<A>(w.bodyText, validator as any, { schemaName }),
+            (body) => asyncSucceed(toResponse(w, body)),
+        );
+
     return {
         cfg,
         wire,
@@ -108,6 +132,7 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
         applyInitHeaders,
         buildReq,
         toResponse,
+        decodeResponse,
     };
 };
 
@@ -121,8 +146,38 @@ export type Dx = {
     post: (url: string, body?: string, init?: AnyInitWithHeaders) => AsyncWithPromise<unknown, HttpError, HttpWireResponse>;
 
     getText: (url: string, init?: InitNoMethodBody) => AsyncWithPromise<unknown, HttpError, HttpResponse<string>>;
-    getJson: <A>(url: string, init?: InitNoMethodBody) => AsyncWithPromise<unknown, HttpError, HttpResponse<A>>;
-    postJson: <A>(url: string, bodyObj: unknown, init?: AnyInitWithHeaders) => AsyncWithPromise<unknown, HttpError, HttpResponse<A>>;
+    getJson: {
+        <Validator extends AnyJsonSchemaLike>(
+            url: string,
+            init: JsonInitWithSchema<Validator>,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<InferJsonSchema<Validator>>>;
+        <A = unknown>(
+            url: string,
+            init?: JsonInitNoSchema,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
+    };
+    postJson: {
+        <Validator extends AnyJsonSchemaLike, BodyValidator extends AnyJsonSchemaLike>(
+            url: string,
+            bodyObj: InferJsonSchema<BodyValidator>,
+            init: PostJsonInitWithSchemaAndBody<Validator, BodyValidator>,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<InferJsonSchema<Validator>>>;
+        <BodyValidator extends AnyJsonSchemaLike, A = unknown>(
+            url: string,
+            bodyObj: InferJsonSchema<BodyValidator>,
+            init: PostJsonInitWithBodySchema<BodyValidator>,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
+        <Validator extends AnyJsonSchemaLike>(
+            url: string,
+            bodyObj: unknown,
+            init: PostJsonInitWithSchema<Validator>,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<InferJsonSchema<Validator>>>;
+        <A = unknown>(
+            url: string,
+            bodyObj: unknown,
+            init?: PostJsonInitNoSchema,
+        ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
+    };
 
     with: (mw: HttpMiddleware) => Dx;
     withRetry: (p: RetryPolicy) => Dx;
@@ -149,24 +204,29 @@ export function httpClient(cfg: MakeHttpConfig = {}) {
             return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, w.bodyText)));
         };
 
-        const getJson = <A>(url: string, init?: InitNoMethodBody) => {
+        const getJson = ((url: string, init?: AnyJsonInit) => {
             const base = core.buildReq("GET", url, init as any);
             const req = setHeaderIfMissing("accept", "application/json")(base);
-            return core.withPromise(mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A)));
-        };
+            return core.withPromise(asyncFlatMap(requestRaw(req), (w) => core.decodeResponse(w, init?.schema, init?.schemaName)));
+        }) as Dx["getJson"];
 
-        const postJson = <A>(url: string, bodyObj: unknown, init?: AnyInitWithHeaders) => {
-            const base = core.buildReq("POST", url, init, JSON.stringify(bodyObj ?? {}));
-
-            // defaults sin pisar (optics)
-            const req = setHeaderIfMissing("content-type", "application/json")(
-                setHeaderIfMissing("accept", "application/json")(base)
-            );
-
+        const postJson = ((url: string, bodyObj: unknown, init?: AnyInitWithHeaders & { schema?: AnyJsonSchemaLike; schemaName?: string; bodySchema?: AnyJsonSchemaLike; bodySchemaName?: string }) => {
             return core.withPromise(
-                mapTryAsync(requestRaw(req), (w) => core.toResponse(w, JSON.parse(w.bodyText) as A))
+                asyncFlatMap(
+                    encodeJsonBodyEffect(bodyObj, init?.bodySchema, { schemaName: init?.bodySchemaName }),
+                    (bodyText) => {
+                        const base = core.buildReq("POST", url, init, bodyText);
+
+                        // defaults sin pisar (optics)
+                        const req = setHeaderIfMissing("content-type", "application/json")(
+                            setHeaderIfMissing("accept", "application/json")(base)
+                        );
+
+                        return asyncFlatMap(requestRaw(req), (w) => core.decodeResponse(w, init?.schema, init?.schemaName));
+                    },
+                )
             );
-        };
+        }) as Dx["postJson"];
 
         return {
             request,
@@ -230,23 +290,32 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
     const postJson = <A>(
         url: string,
         bodyObj: unknown,
-        init?: HttpInit & { headers?: Record<string, string> }
+        init?: AnyInitWithHeaders & { schema?: AnyJsonSchemaLike; schemaName?: string; bodySchema?: AnyJsonSchemaLike; bodySchemaName?: string }
     ) => {
-        const base = core.buildReq("POST", url, init as any, JSON.stringify(bodyObj ?? {}));
-
-        // defaults sin pisar si ya vinieron
-        const req = setHeaderIfMissing("content-type", "application/json")(
-            setHeaderIfMissing("accept", "application/json")(base)
-        );
-
         const startedAt = Date.now();
 
         return core.withPromise(
-            mapTryAsync(core.requestRaw(req), (w) => ({
-                wire: w,
-                response: core.toResponse(w, JSON.parse(w.bodyText) as A),
-                meta: mkMeta(req, w, startedAt),
-            } satisfies HttpResponseWithMeta<A>))
+            asyncFlatMap(
+                encodeJsonBodyEffect(bodyObj, init?.bodySchema, { schemaName: init?.bodySchemaName }),
+                (bodyText) => {
+                    const base = core.buildReq("POST", url, init as any, bodyText);
+
+                    // defaults sin pisar si ya vinieron
+                    const req = setHeaderIfMissing("content-type", "application/json")(
+                        setHeaderIfMissing("accept", "application/json")(base)
+                    );
+
+                    return asyncFlatMap(core.requestRaw(req), (w) =>
+                        asyncFlatMap(core.decodeResponse<A>(w, init?.schema, init?.schemaName), (response) =>
+                            asyncSucceed({
+                                wire: w,
+                                response,
+                                meta: mkMeta(req, w, startedAt),
+                            } satisfies HttpResponseWithMeta<A>),
+                        ),
+                    );
+                },
+            )
         );
     };
 
@@ -267,7 +336,7 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
     };
 
     // => { wire, response(json), meta }
-    const getJson = <A>(url: string, init?: InitNoMethodBody) => {
+    const getJson = <A>(url: string, init?: AnyJsonInit) => {
         const base = core.buildReq("GET", url, init as any);
 
         // optics: default accept sin pisar
@@ -275,11 +344,15 @@ export function httpClientWithMeta(cfg: MakeHttpConfig = {}) {
 
         const startedAt = Date.now();
         return core.withPromise(
-            mapTryAsync(core.requestRaw(req), (w) => ({
-                wire: w,
-                response: core.toResponse(w, JSON.parse(w.bodyText) as A),
-                meta: mkMeta(req, w, startedAt),
-            } satisfies HttpResponseWithMeta<A>))
+            asyncFlatMap(core.requestRaw(req), (w) =>
+                asyncFlatMap(core.decodeResponse<A>(w, init?.schema, init?.schemaName), (response) =>
+                    asyncSucceed({
+                        wire: w,
+                        response,
+                        meta: mkMeta(req, w, startedAt),
+                    } satisfies HttpResponseWithMeta<A>),
+                ),
+            )
         );
     };
 

@@ -64,6 +64,37 @@ const users = await run(useManaged(dbPool, (pool) => pool.query("SELECT *")));
 const orders = await run(useManaged(dbPool, (pool) => pool.query("SELECT *")));
 ```
 
+## Resource — Composable scoped resources
+
+`Resource` is the higher-level acquire/use/release descriptor. It composes with
+`map`, `flatMap`, `zip`, and `Resource.all`, and releases nested resources in
+reverse acquisition order.
+
+```ts
+import { Resource, makeResource, useResource } from "brass-runtime";
+
+const db = makeResource(
+  openDatabasePool(),
+  (pool, _exit) => pool.close()
+);
+
+const cache = makeResource(
+  openCacheClient(),
+  (client, _exit) => client.disconnect()
+);
+
+const services = Resource.all([db, cache] as const);
+
+const users = await run(
+  useResource(services, ([pool, client]) =>
+    loadUsers(pool, client)
+  )
+);
+```
+
+`Resource.fromManaged(managedValue)` bridges older `managed` descriptors into
+the composable API.
+
 ## managedAll — Compose multiple resources
 
 Acquire in order, release in reverse (LIFO):

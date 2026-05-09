@@ -8,6 +8,9 @@ const require = createRequire(import.meta.url);
 const requiredFiles = [
   "dist/index.cjs",
   "dist/http/index.cjs",
+  "dist/http/testing.cjs",
+  "dist/schema/index.cjs",
+  "dist/observability/index.cjs",
   "dist/agent/index.cjs",
   "wasm/pkg/brass_runtime_wasm_engine.js",
   "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
@@ -24,6 +27,9 @@ for (const file of requiredFiles) {
 const cjsFiles = [
   "dist/index.cjs",
   "dist/http/index.cjs",
+  "dist/http/testing.cjs",
+  "dist/schema/index.cjs",
+  "dist/observability/index.cjs",
   "dist/agent/index.cjs",
 ];
 

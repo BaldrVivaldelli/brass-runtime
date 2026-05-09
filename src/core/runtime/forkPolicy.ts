@@ -6,6 +6,7 @@ import { BrassEnv, Tracer } from "./tracer";
 type ForkServices = {
     tracer: Tracer;
     seed?: TraceContext;
+    baggage?: TraceContext["baggage"];
     childName: (parentName?: string) => string | undefined;
 };
 
@@ -43,7 +44,16 @@ export function makeForkPolicy<R>(env: R, hooks: RuntimeHooks) {
                     scopeId: fiber.scopeId, // ✅ ahora viaja
                     name: fiber.name,
                 },
-                { fiberId: parent?.id, traceId: parentCtx?.trace?.traceId, spanId: parentCtx?.trace?.spanId }
+                {
+                    fiberId: fiber.id,
+                    scopeId: fiber.scopeId,
+                    traceId: trace?.traceId,
+                    spanId: trace?.spanId,
+                    parentSpanId: trace?.parentSpanId,
+                    traceState: trace?.traceState,
+                    baggage: trace?.baggage,
+                    sampled: trace?.sampled,
+                }
             );
         },
     };
@@ -59,10 +69,11 @@ function resolveForkServices(env?: BrassEnv): ForkServices {
 
     const tracer = brass?.tracer ?? defaultTracer;
     const seed = brass?.traceSeed;
+    const baggage = brass?.baggage;
 
     const childName = brass?.childName ?? ((p?: string) => (p ? `${p}/child` : undefined));
 
-    return { tracer, seed, childName };
+    return { tracer, seed, baggage, childName };
 }
 
 function randomRuntimeId(prefix: string): string {
@@ -84,8 +95,19 @@ function forkTrace(svc: ForkServices, parentTrace: TraceContext | null): TraceCo
             spanId: svc.tracer.newSpanId(),
             parentSpanId: parentTrace.spanId,
             sampled: parentTrace.sampled,
+            traceState: parentTrace.traceState,
+            baggage: parentTrace.baggage,
         };
     }
-    if (svc.seed) return { ...svc.seed };
-    return { traceId: svc.tracer.newTraceId(), spanId: svc.tracer.newSpanId(), sampled: true };
+    if (svc.seed) {
+        const baggage = svc.seed.baggage ?? svc.baggage;
+        return baggage ? { ...svc.seed, baggage } : { ...svc.seed };
+    }
+    const baggage = svc.baggage;
+    return {
+        traceId: svc.tracer.newTraceId(),
+        spanId: svc.tracer.newSpanId(),
+        sampled: true,
+        ...(baggage ? { baggage } : {}),
+    };
 }

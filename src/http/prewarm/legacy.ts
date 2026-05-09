@@ -1,7 +1,7 @@
-import { fromPromiseAbortable } from "../core/runtime/runtime";
-import type { Async } from "../core/types/asyncEffect";
-import type { HttpError, HttpMethod, HttpMiddleware, HttpRequest } from "./client";
-import { asyncFail, asyncFold } from "../core/types/asyncEffect";
+import { fromPromiseAbortable } from "../../core/runtime/runtime";
+import type { Async } from "../../core/types/asyncEffect";
+import type { HttpError, HttpMethod, HttpMiddleware, HttpRequest } from "../client";
+import { asyncFail, asyncFold } from "../../core/types/asyncEffect";
 
 export type ConnectionPrewarmAttempt = {
   url: string;

@@ -1,3 +1,20 @@
+# Unreleased
+
+### Features
+
+* **schema:** add dependency-free `brass-runtime/schema` DSL with `s`, `Schema`, `InferSchema`, optional/nullable/refine/transform, and path-rich issues
+* **http:** add schema-aware `getJson`/`postJson` validation with typed `ValidationError` while preserving legacy `validatedJson` callbacks
+* **http:** add schema-driven `bodySchema` validation for `postJson` so invalid request payloads fail before `fetch`
+* **http:** infer `postJson` request body types from `bodySchema`
+* **http:** add public error helpers (`isHttpError`, `isValidationError`, `matchHttpError`, `formatHttpError`)
+* **http:** improve adaptive limiter with per-key TTL eviction, warmup ramp, jittered probes, slow-start recovery, circuit-breaker feedback, configurable headroom, efficient percentile reads, and explicit shutdown cleanup
+* **http:** add adaptive limiter diagnostics via `keys()`, `snapshot(key)`, `dump()`, and aggregate stats keys
+* **schema:** add common shortcut schemas for email, URL, UUID, integer, positive number, non-empty string, and ISO date
+* **docs:** add HTTP cookbook recipes for typed API clients, testing, retry/adaptive/circuit breaker, observability errors, and startup config validation
+* **config:** validate runtime, HTTP, and observability construction config with schema-driven `ConfigValidationError`
+* **http:** add `httpClientBuilder`/`makeHttpClientBuilder` for discoverable default-client configuration
+* **http/testing:** add dependency-free mock HTTP client, mock fetch, response factories, and effect runner helpers under `brass-runtime/http/testing`
+
 # [1.10.0](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.9.6...v1.10.0) (2026-01-25)
 
 ## [1.9.6](https://github.com/BaldrVivaldelli/brass-runtime/compare/v1.9.5...v1.9.6) (2026-01-24)

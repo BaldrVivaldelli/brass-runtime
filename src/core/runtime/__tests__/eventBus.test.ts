@@ -54,6 +54,54 @@ describe("EventBus optimizations", () => {
     });
   });
 
+  describe("event/context field preservation", () => {
+    it("keeps event fiberId/scopeId when context has ambient ids", async () => {
+      const bus = new EventBus();
+      const received: RuntimeEventRecord[] = [];
+
+      bus.subscribe((ev) => received.push(ev));
+      bus.emit(
+        { type: "fiber.start", fiberId: 2, parentFiberId: 1, scopeId: 20 },
+        { fiberId: 1, scopeId: 10, traceId: "trace", spanId: "span" }
+      );
+
+      await Promise.resolve();
+
+      expect(received).toHaveLength(1);
+      expect(received[0].fiberId).toBe(2);
+      expect(received[0].scopeId).toBe(20);
+      expect(received[0].contextFiberId).toBe(1);
+      expect(received[0].contextScopeId).toBe(10);
+      expect(received[0].traceId).toBe("trace");
+      expect(received[0].spanId).toBe("span");
+    });
+
+    it("subscribeHooks forwards the original event and ambient context to RuntimeHooks", async () => {
+      const bus = new EventBus();
+      const received: Array<{ ev: RuntimeEvent; ctx: RuntimeEmitContext }> = [];
+
+      bus.subscribeHooks({
+        emit: (ev, ctx) => received.push({ ev, ctx }),
+      });
+      bus.emit(
+        { type: "fiber.start", fiberId: 2, parentFiberId: 1, scopeId: 20 },
+        { fiberId: 1, scopeId: 10, traceId: "trace", spanId: "span", parentSpanId: "parent-span" }
+      );
+
+      await Promise.resolve();
+
+      expect(received).toHaveLength(1);
+      expect(received[0].ev).toMatchObject({ type: "fiber.start", fiberId: 2, parentFiberId: 1, scopeId: 20 });
+      expect(received[0].ctx).toEqual({
+        fiberId: 1,
+        scopeId: 10,
+        traceId: "trace",
+        spanId: "span",
+        parentSpanId: "parent-span",
+      });
+    });
+  });
+
   describe("FIFO ordering", () => {
     it("events are delivered in the order they were emitted", async () => {
       const bus = new EventBus();

@@ -30,6 +30,9 @@ The package has several public surfaces:
 - `brass-runtime`: broad compatibility root export.
 - `brass-runtime/core`: preferred stable core/runtime surface for new code.
 - `brass-runtime/http`: HTTP clients, middleware, lifecycle utilities.
+- `brass-runtime/observability`: Prometheus/OTLP exporters, structured logs,
+  spans, W3C trace propagation, request adapters, and production export
+  controls.
 - `brass-runtime/agent`: agent library API.
 - `brass-agent`: CLI binary.
 
@@ -112,6 +115,31 @@ All async boundaries must go through the scheduler.
 
 Lane/caller scheduling is observability and fairness metadata. It must not
 change the semantic result of user effects.
+
+The default TS scheduler uses fair lane rotation. `laneMode: "single"` is an
+explicit throughput fast path for callers that provide their own isolation or do
+not need per-lane fairness.
+
+Fair mode should keep per-task queue entries compact: lane membership belongs to
+the lane queue itself, so enqueue the task function directly and avoid retaining
+per-task `{ task, tag }` wrappers unless a feature truly needs them.
+
+Semaphore hot paths must not fork a child fiber for every permit. `withPermit`
+runs the protected effect in the current fiber and installs an idempotent
+release finalizer so success, failure, and interruption all return the permit.
+
+HTTP concurrency benchmarks must use the local delayed dummy server in
+`src/benchmarks/http-concurrent.bench.ts`. The daily benchmark path uses
+100,000 local calls; million-call runs are soak-only/opt-in via
+`BRASS_HTTP_BENCH_MODE=soak` or `BRASS_HTTP_BENCH_CALLS=1000000`. Do not point
+default benchmark runs at public demo APIs; use external services only for
+small opt-in smoke checks.
+
+When investigating HTTP benchmark regressions, run the focused benchmark with
+`node --expose-gc --import tsx src/benchmarks/runner.ts http-concurrent` and
+inspect `heapDeltaMb`, `rssDeltaMb`, `gcAvailable`, and the adaptive limiter
+fields. Treat sustained positive heap-after-GC as leak evidence; RSS alone can
+reflect allocator retention.
 
 ---
 
@@ -233,7 +261,31 @@ This client:
 - supports cancellation
 - works in Browser and Node 18+
 
-### 4) Lifecycle client: `makeHttpClient` / `makeLifecycleClient`
+### 4) Default HTTP client: `makeDefaultHttpClient`
+
+Recommended user-facing entrypoint for HTTP is `makeDefaultHttpClient` from
+`brass-runtime/http`. It returns the JSON/text helper API (`getJson`, `postJson`,
+`request`) backed by the lifecycle stack, adaptive concurrency, response
+compression, stats, cache controls, and `cancelAll`.
+
+Preset defaults:
+
+- `default`: timeout, dedup, priority, retry, adaptive limiter, safe-method
+  response cache, response compression.
+- `balanced`: production shape without default response cache.
+- `minimal`: wire client + helper API; opt into layers explicitly.
+
+Default adaptive limiter configs must be conservative: require warmup samples,
+use a deadband, cap one-step decreases, and avoid `minLimit: 1` in user-facing
+presets unless the caller explicitly asks for that behavior. If benchmarks show
+`serverMaxInFlight` far below requested concurrency, inspect `adaptiveFinalLimit`
+and `adaptiveMaxQueueDepth` before assuming a memory leak.
+
+Observability is attached through `middleware: [withHttpObservability(obs)]`.
+Do not import observability exporters from `src/http`; keep observability as an
+outer integration layer.
+
+### 5) Lifecycle client: `makeHttpClient` / `makeLifecycleClient`
 
 Production-oriented client with optional:
 
@@ -241,6 +293,7 @@ Production-oriented client with optional:
 - response cache
 - priority queueing
 - retry
+- request batching
 - lifecycle events
 - lifecycle stats
 - `cancelAll`
@@ -248,14 +301,63 @@ Production-oriented client with optional:
 Canonical composition order:
 
 ```txt
-wire -> priority -> retry -> cache -> dedup -> lifecycle tracking
+wire -> priority -> retry -> cache -> batch -> dedup -> lifecycle tracking
 ```
+
+The default client may wrap that lifecycle stack with response compression and
+caller middleware. User middleware is outermost; compression is outside the
+lifecycle stack but inside caller middleware.
 
 `LifecycleStatsTracker` owns lifecycle counters. The client should report real
 request/cache/dedup/queue/retry stats, not placeholder zeros.
 
 `cancelAll` must abort active requests through `AbortController`, using the same
 cancellation path as fiber interruption.
+
+---
+
+## Observability Export
+
+Observability is a library layer on top of runtime hooks, metrics, tracing, and
+fiber context. Core may expose hook/event primitives, but core must not depend
+on HTTP, framework adapters, OTLP, or exporter code.
+
+Public production surface lives in `brass-runtime/observability`:
+
+- `makeObservability` wires metrics, structured logs, tracer, Prometheus, and
+  OTLP exporters.
+- `withSpan`, `spanEvent`, `logEffect`, and `withLogContext` operate through
+  current fiber context.
+- `withHttpObservability` instruments outbound HTTP client calls.
+- `runObservedHttpServerEffect` and request adapters instrument inbound server
+  work.
+- `parseTraceparent`, `extractTraceContext`, `injectTraceContext`, and
+  `formatTraceparent` provide W3C trace-context interop.
+
+Production invariants:
+
+- Exporters must be backend-neutral and dependency-free.
+- Exporter failures must not change user effect semantics.
+- Flush is single-flight; overlapping flush calls return the in-flight result.
+- Queues are bounded and must expose drop/retry/queue metrics.
+- `shutdown()` drains with a deadline.
+- Finished spans must be pruned after export and bounded by retention options.
+- Logs and spans must support redaction before leaving the process.
+- High-cardinality labels should be opt-in or bounded.
+
+Useful validation:
+
+```bash
+npm run test:types
+npm test -- src/observability/__tests__
+npm run benchmark:observability
+npm run benchmark:observability:budget
+npm run smoke:observability:collector
+```
+
+Framework examples are documented in
+`docs/observability-framework-examples.md`; collector smoke setup is in
+`docs/observability-collector-smoke.md`.
 
 ---
 

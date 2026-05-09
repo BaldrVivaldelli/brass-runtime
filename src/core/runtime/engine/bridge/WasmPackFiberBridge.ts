@@ -234,21 +234,6 @@ export class WasmPackFiberBridge implements WasmBridge {
     return events;
   }
 
-  private decodeBinary(words: Uint32Array): EngineEvent[] {
-    this.binaryEventCalls += 1;
-    const events = decodeEventBatch(words);
-    this.eventsReceived += events.length;
-    this.maxEventsPerCall = Math.max(this.maxEventsPerCall, events.length);
-    return events;
-  }
-
-  private decodeJson(json: string): EngineEvent {
-    this.jsonEventCalls += 1;
-    this.eventsReceived += 1;
-    this.maxEventsPerCall = Math.max(this.maxEventsPerCall, 1);
-    return JSON.parse(json) as EngineEvent;
-  }
-
   private memory(): WasmMemoryLike {
     const memory = this.vm.memory?.();
     if (!memory?.buffer) throw new Error("brass-runtime WASM memory is not available");

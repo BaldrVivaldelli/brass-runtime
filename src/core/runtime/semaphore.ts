@@ -4,10 +4,10 @@
 // A Semaphore(n) allows at most n effects to run concurrently.
 // Additional effects wait in a FIFO queue until a permit is released.
 
-import { async, Async, asyncFlatMap, unit } from "../types/asyncEffect";
+import { async, Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../types/asyncEffect";
 import { Exit } from "../types/effect";
 import { LinkedQueue } from "./linkedQueue";
-import { unsafeGetCurrentRuntime } from "./fiber";
+import { getCurrentFiber } from "./fiber";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -98,11 +98,9 @@ export function makeSemaphore(n: number): Semaphore {
     available++;
   };
 
-  const withPermit = <R, E, A>(effect: Async<R, E, A>): Async<R, E, A> => {
-    return asyncFlatMap(acquire(), () =>
+  const acquirePermit = (): Async<unknown, never, () => void> =>
+    asyncFlatMap(acquire(), () =>
       async((_env, cb) => {
-        const runtime = unsafeGetCurrentRuntime();
-        const fiber = runtime.fork(effect as any);
         let released = false;
         const releaseOnce = () => {
           if (released) return;
@@ -110,18 +108,29 @@ export function makeSemaphore(n: number): Semaphore {
           release();
         };
 
-        fiber.join((exit: any) => {
+        const fiber = getCurrentFiber();
+        fiber?.addFinalizer(() => {
           releaseOnce();
-          cb(exit);
         });
 
-        return () => {
-          fiber.interrupt();
-          releaseOnce();
-        };
+        cb({ _tag: "Success", value: releaseOnce });
       })
     );
-  };
+
+  const withPermit = <R, E, A>(effect: Async<R, E, A>): Async<R, E, A> =>
+    asyncFlatMap(acquirePermit(), (releaseOnce) =>
+      asyncFold(
+        effect,
+        (error: E) => {
+          releaseOnce();
+          return asyncFail(error) as Async<unknown, E, A>;
+        },
+        (value: A) => {
+          releaseOnce();
+          return asyncSucceed(value) as Async<unknown, E, A>;
+        },
+      )
+    ) as Async<R, E, A>;
 
   return {
     capacity,

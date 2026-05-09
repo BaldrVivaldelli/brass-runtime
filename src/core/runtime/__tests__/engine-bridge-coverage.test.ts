@@ -129,6 +129,7 @@ describe("WasmFiberRegistryBridge", () => {
 
     registry.registerFiber(1, 2, 3);
     registry.markQueued(1);
+    expect(registry.stateOf(1)).toBe("queued");
     registry.markRunning(1);
     expect(registry.stateOf(1)).toBe("running");
     registry.markSuspended(1);
@@ -139,6 +140,9 @@ describe("WasmFiberRegistryBridge", () => {
     expect(registry.stateOf(1)).toBe("failed");
     registry.markDone(1, "interrupted");
     expect(registry.stateOf(1)).toBe("interrupted");
+    expect((registry as any).markDone(1, "queued")).toBe(2);
+    expect((registry as any).markDone(1, "running")).toBe(2);
+    expect((registry as any).markDone(1, "suspended")).toBe(2);
     registry.addJoiner(1);
     expect(registry.wake(1)).toBe(true);
     expect(registry.drainWakeups()).toEqual([7, 8]);
@@ -154,6 +158,10 @@ describe("WasmFiberRegistryBridge", () => {
 });
 
 describe("WasmTimerWheelBridge", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("schedules, cancels, flushes, reads events, reports stats, and resolves from WASM module", async () => {
     const wasmModule = await import("../wasmModule");
     const resolveWasmModule = vi.mocked(wasmModule.resolveWasmModule);
@@ -199,6 +207,41 @@ describe("WasmTimerWheelBridge", () => {
 
     resolveWasmModule.mockReturnValueOnce({});
     expect(() => makeWasmTimerWheel({ onExpired: () => undefined })).toThrow(/wasm timer wheel is not available/);
+  });
+
+  it("pumps scheduled timer deadlines and unrefs Node timers", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    const expired: unknown[] = [];
+
+    class PumpWheel {
+      readonly buffer = new ArrayBuffer(64);
+      private scheduled = false;
+      memory() { return { buffer: this.buffer }; }
+      schedule_deadline() {
+        this.scheduled = true;
+        return 1;
+      }
+      cancel() { return true; }
+      advance_time() {
+        this.scheduled = false;
+        new Uint32Array(this.buffer).set([1, 7, 8, 9, 10, 0], 1);
+        return 4;
+      }
+      expired_len() { return 6; }
+      next_deadline_ms() { return this.scheduled ? 1_005 : -1; }
+      metric_u64() { return 0; }
+    }
+
+    const wheel = new WasmTimerWheelBridge(PumpWheel, {
+      onExpired: (events) => expired.push(...events),
+    });
+
+    expect(wheel.schedule(1, 2, 1_005)).toBe(1);
+    vi.advanceTimersByTime(5);
+
+    expect(expired).toEqual([{ timerId: 7, subjectId: 8, kind: 9, deadlineMs: 10 }]);
+    wheel.dispose();
   });
 });
 
@@ -333,6 +376,15 @@ describe("fiber ready queue bridge", () => {
       data: { completedFlushes: 2, lanes: expect.any(Array) },
     });
     expect(() => makeFiberReadyQueue({ engine: "bad" as any })).toThrow(/must be 'ts' or 'wasm'/);
+
+    const emptyQueue = makeFiberReadyQueue({ flushBudget: 1 });
+    expect(emptyQueue.beginFlush()).toBe(0);
+    expect(emptyQueue.shift()).toBeUndefined();
+
+    const droppingQueue = makeFiberReadyQueue({ laneCapacity: 1, flushBudget: 1 });
+    expect(droppingQueue.enqueue(1, "lane:drop|one")).toBe("micro");
+    expect(droppingQueue.enqueue(2, "lane:drop|two")).toBe("dropped");
+    expect(droppingQueue.stats().data.droppedFibers).toBe(1);
 
     const wasmModule = await import("../wasmModule");
     const resolveWasmModule = vi.mocked(wasmModule.resolveWasmModule);

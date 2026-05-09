@@ -1,4 +1,4 @@
-import type { RuntimeEmitContext, RuntimeEvent, RuntimeEventRecord, RuntimeHooks } from "./events";
+import { makeRuntimeEventRecord, type RuntimeEmitContext, type RuntimeEvent, type RuntimeEventRecord, type RuntimeHooks } from "./events";
 
 export type FiberRunState = "Queued" | "Running" | "Suspended" | "Done";
 
@@ -39,13 +39,7 @@ export class RuntimeRegistry implements RuntimeHooks {
     private recentCap = 2000;
 
     emit(ev: RuntimeEvent, ctx: RuntimeEmitContext) {
-        const rec: RuntimeEventRecord = {
-            ...ev,
-            ...ctx,
-            seq: this.seq++,
-            wallTs: Date.now(),
-            ts: typeof performance !== "undefined" ? performance.now() : Date.now(),
-        };
+        const rec = makeRuntimeEventRecord(ev, ctx, this.seq++);
 
         this.recent.push(rec);
 
