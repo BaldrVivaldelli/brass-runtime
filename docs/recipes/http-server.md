@@ -4,17 +4,17 @@ Use `HttpServer` for the discoverable happy path: define routes, build a
 router, and manage the Node listener as a resource.
 
 ```ts
-import { asyncSucceed, runPromise, useResource } from "brass-runtime";
+import { asyncSucceed, asyncSync, runPromise, useResource } from "brass-runtime";
 import { HttpServer, s } from "brass-runtime/http";
 
 const User = s.object({
-  id: s.int(),
+  id: s.nonEmptyString(),
   name: s.nonEmptyString(),
 });
 
 const routes = [
   HttpServer.route("GET", "/users/:id", {
-    params: s.object({ id: s.int() }),
+    params: s.object({ id: s.nonEmptyString() }),
     response: User,
   }, (ctx) =>
     asyncSucceed(HttpServer.json({
@@ -33,7 +33,9 @@ const router = HttpServer.router(routes, {
 await runPromise(
   useResource(
     router.listen({ port: 3000 }),
-    (server) => asyncSucceed(console.log(server.url())),
+    (server) => asyncSync(() => {
+      console.log(server.url());
+    }),
   ),
 );
 ```

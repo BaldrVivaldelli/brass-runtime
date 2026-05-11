@@ -20,9 +20,9 @@ regions, fiber-local refs, typed layers, semaphores, circuit breakers, rich
 **Streams** — pull-based streams with backpressure, bounded buffers, hubs,
 pipelines, fusion optimization, and a small fluent DX facade.
 
-**HTTP** — lazy/cancelable client and server primitives with schema validation,
-adaptive concurrency, compression, batching, prewarm, cache, dedup, priority,
-retry, and observability.
+**HTTP** — lazy/cancelable client and server primitives with typed routing,
+schema validation, health/readiness probes, adaptive concurrency, compression,
+batching, prewarm, cache, dedup, priority, retry, and observability.
 
 **Production signals** — dependency-free schemas, Prometheus/OTLP exporters,
 structured logs, W3C trace propagation, sampling, redaction, bounded exporters,
@@ -204,6 +204,45 @@ await http.postJson(
 The same validation machinery checks runtime, HTTP, and observability configs
 at construction time, so invalid values fail with field paths like
 `$.otlp.pipeline.batchSize` instead of surfacing later as ambiguous behavior.
+
+### HTTP server
+
+```ts
+import { asyncSucceed, asyncSync, runPromise, useResource } from "brass-runtime";
+import { HttpServer, s } from "brass-runtime/http";
+
+const User = s.object({
+  id: s.nonEmptyString(),
+  name: s.nonEmptyString(),
+});
+
+const router = HttpServer.router([
+  HttpServer.route("GET", "/users/:id", {
+    params: s.object({ id: s.nonEmptyString() }),
+    response: User,
+  }, (ctx) =>
+    asyncSucceed(HttpServer.json({
+      id: ctx.params.id,
+      name: "Ada",
+    })),
+  ),
+  HttpServer.healthRoute(),
+  HttpServer.readinessRoute(),
+]);
+
+await runPromise(
+  useResource(
+    router.listen({ port: 3000 }),
+    (server) => asyncSync(() => {
+      console.log(server.url());
+    }),
+  ),
+);
+```
+
+Routes infer `:params` from the path, optional schemas validate
+params/query/body/response, middleware is effect-based, and the Node listener is
+available as a managed resource for graceful shutdown.
 
 ### Discoverable HTTP builder
 
@@ -446,6 +485,7 @@ const result = await Stream
 | `brass-runtime/http/testing` | Dependency-free mock clients, mock fetch, response factories, and effect runner helpers |
 | `brass-runtime/schema` | Dependency-free runtime schema DSL with type inference |
 | `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
+| `brass-runtime/perf` | Runtime, HTTP, observability, memory, and baseline performance profiler |
 | `brass-runtime/agent` | Brass Agent core (experimental) |
 
 CLI: `brass-agent`
@@ -524,6 +564,7 @@ Docs: [Install](./docs/agent-install-and-configure.md) · [CLI](./docs/agent-cli
 npm test              # vitest suite
 npm run test:types    # TypeScript type checking
 npm run test:coverage # coverage with baseline gate
+npm run release:check # full release gate: types, tests, build, CJS, perf budgets
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
 npm run benchmark:runtime        # Runtime Performance Track
 npm run benchmark:runtime:budget # Runtime Performance Track regression budget
@@ -594,6 +635,9 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 ### HTTP
 
 - [x] Lazy, cancelable HTTP client
+- [x] Effect-based Node HTTP server listener with resource lifecycle
+- [x] Declarative typed routing with params/query/body/response schemas
+- [x] Health/readiness routes backed by runtime health reports
 - [x] Schema-validated JSON helpers
 - [x] Discoverable builder API
 - [x] Test helper subpath

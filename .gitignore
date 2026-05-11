@@ -2,6 +2,7 @@
 .kiro/
 .codex/
 .agents/
+.brass/perf-history/
 .idea/
 # Logs
 logs
