@@ -403,8 +403,51 @@ function baselinePath(paths: StorePaths, name: string): string {
 }
 
 function sanitizeBaselineName(name: string): string {
-  const safe = name.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-  return safe.length > 0 ? safe : "baseline";
+  let safe = "";
+  let lastWasReplacement = false;
+
+  for (const char of name.trim()) {
+    if (isSafeBaselineNameChar(char)) {
+      safe += char;
+      lastWasReplacement = false;
+      continue;
+    }
+    if (safe.length > 0 && !lastWasReplacement) {
+      safe += "-";
+      lastWasReplacement = true;
+    }
+  }
+
+  let start = 0;
+  let end = safe.length;
+  while (start < end && safe.charCodeAt(start) === HYPHEN_CODE) start += 1;
+  while (end > start && safe.charCodeAt(end - 1) === HYPHEN_CODE) end -= 1;
+
+  const normalized = safe.slice(start, end);
+  return normalized.length > 0 ? normalized : "baseline";
+}
+
+const HYPHEN_CODE = 45;
+const DOT_CODE = 46;
+const UNDERSCORE_CODE = 95;
+const ZERO_CODE = 48;
+const NINE_CODE = 57;
+const UPPER_A_CODE = 65;
+const UPPER_Z_CODE = 90;
+const LOWER_A_CODE = 97;
+const LOWER_Z_CODE = 122;
+
+function isSafeBaselineNameChar(char: string): boolean {
+  if (char.length !== 1) return false;
+  const code = char.charCodeAt(0);
+  return (
+    code === HYPHEN_CODE ||
+    code === DOT_CODE ||
+    code === UNDERSCORE_CODE ||
+    (code >= ZERO_CODE && code <= NINE_CODE) ||
+    (code >= UPPER_A_CODE && code <= UPPER_Z_CODE) ||
+    (code >= LOWER_A_CODE && code <= LOWER_Z_CODE)
+  );
 }
 
 async function pruneHistoryFile(historyFile: string, maxEntries: number): Promise<void> {

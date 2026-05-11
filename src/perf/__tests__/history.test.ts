@@ -1,6 +1,6 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   comparePerfToBaseline,
@@ -44,6 +44,17 @@ describe("perf history and baseline store", () => {
     const history = await readPerfHistory({ directory });
     expect(history).toHaveLength(1);
     expect(history[0]?.metrics.find((metric) => metric.name === "runtime.ops_per_second")?.value).toBe(2);
+  });
+
+  it("sanitizes baseline names without regular expressions", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "brass-perf-history-"));
+    const entry = createPerfHistoryEntry("runtime", makeRuntimeReport(1000));
+
+    const saved = await savePerfBaseline("++release/main  1---", entry, { directory });
+    expect(basename(saved.path)).toBe("release-main-1.json");
+
+    const fallback = await savePerfBaseline("////", entry, { directory });
+    expect(basename(fallback.path)).toBe("baseline.json");
   });
 });
 
