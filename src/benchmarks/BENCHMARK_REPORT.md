@@ -9,11 +9,14 @@ Focused runs are still available through the same runner:
 
 ```bash
 npm run benchmark -- scheduler-throughput
+npm run benchmark:runtime
+npm run benchmark:runtime:budget
 npm run benchmark -- wasm-engines
 npm run benchmark -- heap-suspended-fiber
 npm run benchmark:http
 npm run benchmark:adaptive
 npm run benchmark:http:budget
+npm run benchmark:http:ramp
 npm run benchmark:json -- observability-overhead
 ```
 
@@ -28,6 +31,20 @@ BRASS_HTTP_BENCH_MODE=soak npm run benchmark:http
 BRASS_HTTP_BENCH_CALLS=1000000 npm run benchmark -- http-concurrent
 BRASS_HTTP_BENCH_CALLS=100000 node --expose-gc --import tsx src/benchmarks/runner.ts http-concurrent
 ```
+
+HTTP TPS ramp is open-loop: it schedules request arrivals at the requested TPS
+instead of deriving TPS from max concurrency. A focused run defaults to
+`60->120->180->240->300->240->180->120->60`, with 5 seconds per step:
+
+```bash
+npm run benchmark:http:ramp
+BRASS_HTTP_RAMP_STEP_SECONDS=30 npm run benchmark:http:ramp
+BRASS_HTTP_RAMP_CLIENT=observed npm run benchmark:http:ramp
+BRASS_HTTP_RAMP_MAX_TPS=600 BRASS_HTTP_RAMP_STEP_TPS=60 npm run benchmark:http:ramp
+```
+
+The normal `npm run benchmark` path keeps the ramp short
+(`60->120->60`, 1 second per step) so the daily suite stays practical.
 
 Adaptive limiter synthetic scenarios have daily and soak modes:
 
@@ -44,9 +61,26 @@ Use the explicit `node --expose-gc` form when investigating retained heap; the
 normal `npm run benchmark` path still reports memory deltas, but without forced
 GC they are a noisier allocation-pressure signal.
 
+Runtime Performance Track focuses on core runtime overhead from the recent
+runtime features:
+
+```bash
+npm run benchmark:runtime
+npm run benchmark:runtime:budget
+BRASS_RUNTIME_BENCH_SCHEDULE_STEPS=100000 npm run benchmark:runtime
+```
+
+It covers FlatMap chains, FiberRef updates, interruptibility mask/restore,
+Layer 2 typed context builds, LayerScope diamond memoization, pure
+ScheduleDriver decisions, and observed ScheduleDriver decisions through the
+runtime recorder.
+
 ## Current Scale
 
 - Scheduler throughput TS benchmarks use 1,000,000 tasks.
+- Runtime Performance Track daily defaults use 1,000 FlatMap effects, 1,000
+  FiberRef ops, 500 interruptibility regions, 100 Layer 2 typed builds, 50,000
+  pure ScheduleDriver decisions, and 10,000 observed ScheduleDriver decisions.
 - WASM engine comparison keeps WASM cases at 100,000 operations to avoid hiding
   JS/WASM boundary costs behind very long runs.
 - TS ring-buffer and chunker cases in `wasm-engines.bench.ts` use 1,000,000
@@ -79,6 +113,10 @@ GC they are a noisier allocation-pressure signal.
   (`adaptiveMinLimit`, `adaptiveMaxQueueDepth`, `adaptiveMaxInFlight`) so local
   slowdowns can be separated into retained heap, runtime RSS retention, limiter
   throttling, or transport pressure.
+- HTTP TPS ramp uses the same local server, but measures a fixed arrival-rate
+  profile. It reports the target profile, scheduled/sent/dropped/missed counts,
+  per-step actual TPS and latency percentiles, max client/server in-flight, and
+  the same memory/adaptive/client counters when available.
 - The default HTTP adaptive limiter uses `minSamples`, `decreaseThreshold`, and
   `maxDecreaseRatio` to avoid collapse from cold-start or low-latency jitter.
   `npm run benchmark:http:budget` fails if adaptive variants fall below the
@@ -101,6 +139,13 @@ Captured on linux-x64, Node v22.21.1:
 
 | Benchmark | Scale | Latest local read |
 |-----------|-------|-------------------|
+| RuntimeTrack flatMap chain | 1,000 effects | ~0.12ms/op, ~8M effects/s |
+| RuntimeTrack FiberRef update/get | 1,000 ops | ~0.15ms/op, ~6.7M ops/s |
+| RuntimeTrack interruptibility mask/restore | 500 regions | ~0.11ms/op, ~4.6M regions/s |
+| RuntimeTrack Layer 2 typed provideContext | 100 builds | ~1.3ms/op, ~75k builds/s |
+| RuntimeTrack LayerScope memoized diamond graph | shared dependency | ~0.05ms/op, acquired/released once |
+| RuntimeTrack ScheduleDriver pure | 50,000 decisions | ~3.7ms/op, ~13M decisions/s |
+| RuntimeTrack ScheduleDriver observed | 10,000 decisions | ~2.3ms/op, ~4.3M decisions/s |
 | Scheduler fair sequential TS | 1,000,000 tasks | ~46ms/op |
 | Scheduler single-lane sequential TS | 1,000,000 tasks | ~15ms/op |
 | Scheduler fair fan-out TS | 100 x 10,000 tasks | ~48ms/op |

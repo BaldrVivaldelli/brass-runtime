@@ -128,6 +128,31 @@ describe("observability primitives", () => {
     ]);
   });
 
+  it("keeps finished span pruning bounded and preserves newest spans", () => {
+    const tracer = new InMemoryTracer({ maxFinishedSpans: 2 });
+
+    for (let i = 0; i < 5; i++) {
+      const spanId = `span-${i}`;
+      tracer.emit({ type: "span.start", name: `operation-${i}` }, { traceId: "trace", spanId });
+      tracer.emit({ type: "span.end", name: `operation-${i}`, status: "success" }, { traceId: "trace", spanId });
+    }
+
+    expect(tracer.stats()).toMatchObject({
+      storedSpans: 2,
+      finishedSpans: 2,
+      prunedFinishedSpans: 3,
+    });
+    expect(tracer.exportFinished().map((span) => span.name)).toEqual(["operation-3", "operation-4"]);
+
+    expect(tracer.pruneFinished(["span-4"])).toBe(1);
+    expect(tracer.stats()).toMatchObject({
+      storedSpans: 1,
+      finishedSpans: 1,
+      prunedFinishedSpans: 4,
+    });
+    expect(tracer.exportFinished().map((span) => span.name)).toEqual(["operation-3"]);
+  });
+
   it("attaches trace/span exemplars to runtime histograms for Prometheus and OTLP", () => {
     const metrics = makeMetrics();
     const bus = new EventBus();

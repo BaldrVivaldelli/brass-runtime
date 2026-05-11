@@ -33,8 +33,12 @@ The package has several public surfaces:
 - `brass-runtime/observability`: Prometheus/OTLP exporters, structured logs,
   spans, W3C trace propagation, request adapters, and production export
   controls.
+- `brass-runtime/perf`: runtime/HTTP performance profiler, A/B runtime lab,
+  runtime soak profiles, memory reports, diagnostics, history/baseline store,
+  and perf budgets.
 - `brass-runtime/agent`: agent library API.
 - `brass-agent`: CLI binary.
+- `brass-perf`: performance profiler CLI binary.
 
 Root exports are compatibility-first. Do not widen `src/index.ts` by default.
 Prefer a focused subpath when adding a public API.
@@ -52,6 +56,55 @@ Then run:
 npm run build
 npm run validate:cjs
 ```
+
+### Mandatory performance discipline
+
+Every feature must finish with correctness validation and a performance pass.
+The goal is to keep Brass feeling native, not merely functionally correct.
+
+For every feature, run and summarize:
+
+```bash
+npm run test:types
+npm test
+npm run perf -- --profile runtime-ab
+npm run perf -- --profile runtime-soak
+npm run perf:history -- --profile runtime-ab
+npm run perf:runtime:budget
+npm run perf:http:memory
+npm run benchmark
+npm run benchmark:runtime:budget
+npm run benchmark:http:budget
+npm run benchmark:observability:budget
+```
+
+For release-candidate cuts, prefer the bundled gate:
+
+```bash
+npm run release:check
+```
+
+When the feature touches HTTP, observability, scheduler, fibers, layers,
+schedule, streams, or memory-sensitive code, also run an explicit GC-aware
+profile when possible:
+
+```bash
+node --expose-gc --import tsx src/perf/cli.ts --profile http --calls 20000 --concurrency 512 --delay-ms 2 --force-gc
+node --expose-gc --import tsx src/perf/cli.ts --profile http-memory --calls 100000 --concurrency 512 --delay-ms 2 --force-gc
+node --expose-gc --import tsx src/perf/cli.ts --profile runtime-ab --force-gc
+```
+
+The final note for a feature should include the important numbers, not only the
+command names: ops/s, percent regression/improvement, p99 where relevant,
+heapDeltaMb/rssDeltaMb, budget pass/fail, and any profiler recommendation. If a
+full benchmark cannot be run in the current environment, say exactly why and run
+the closest focused performance command before handing work back.
+
+Use perf history for comparable local evidence when the environment is stable:
+`--record-history` appends to `.brass/perf-history/runs.jsonl`,
+`--save-baseline NAME` writes a named baseline, and `--compare-baseline NAME`
+checks the current run against it. Do not commit `.brass/perf-history` unless a
+task explicitly asks for persisted local run artifacts.
 
 ### Effects
 
@@ -83,7 +136,13 @@ Execution happens via:
 toPromise(effect, env)
 ```
 
-The runtime schedules fibers using the global scheduler.
+The runtime schedules fibers using the global scheduler. The only exception is
+the no-hooks/no-lane native top-level fast path: when `inferLane: false`, the
+global scheduler is in use, and no current fiber exists, the runtime may
+interpret root effects without allocating a root fiber. That path must preserve
+`FiberRef`, `unsafeGetCurrentRuntime`, failure causes, finalizers, and async
+callback resumption semantics, and it must stay disabled for active hooks,
+custom schedulers, lanes, and WASM mode.
 
 ---
 
@@ -113,6 +172,24 @@ The scheduler:
 
 All async boundaries must go through the scheduler.
 
+Runtime diagnostics should stay opt-in. Use `makeRuntimeRecorder` when a caller
+needs a bounded execution trace of fibers, scopes, scheduler-visible runtime
+events, spans, and logs; do not make recorder allocation part of the no-hooks
+hot path.
+
+Failure diagnostics use `Cause<E>`: preserve `Fail`, `Die`, `Interrupt`, and
+composed `Then` / `Both` causes instead of flattening them into strings at the
+runtime boundary. Pretty-print causes only in sinks, docs, and diagnostics.
+
+Interruptibility is cooperative. `uninterruptible` defers interruption until
+the protected region exits, while `uninterruptibleMask` exposes a `restore`
+function for sub-effects that should remain cancelable. Do not cancel suspended
+async work inside a masked region until interruptibility has been restored.
+
+`FiberRef` values are fiber-local context. Forked children inherit a snapshot of
+the parent's refs, child mutations stay isolated, and `locally` must restore the
+previous value before failure/interruption finalizers observe the fiber.
+
 Lane/caller scheduling is observability and fairness metadata. It must not
 change the semantic result of user effects.
 
@@ -140,6 +217,24 @@ When investigating HTTP benchmark regressions, run the focused benchmark with
 inspect `heapDeltaMb`, `rssDeltaMb`, `gcAvailable`, and the adaptive limiter
 fields. Treat sustained positive heap-after-GC as leak evidence; RSS alone can
 reflect allocator retention.
+
+For HTTP memory regressions, prefer `npm run perf:http:memory` or the
+`node --expose-gc --import tsx src/perf/cli.ts --profile http-memory ...`
+variant. Compare `default-json`, `default-json-observed`, `default-minimal-json`,
+`default-balanced-no-adaptive-json`, and `default-balanced-json`; report
+`heapDeltaPer10kRequestsMb`, `gcAvailable`, throughput ratio, and p99.
+
+Runtime-only performance investigations should start with
+`npm run perf:runtime:ab` and `npm run perf:runtime:soak`. Use the A/B output to
+compare baseline vs candidate variants (`fiber-only`, `default`,
+`active-hooks`, `recorder`, `wide-scheduler`) before optimizing interpreter or
+scheduler code. Use soak output to look for throughput drift and retained heap
+without HTTP noise.
+
+When optimizing the default runtime variant, check that the native top-level fast
+path still starts zero root fibers for `Succeed`, `Fail`, `Sync`, synchronous
+`flatMap` chains, and `FiberRef` local regions, while `active-hooks` and custom
+scheduler variants keep normal fiber/event semantics.
 
 ---
 

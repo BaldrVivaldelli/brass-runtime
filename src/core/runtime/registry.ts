@@ -1,4 +1,5 @@
 import { makeRuntimeEventRecord, type RuntimeEmitContext, type RuntimeEvent, type RuntimeEventRecord, type RuntimeHooks } from "./events";
+import { Cause } from "../types/effect";
 
 export type FiberRunState = "Queued" | "Running" | "Suspended" | "Done";
 
@@ -89,7 +90,7 @@ export class RuntimeRegistry implements RuntimeHooks {
                     f.runState = "Done";
                     f.lastActiveAt = rec.wallTs;
                     f.status = rec.status === "interrupted" ? "Interrupted" : "Done";
-                    f.lastEnd = { status: rec.status, error: rec.error as any };
+                    f.lastEnd = { status: rec.status, error: formatRegistryError(rec.error) };
                 }
                 break;
             }
@@ -115,4 +116,16 @@ export class RuntimeRegistry implements RuntimeHooks {
     }
 
     getRecentEvents() { return this.recent.slice(); }
+}
+
+function formatRegistryError(error: unknown): string | undefined {
+    if (error === undefined) return undefined;
+    if (Cause.isCause(error)) return Cause.pretty(error, { singleLine: true });
+    if (error instanceof Error) return error.message;
+    if (typeof error === "string") return error;
+    try {
+        return JSON.stringify(error);
+    } catch {
+        return String(error);
+    }
 }

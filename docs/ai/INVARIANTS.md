@@ -25,7 +25,10 @@ stronger than local convenience.
 
 ## Scheduler and fibers
 
-- All async resumption goes back through the scheduler/fiber machinery.
+- All normal async resumption goes back through the scheduler/fiber machinery.
+  The no-hooks/no-lane native top-level fast path may resume via its own
+  microtask loop, but only when it preserves runtime/fiber-local semantics and
+  is disabled for hooks, custom schedulers, lanes, and WASM mode.
 - Fibers must not notify joiners more than once.
 - Interrupt must be cooperative and idempotent.
 - Runtime hooks must observe events without changing semantics.
@@ -79,4 +82,3 @@ Before changing behavior, answer these:
 - Which scope/fiber runs its finalizer?
 - Is this public API or internal plumbing?
 - Which tests encode the invariant I am touching?
-

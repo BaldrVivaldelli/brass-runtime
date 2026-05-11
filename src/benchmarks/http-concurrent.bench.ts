@@ -313,7 +313,7 @@ function runHttpLoad(
     let sawAdaptiveStats = false;
     let lastClientStats: ClientSnapshot | undefined;
     const initialClientStats = readClientStats?.();
-    const latencies = new Array<number>(scenario.calls);
+    let latencies = new Array<number>(scenario.calls);
     forceGc();
     const memoryBefore = memorySnapshot();
     const startedAt = performance.now();
@@ -347,10 +347,11 @@ function runHttpLoad(
       sampleClientStats();
       const durationMs = performance.now() - startedAt;
       const observabilityFlushMs = flushObservability(observability);
+      const latencyPercentiles = percentiles(latencies);
+      latencies = [];
       forceGc();
       const memoryAfter = memorySnapshot();
       const serverStats = server.stats();
-      const latencyPercentiles = percentiles(latencies);
       const tracerStats = observability?.tracer.stats();
       resolve({
         units: scenario.calls,

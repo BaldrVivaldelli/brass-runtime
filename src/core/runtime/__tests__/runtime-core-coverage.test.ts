@@ -5,6 +5,7 @@ import { ctxExtend, ctxToObject, emptyContext } from "../contex";
 import { dumpAllFibers } from "../dump";
 import { EventBus } from "../eventBus";
 import { getBenchmarkBudget, getCurrentFiber, setBenchmarkBudget, unsafeGetCurrentRuntime, withCurrentFiber } from "../fiber";
+import { makeFiberRef } from "../fiberRef";
 import { consoleJsonLogger } from "../loggerSink";
 import { RuntimeRegistry } from "../registry";
 import { withScopeAsync } from "../scope";
@@ -99,6 +100,36 @@ describe("runtime helpers and observability coverage", () => {
     await wait();
     expect(successes).toEqual(["done"]);
     expect(failures).toEqual([]);
+  });
+
+  it("uses the pure top-level fast path only when hooks are inactive", async () => {
+    const noopRuntime = Runtime.makeWithEngine({}, "ts", { inferLane: false });
+    const before = noopRuntime.stats().data.startedFibers;
+
+    await expect(noopRuntime.toPromise(asyncSucceed("pure"))).resolves.toBe("pure");
+    await expect(noopRuntime.toPromise(asyncFail("typed-failure"))).rejects.toBe("typed-failure");
+    await expect(noopRuntime.toPromise(asyncSync(() => unsafeGetCurrentRuntime().env))).resolves.toEqual({});
+
+    const chain = asyncFlatMap(
+      asyncFlatMap(asyncSucceed(1), (n) => asyncSync(() => n + 1)),
+      (n) => asyncSucceed(n + 1),
+    );
+    await expect(noopRuntime.toPromise(chain)).resolves.toBe(3);
+
+    const ref = makeFiberRef(0);
+    const fiberRefProgram = asyncFlatMap(
+      ref.locally(10, asyncFlatMap(ref.update((n) => n + 5), () => ref.get())),
+      (inside) => asyncFlatMap(ref.get(), (outside) => asyncSucceed({ inside, outside })),
+    );
+    await expect(noopRuntime.toPromise(fiberRefProgram)).resolves.toEqual({ inside: 15, outside: 0 });
+
+    expect(noopRuntime.stats().data.startedFibers).toBe(before);
+
+    const activeRuntime = new Runtime({ env: {}, hooks: new EventBus(), inferLane: false });
+    const activeBefore = activeRuntime.stats().data.startedFibers;
+    await expect(activeRuntime.toPromise(asyncSucceed("observed"))).resolves.toBe("observed");
+    await expect(activeRuntime.toPromise(asyncSync(() => "observed-sync"))).resolves.toBe("observed-sync");
+    expect(activeRuntime.stats().data.startedFibers).toBe(activeBefore + 2);
   });
 
   it("fromPromiseAbortable maps success, rejection and interruption", async () => {

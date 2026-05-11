@@ -91,10 +91,13 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
             onFailure: (e: any) => Async<R, E, any>;
             onSuccess: (a: any) => Async<R, E, any>;
         }
+        | { _tag: "InterruptibilityCont"; previousDepth: number }
+        | { _tag: "FiberRefCont"; refId: number; hadValue: boolean; previousValue: unknown }
     )[] = [];
 
     private readonly fiberFinalizers: Array<{ run?: (exit: Exit<E, A>) => any }> = [];
     private finalizersDrained = false;
+    private interruptibilityDepth = 0;
 
     fiberContext!: FiberContext;
     name?: string;
@@ -145,14 +148,8 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                 return;
             }
 
-            const cause = exit.cause;
-            if (cause._tag === "Interrupt") {
-                this.notify(Exit.failCause(Cause.interrupt()));
-            } else if (cause._tag === "Fail") {
-                this.current = Async.fail(cause.error);
+            if (this.onCause(exit.cause)) {
                 this.schedule("async-resume");
-            } else {
-                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
             }
         };
 
@@ -222,7 +219,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
     status(): FiberStatus {
         if (this.result == null) return "Running";
-        if (this.result._tag === "Failure" && this.result.cause._tag === "Interrupt") return "Interrupted";
+        if (this.result._tag === "Failure" && Cause.isInterruptedOnly(this.result.cause)) return "Interrupted";
         return "Done";
     }
 
@@ -235,7 +232,9 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         if (this.result != null) return;
         if (this.interrupted) return;
         this.interrupted = true;
-        this.schedule("interrupt-step");
+        if (this.isInterruptible()) {
+            this.schedule("interrupt-step");
+        }
     }
 
     schedule(tag: string = "step"): void {
@@ -299,7 +298,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         const status =
             exit._tag === "Success"
                 ? "success"
-                : exit.cause._tag === "Interrupt"
+                : Cause.isInterruptedOnly(exit.cause)
                     ? "interrupted"
                     : "failure";
 
@@ -314,48 +313,122 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         this.joiners.length = 0;
     }
 
-    private onSuccess(value: any): void {
-        const frame = this.stack.pop();
-        if (!frame) {
-            this.notify(Exit.succeed(value));
-            return;
-        }
+    private isInterruptible(): boolean {
+        return this.interruptibilityDepth === 0;
+    }
 
-        if (frame._tag === "SuccessCont") {
+    private shouldInterruptNow(): boolean {
+        return this.interrupted && this.isInterruptible();
+    }
+
+    private enterInterruptibility(mode: "uninterruptible" | "interruptible"): number {
+        const previousDepth = this.interruptibilityDepth;
+        this.interruptibilityDepth = mode === "uninterruptible" ? previousDepth + 1 : 0;
+        return previousDepth;
+    }
+
+    private restoreInterruptibility(previousDepth: number): void {
+        this.interruptibilityDepth = Math.max(0, previousDepth);
+    }
+
+    private fiberRefs(): Map<number, unknown> {
+        const ctx = this.fiberContext as any;
+        if (!ctx.fiberRefs) ctx.fiberRefs = new Map<number, unknown>();
+        return ctx.fiberRefs;
+    }
+
+    private restoreFiberRef(frame: { refId: number; hadValue: boolean; previousValue: unknown }): void {
+        const refs = this.fiberRefs();
+        if (frame.hadValue) refs.set(frame.refId, frame.previousValue);
+        else refs.delete(frame.refId);
+    }
+
+    private onSuccess(value: any): void {
+        let currentValue = value;
+        while (true) {
+            const frame = this.stack.pop();
+            if (!frame) {
+                if (this.shouldInterruptNow()) {
+                    this.notify(Exit.failCause(Cause.interrupt()));
+                } else {
+                    this.notify(Exit.succeed(currentValue));
+                }
+                return;
+            }
+
+            if (frame._tag === "InterruptibilityCont") {
+                this.restoreInterruptibility(frame.previousDepth);
+                if (this.shouldInterruptNow()) {
+                    this.notify(Exit.failCause(Cause.interrupt()));
+                    return;
+                }
+                continue;
+            }
+
+            if (frame._tag === "FiberRefCont") {
+                this.restoreFiberRef(frame);
+                continue;
+            }
+
+            if (frame._tag === "SuccessCont") {
+                try {
+                    this.current = frame.k(currentValue);
+                } catch (e) {
+                    // throw => defecto (no E)
+                    this.notify(Exit.failCause(Cause.die<E>(e)));
+                }
+                return;
+            }
+
+            // si llega acá, era un FoldCont pero por success
             try {
-                this.current = frame.k(value);
+                this.current = frame.onSuccess(currentValue);
             } catch (e) {
-                // throw => defecto (no E)
                 this.notify(Exit.failCause(Cause.die<E>(e)));
             }
             return;
         }
-
-        // si llega acá, era un FoldCont pero por success
-        try {
-            this.current = frame.onSuccess(value);
-        } catch (e) {
-            this.notify(Exit.failCause(Cause.die<E>(e)));
-        }
     }
 
     private onFailure(error: any): void {
+        this.onCause(Cause.fail(error as E));
+    }
+
+    private onCause(cause: Cause<E>): boolean {
+        let currentCause = cause;
+
         while (this.stack.length > 0) {
             const fr = this.stack.pop()!;
+            if (fr._tag === "InterruptibilityCont") {
+                this.restoreInterruptibility(fr.previousDepth);
+                if (this.shouldInterruptNow() && !Cause.isInterruptedOnly(currentCause)) {
+                    currentCause = Cause.then(currentCause, Cause.interrupt()) as Cause<E>;
+                }
+                continue;
+            }
+
+            if (fr._tag === "FiberRefCont") {
+                this.restoreFiberRef(fr);
+                continue;
+            }
+
             if (fr._tag === "FoldCont") {
+                if (!Cause.isFailureOnly(currentCause)) continue;
+                const failure = Cause.firstFailure(currentCause);
+                if (failure._tag === "None") break;
                 try {
-                    this.current = fr.onFailure(error);
-                    return;
+                    this.current = fr.onFailure(failure.value);
+                    return true;
                 } catch (e) {
-                    error = e;
+                    currentCause = Cause.fail(e as E);
                     continue;
                 }
             }
             // SuccessCont se descarta
         }
 
-        // este es “fail” del dominio del effect
-        this.notify(Exit.failCause(Cause.fail(error as E)));
+        this.notify(Exit.failCause(currentCause));
+        return false;
     }
 
     private budget = DEFAULT_BUDGET;
@@ -364,8 +437,8 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         if (this.result != null) return STEP.DONE;
 
         // interrupción cooperativa
-        if (this.interrupted) {
-            this.notify(Exit.failCause(Cause.interrupt()));
+        if (this.shouldInterruptNow()) {
+            this.onCause(Cause.interrupt());
             return STEP.DONE;
         }
 
@@ -441,15 +514,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                         if (resolvedExit._tag === "Success") {
                             this.onSuccess(resolvedExit.value);
                         } else {
-                            const cause = resolvedExit.cause;
-
-                            if (cause._tag === "Interrupt") {
-                                this.notify(Exit.failCause(Cause.interrupt()));
-                            } else if (cause._tag === "Fail") {
-                                this.onFailure(cause.error);
-                            } else {
-                                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
-                            }
+                            this.onCause(resolvedExit.cause);
                         }
                         break; // continue the while loop
                     }
@@ -475,6 +540,51 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                 case "Fork": {
                     const child = this.runtime.fork(current.effect, current.scopeId);
                     this.onSuccess(child as any);
+                    break;
+                }
+
+                case "Interruptibility": {
+                    const previousDepth = this.enterInterruptibility(current.mode);
+                    this.stack.push({ _tag: "InterruptibilityCont", previousDepth });
+                    this.current = current.effect;
+                    break;
+                }
+
+                case "InterruptibilityMask": {
+                    const previousDepth = this.enterInterruptibility("uninterruptible");
+                    this.stack.push({ _tag: "InterruptibilityCont", previousDepth });
+                    try {
+                        this.current = current.body((effect: Async<any, any, any>) => ({
+                            _tag: "InterruptibilityRestore",
+                            depth: previousDepth,
+                            effect,
+                        }));
+                    } catch (e) {
+                        this.onCause(Cause.die<E>(e));
+                    }
+                    break;
+                }
+
+                case "InterruptibilityRestore": {
+                    const previousDepth = this.interruptibilityDepth;
+                    this.restoreInterruptibility(current.depth);
+                    this.stack.push({ _tag: "InterruptibilityCont", previousDepth });
+                    this.current = current.effect;
+                    break;
+                }
+
+                case "FiberRefLocally": {
+                    const refs = this.fiberRefs();
+                    const hadValue = refs.has(current.refId);
+                    const previousValue = refs.get(current.refId);
+                    refs.set(current.refId, current.value);
+                    this.stack.push({
+                        _tag: "FiberRefCont",
+                        refId: current.refId,
+                        hadValue,
+                        previousValue,
+                    });
+                    this.current = current.effect;
                     break;
                 }
 
@@ -590,14 +700,7 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
                         } else {
                             // Failure in async — push continuation and propagate
                             this.stack.push({ _tag: "SuccessCont", k: andThen });
-                            const cause = exit.cause;
-                            if (cause._tag === "Fail") {
-                                this.onFailure(cause.error);
-                            } else if (cause._tag === "Interrupt") {
-                                this.notify(Exit.failCause(Cause.interrupt()));
-                            } else {
-                                this.notify(Exit.failCause(Cause.die<E>(cause.defect)));
-                            }
+                            this.onCause(exit.cause);
                             return this.result != null ? TRAMPOLINE.DONE : TRAMPOLINE.CONTINUE;
                         }
                     }

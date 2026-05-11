@@ -110,6 +110,12 @@ function safeEmitBatch(
   }
 }
 
+function causeDefectMessage(cause: Cause<unknown>): string {
+  const defect = Cause.firstDefect(cause);
+  if (defect._tag === "Some") return String(defect.value);
+  return Cause.pretty(cause, { singleLine: true });
+}
+
 // --- Middleware Factory ---
 
 /**
@@ -207,18 +213,19 @@ export function withBatch<K>(config: BatchConfig<K>, onEvent?: BatchEventCallbac
         }
 
         // 2.10: Batch failure propagation - same error to all callers
-        if (exit.cause._tag === "Fail") {
-          rejectAllWaiters(group, exit.cause.error);
+        const failure = Cause.firstFailure(exit.cause);
+        if (failure._tag === "Some") {
+          rejectAllWaiters(group, failure.value);
           return;
         }
 
-        if (exit.cause._tag === "Interrupt") {
+        if (Cause.isInterruptedOnly(exit.cause)) {
           rejectAllWaiters(group, { _tag: "Abort" });
           return;
         }
 
         // Die/defect case
-        const err: HttpError = { _tag: "FetchError", message: String((exit.cause as any).defect ?? "unknown") };
+        const err: HttpError = { _tag: "FetchError", message: causeDefectMessage(exit.cause) };
         rejectAllWaiters(group, err);
       });
     }

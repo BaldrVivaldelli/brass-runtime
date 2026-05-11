@@ -7,6 +7,9 @@ Start here:
 - **[Cancellation & interruption](./cancellation.md)** — interruption semantics, scopes, and cancellable `Async`
 - **[Observability](./observability.md)** — hooks, events, sinks, and tracing
 - **[HTTP client](./http.md)** — ZIO-style HTTP built on brass-runtime
+- **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths
+- **[API polish notes](./api-polish.md)** — first-release DX audit and compatibility posture
+- **[First release checklist](./release.md)** — local release gate and perf evidence workflow
 - **[Modules overview](./modules.md)** — map of core modules and where things live
 - **[AI context pack](./ai/PROJECT_MAP.md)** — compact project map, invariants, validation matrix, and public API notes
 - **[Agent module boundaries](./agent-boundaries.md)** — rules for keeping `brass-agent` isolated from the core runtime

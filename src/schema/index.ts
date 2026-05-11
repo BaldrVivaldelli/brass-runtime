@@ -98,6 +98,24 @@ export class ConfigValidationError extends Error {
   }
 }
 
+export function isConfigValidationError(error: unknown): error is ConfigValidationError {
+  return error instanceof ConfigValidationError
+    || (
+      typeof error === "object" &&
+      error !== null &&
+      (error as any)._tag === "ConfigValidationError" &&
+      typeof (error as any).configName === "string" &&
+      Array.isArray((error as any).issues)
+    );
+}
+
+export function formatConfigError(error: unknown): string {
+  if (!isConfigValidationError(error)) {
+    return error instanceof Error ? error.message : String(error);
+  }
+  return `${error.configName} failed validation: ${formatIssues(error.issues)}`;
+}
+
 const ok = <A>(data: A): SchemaResult<A> => ({ success: true, data });
 const fail = (issues: readonly SchemaIssue[]): SchemaResult<never> => ({ success: false, issues });
 

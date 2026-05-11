@@ -1,5 +1,7 @@
 import type { Async } from "../../types/asyncEffect";
 import type { HostAction, HostActionResult } from "../hostAction";
+import { emptyContext } from "../contex";
+import { getCurrentFiber } from "../fiber";
 
 export type NodeId = number;
 export type RefId = number;
@@ -32,6 +34,8 @@ export type FlatMapRef<R = unknown> = (value: unknown) => Async<R, unknown, unkn
 export type FoldFailureRef<R = unknown> = (error: unknown) => Async<R, unknown, unknown>;
 export type FoldSuccessRef<R = unknown> = (value: unknown) => Async<R, unknown, unknown>;
 export type DecodeRef = (result: HostActionResult) => unknown;
+
+type FiberRefRestore = () => void;
 
 export type HostRegistryStats = {
   readonly live: number;
@@ -231,6 +235,16 @@ export class ProgramBuilder {
         return this.add(current.scopeId === undefined ? base : { ...base, scopeId: current.scopeId });
       }
 
+      case "Interruptibility":
+      case "InterruptibilityRestore":
+        return this.visit(current.effect);
+
+      case "FiberRefLocally":
+        return this.visit(desugarFiberRefLocally(current.refId, current.value, current.effect));
+
+      case "InterruptibilityMask":
+        return this.visit(current.body((effect: Async<unknown, unknown, unknown>) => effect));
+
       case "HostAction": {
         const base = {
           tag: "HostAction" as const,
@@ -243,4 +257,60 @@ export class ProgramBuilder {
         return this.add({ tag: "Fail", errorRef: this.registry.register(new Error(`Unknown Async opcode: ${current?._tag}`)) });
     }
   }
+}
+
+function desugarFiberRefLocally(
+  refId: number,
+  value: unknown,
+  effect: Async<unknown, unknown, unknown>,
+): Async<unknown, unknown, unknown> {
+  return {
+    _tag: "FlatMap",
+    first: {
+      _tag: "Sync",
+      thunk: () => enterFiberRefLocal(refId, value),
+    },
+    andThen: (restore: FiberRefRestore) => ({
+      _tag: "Fold",
+      first: effect,
+      onFailure: (error: unknown) => restoreThen(restore, { _tag: "Fail", error }),
+      onSuccess: (result: unknown) => restoreThen(restore, { _tag: "Succeed", value: result }),
+    }),
+  };
+}
+
+function restoreThen(
+  restore: FiberRefRestore,
+  next: Async<unknown, unknown, unknown>,
+): Async<unknown, unknown, unknown> {
+  return {
+    _tag: "FlatMap",
+    first: {
+      _tag: "Sync",
+      thunk: () => restore(),
+    },
+    andThen: () => next,
+  };
+}
+
+function enterFiberRefLocal(refId: number, value: unknown): FiberRefRestore {
+  const fiber = getCurrentFiber() as any;
+  if (!fiber) return () => undefined;
+
+  fiber.fiberContext ??= { log: emptyContext, trace: null };
+  const refs: Map<number, unknown> = fiber.fiberContext.fiberRefs ??= new Map<number, unknown>();
+  const hadValue = refs.has(refId);
+  const previousValue = refs.get(refId);
+  refs.set(refId, value);
+
+  let active = true;
+  const restore = () => {
+    if (!active) return;
+    active = false;
+    if (hadValue) refs.set(refId, previousValue);
+    else refs.delete(refId);
+  };
+
+  fiber.addFinalizer?.(() => restore());
+  return restore;
 }

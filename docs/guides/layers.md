@@ -1,101 +1,189 @@
 # Layers (Dependency Injection)
 
-Layers provide composable dependency injection with automatic lifecycle management.
+Layers describe how to build services, wire dependencies, and release resources.
+They are lazy values: acquisition happens only when a runtime evaluates
+`provideLayer`, `provideLayerContext`, `buildLayer`, or the `Layer.*` aliases.
 
-## Basic Layer
+Layer 2.0 adds three pieces on top of the original API:
 
-```ts
-import { layer, provideLayer, asyncSucceed } from "brass-runtime";
+- typed `ServiceTag<A>` keys
+- immutable `LayerContext` service maps
+- scoped builds with memoization and idempotent finalizers
 
-// Define a service layer
-const DbLayer = layer(
-  () => asyncSucceed(createPool({ host: "localhost", max: 10 })),
-  (pool) => { pool.end(); return unit(); }
-);
+## Typed Contexts
 
-// Use it
-const result = await run(
-  provideLayer(DbLayer, (pool) => pool.query("SELECT 1"))
-);
-// Pool is automatically closed after use
-```
-
-## Layer with dependencies
+Use tags when a layer graph needs more than one service or when a service should
+be retrieved by capability instead of object shape.
 
 ```ts
-import { layerFrom, compose } from "brass-runtime";
+import { type Async, Layer, Runtime, asyncSucceed, asyncSync } from "brass-runtime";
 
-// Config layer (no dependencies, no cleanup)
-const ConfigLayer = layerSucceed({ dbUrl: "postgres://...", port: 3000 });
+const finalizer = (run: () => void): Async<unknown, never, void> =>
+  asyncSync(() => run()) as Async<unknown, never, void>;
 
-// DB layer depends on Config
-const DbLayer = layerFrom<{ dbUrl: string }>()(
-  (config) => asyncSucceed(createPool(config.dbUrl)),
-  (pool) => pool.close()
-);
+type Config = { readonly dbUrl: string };
+type Db = { readonly query: (sql: string) => string };
 
-// Compose: Config → DB
-const AppLayer = compose(ConfigLayer, DbLayer);
+const Config = Layer.tag<Config>("Config");
+const Db = Layer.tag<Db>("Db");
 
-// Use the composed layer
-await run(provideLayer(AppLayer, (db) => db.query("...")));
-```
+const ConfigLayer = Layer.value(Config, { dbUrl: "postgres://local" });
 
-## Merging independent layers
-
-```ts
-import { merge, provideLayer } from "brass-runtime";
-
-const DbLayer = layer(() => asyncSucceed(createPool()), (p) => p.close());
-const CacheLayer = layer(() => asyncSucceed(createRedis()), (r) => r.quit());
-const StorageLayer = layer(() => asyncSucceed(createS3()), (s) => s.destroy());
-
-// Merge produces all three services
-const InfraLayer = merge(merge(DbLayer, CacheLayer), StorageLayer);
-
-await run(provideLayer(InfraLayer, (services) => {
-  // services has all three: db + cache + storage
-  return processRequest(services);
-}));
-// All released in reverse order
-```
-
-## Layer patterns
-
-### Singleton service
-
-```ts
-const LoggerLayer = layerSucceed(console); // no lifecycle needed
-```
-
-### Service with health check
-
-```ts
-const DbLayer = layer(
-  async () => {
-    const pool = createPool();
-    await pool.query("SELECT 1"); // health check on acquire
-    return asyncSucceed(pool);
+const DbLayer = Layer.effect(
+  Db,
+  (ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return asyncSucceed({
+      query: (sql) => `${sql} on ${config.dbUrl}`,
+    });
   },
-  (pool) => pool.end()
+  (db) => finalizer(() => {
+    db.query("close");
+  }),
+);
+
+const AppLayer = Layer.compose(ConfigLayer, DbLayer);
+
+const runtime = Runtime.make({});
+const result = await runtime.toPromise(
+  Layer.provideContext(AppLayer, (ctx) =>
+    asyncSucceed(ctx.unsafeGet(Db).query("select 1")),
+  ),
 );
 ```
 
-### Test doubles
+`LayerContext` is immutable. `add` and `merge` return new contexts, and
+right-hand services win when two contexts contain the same tag.
+
+## Plain Services
+
+The original layer API is still supported for simple service shapes.
 
 ```ts
-// Production
-const RealDbLayer = layer(() => asyncSucceed(createPool()), (p) => p.close());
+import { layer, layerFrom, composeLayer, provideLayer, asyncSucceed, asyncSync } from "brass-runtime";
 
-// Test
-const MockDbLayer = layerSucceed({
-  query: (sql: string) => asyncSucceed([{ id: 1, name: "test" }]),
-  close: () => unit(),
+type Config = { readonly dbUrl: string };
+type Db = { readonly query: (sql: string) => string };
+
+const ConfigLayer = layer(() => asyncSucceed<Config>({
+  dbUrl: "postgres://local",
+}));
+
+const DbLayer = layerFrom<Config>()(
+  (config) => asyncSucceed<Db>({
+    query: (sql) => `${sql} on ${config.dbUrl}`,
+  }),
+  () => asyncSync(() => {
+    // close the connection pool here
+  }),
+);
+
+const AppLayer = composeLayer(ConfigLayer, DbLayer);
+
+await runtime.toPromise(
+  provideLayer(AppLayer, (db) => asyncSucceed(db.query("select 1"))),
+);
+```
+
+## Merging
+
+`mergeLayer` combines independent layers. Plain object services are merged with
+object spread; `LayerContext` services are merged by tag.
+
+```ts
+import { Layer, mergeLayer, asyncSucceed } from "brass-runtime";
+
+const Db = Layer.tag<{ readonly query: (sql: string) => string }>("Db");
+const Cache = Layer.tag<{ readonly get: (key: string) => string | undefined }>("Cache");
+
+const DbLayer = Layer.effect(Db, () => asyncSucceed({ query: (sql) => sql }));
+const CacheLayer = Layer.effect(Cache, () => asyncSucceed({ get: () => undefined }));
+
+const InfraLayer = mergeLayer(DbLayer, CacheLayer);
+
+await runtime.toPromise(
+  Layer.provideContext(InfraLayer, (ctx) =>
+    asyncSucceed({
+      db: ctx.unsafeGet(Db),
+      cache: ctx.unsafeGet(Cache),
+    }),
+  ),
+);
+```
+
+## Scoped Builds
+
+Use `buildLayer` or `Layer.build` when a caller wants manual lifecycle control.
+The returned scope memoizes shared layer instances during a build, releases in
+reverse acquisition order, and makes `close()` idempotent.
+
+```ts
+import { Layer, asyncSucceed } from "brass-runtime";
+
+const built = await runtime.toPromise(Layer.build(InfraLayer));
+
+try {
+  await runtime.toPromise(
+    built.use((ctx) => asyncSucceed(ctx.unsafeGet(Db).query("select 1"))),
+  );
+} finally {
+  await runtime.toPromise(built.close());
+}
+```
+
+For advanced graph assembly, create an explicit scope:
+
+```ts
+const scope = Layer.scope();
+
+const db = await runtime.toPromise(scope.get(DbLayer));
+const sameDb = await runtime.toPromise(scope.get(DbLayer));
+
+db === sameDb; // true for the same layer object within the same scope
+
+await runtime.toPromise(scope.close());
+```
+
+After a scope is closed, further `scope.get(...)` calls fail.
+
+## Patterns
+
+### Singleton Service
+
+```ts
+const Logger = Layer.tag<Console>("Logger");
+const LoggerLayer = Layer.value(Logger, console);
+```
+
+### Service With Health Check
+
+```ts
+const DbLayer = Layer.effect(
+  Db,
+  () => asyncSync(() => {
+    const pool = createPool();
+    pool.query("select 1");
+    return pool;
+  }),
+  (pool) => asyncSync(() => {
+    pool.close();
+  }),
+);
+```
+
+### Test Doubles
+
+```ts
+const RealDbLayer = Layer.effect(Db, () => asyncSucceed(createPool()));
+
+const MockDbLayer = Layer.value(Db, {
+  query: (sql: string) => `mock:${sql}`,
 });
 
-// Same code, different layer
-const result = await run(provideLayer(
-  process.env.NODE_ENV === "test" ? MockDbLayer : RealDbLayer,
-  (db) => db.query("SELECT *")
-));
+const result = await runtime.toPromise(
+  Layer.provideContext(
+    process.env.NODE_ENV === "test" ? MockDbLayer : RealDbLayer,
+    (ctx) => asyncSucceed(ctx.unsafeGet(Db).query("select *")),
+  ),
+);
 ```

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { Runtime } from "../../core/runtime/runtime";
 import { async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed, asyncSync } from "../../core/types/asyncEffect";
 import { Async } from "../../core/types/asyncEffect";
+import { interruptible, uninterruptible, uninterruptibleMask } from "../../core/types/effect";
+import { makeFiberRef } from "../../core/runtime/fiberRef";
 import { withRequestBatching } from "../batching";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../client";
 
@@ -83,6 +85,18 @@ describe("request batching edge coverage", () => {
 
     const forkClient = withRequestBatching(config())(() => ({ _tag: "Fork", effect: asyncSucceed(response("fork")) } as Async<any, any, any>));
     await expect(rt.toPromise(forkClient(req("/fork")))).resolves.toMatchObject({ bodyText: "/fork" });
+
+    const maskedClient = withRequestBatching(config())(() => uninterruptible(asyncSucceed(response("masked"))));
+    await expect(rt.toPromise(maskedClient(req("/masked")))).resolves.toMatchObject({ bodyText: "/masked" });
+
+    const restoredClient = withRequestBatching(config())(() =>
+      uninterruptibleMask((restore) => restore(interruptible(asyncSucceed(response("restored")))))
+    );
+    await expect(rt.toPromise(restoredClient(req("/restored")))).resolves.toMatchObject({ bodyText: "/restored" });
+
+    const ref = makeFiberRef("root");
+    const fiberRefClient = withRequestBatching(config())(() => ref.locally("local", asyncSucceed(response("fiber-ref"))));
+    await expect(rt.toPromise(fiberRefClient(req("/fiber-ref")))).resolves.toMatchObject({ bodyText: "/fiber-ref" });
 
     let cancelled = 0;
     const neverNext: HttpClientFn = () => async(() => () => { cancelled++; });

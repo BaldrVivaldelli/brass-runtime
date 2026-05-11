@@ -69,6 +69,17 @@ export type RuntimeEvent =
       supervisorId: number;
     }
   | {
+      type: "schedule.decision";
+      name?: string;
+      attempt: number;
+      elapsedMs: number;
+      delayMs: number;
+      continue: boolean;
+      reason?: string;
+      input?: unknown;
+      output?: unknown;
+    }
+  | {
       type: "log";
       level: "debug" | "info" | "warn" | "error";
       message: string;

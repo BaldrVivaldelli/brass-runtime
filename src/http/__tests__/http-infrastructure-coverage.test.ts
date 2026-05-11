@@ -7,7 +7,8 @@ import {
   asyncSucceed,
   asyncSync,
 } from "../../core/types/asyncEffect";
-import type { Exit } from "../../core/types/effect";
+import { interruptible, uninterruptible, uninterruptibleMask, type Exit } from "../../core/types/effect";
+import { makeFiberRef } from "../../core/runtime/fiberRef";
 import { Runtime } from "../../core/runtime/runtime";
 import { withCircuitBreaker } from "../circuitBreaker";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../client";
@@ -54,6 +55,26 @@ describe("registerHttpEffect", () => {
     await expect(runRegistered({ _tag: "Fork", effect: asyncSucceed("child") })).resolves.toEqual({
       _tag: "Success",
       value: undefined,
+    });
+  });
+
+  it("runs interruptibility wrapper opcodes transparently", async () => {
+    await expect(runRegistered(uninterruptible(asyncSucceed("masked")))).resolves.toEqual({
+      _tag: "Success",
+      value: "masked",
+    });
+    await expect(runRegistered(interruptible(asyncSucceed("open")))).resolves.toEqual({
+      _tag: "Success",
+      value: "open",
+    });
+    await expect(runRegistered(uninterruptibleMask((restore) => restore(asyncSucceed("restored"))))).resolves.toEqual({
+      _tag: "Success",
+      value: "restored",
+    });
+    const ref = makeFiberRef("root");
+    await expect(runRegistered(ref.locally("local", asyncSucceed("fiber-ref")))).resolves.toEqual({
+      _tag: "Success",
+      value: "fiber-ref",
     });
   });
 

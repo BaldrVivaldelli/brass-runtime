@@ -7,6 +7,8 @@ This is the compact map for understanding `brass-runtime` quickly.
 - `src/index.ts` -> package root export `brass-runtime`.
 - `src/http/index.ts` -> subpath export `brass-runtime/http`.
 - `src/observability/index.ts` -> subpath export `brass-runtime/observability`.
+- `src/perf/index.ts` -> subpath export `brass-runtime/perf`.
+- `src/perf/cli.ts` -> CLI binary `brass-perf`.
 - `src/agent/index.ts` -> subpath export `brass-runtime/agent`.
 - `src/agent/cli/main.ts` -> CLI binary `brass-agent`.
 - `tsup.config.ts` -> CJS, ESM, and JS bundle entries.
@@ -24,6 +26,8 @@ Purpose:
 
 - Define `Effect`, `Async`, `Exit`, `Cause`, and cancellation types.
 - Interpret `Async` values in fibers.
+- Provide first-release DX helpers (`runPromise`, `runExit`, `makeRuntime`) on
+  top of the existing runtime.
 - Own scheduler, scopes, finalizers, runtime hooks, layers, metrics, tracing,
   schedules, supervisors, semaphores, resources, worker pools, and engine
   selection.
@@ -32,6 +36,7 @@ Read first:
 
 - `src/core/types/asyncEffect.ts`
 - `src/core/runtime/runtime.ts`
+- `src/core/runtime/dx.ts`
 - `src/core/runtime/fiber.ts`
 - `src/core/runtime/scope.ts`
 - `src/core/runtime/scheduler.ts`
@@ -53,6 +58,9 @@ Docs:
 - `docs/guides/resource-management.md`
 - `docs/guides/retry.md`
 - `docs/guides/supervisors.md`
+- `docs/recipes`
+- `docs/api-polish.md`
+- `docs/release.md`
 
 ## Streams
 
@@ -176,6 +184,47 @@ Docs:
 - `docs/observability-collector-smoke.md`
 - `docs/otel-collector-smoke.yaml`
 
+## Performance Profiler
+
+Paths:
+
+- `src/perf`
+- `docs/performance-profiler.md`
+
+Purpose:
+
+- Profile runtime primitives, HTTP layer overhead, memory retention, and
+  observability cost using dependency-free local workloads.
+- Provide importable report APIs plus `npm run perf`, `npm run perf:json`,
+  `npm run perf:history`, `npm run benchmark:perf`, and the `brass-perf`
+  package binary.
+- Persist compact perf history to `.brass/perf-history/runs.jsonl` and named
+  baselines to `.brass/perf-history/baselines`.
+- Keep profiler code outside core because it depends on runtime, HTTP, and
+  observability modules.
+
+Read first:
+
+- `src/perf/index.ts`
+- `src/perf/report.ts`
+- `src/perf/httpProfiler.ts`
+- `src/perf/httpMemoryLab.ts`
+- `src/perf/history.ts`
+- `src/perf/runtimeProfiler.ts`
+- `src/perf/runtimeAb.ts`
+- `src/perf/runtimeSoak.ts`
+- `src/perf/runtimeDiagnostics.ts`
+- `src/perf/budget.ts`
+- `src/perf/recommendations.ts`
+
+Tests:
+
+- `src/perf/__tests__`
+
+Docs:
+
+- `docs/performance-profiler.md`
+
 ## Brass Agent
 
 Paths:
@@ -243,12 +292,29 @@ Purpose:
 - Track runtime and HTTP lifecycle overhead.
 - Run the standard benchmark surface, including heap-per-suspended-fiber, from
   `npm run benchmark`.
+- Run the focused Runtime Performance Track with `npm run benchmark:runtime`
+  and its regression budget with `npm run benchmark:runtime:budget`.
+- Run the complete performance profiler JSON surface with
+  `npm run benchmark:perf`.
+- Run runtime-only A/B and soak checks with `npm run perf:runtime:ab`,
+  `npm run perf:runtime:soak`, and `npm run perf:runtime:budget`.
+- Run HTTP retained-memory checks with `npm run perf:http:memory`.
+- Record comparable local profiler history with `npm run perf:history` or
+  `npm run perf -- --record-history --save-baseline NAME`.
 - Keep benchmark thresholds separate from correctness tests.
 
 Commands:
 
 - `npm run benchmark`
 - `npm run benchmark:json`
+- `npm run benchmark:runtime`
+- `npm run benchmark:runtime:budget`
+- `npm run benchmark:perf`
+- `npm run perf:runtime:ab`
+- `npm run perf:runtime:soak`
+- `npm run perf:runtime:budget`
+- `npm run perf:http:memory`
+- `npm run perf:history`
 
 ## Where to start by task
 

@@ -9,6 +9,9 @@ import * as schema from "../schema";
 import * as observability from "../observability";
 import * as compression from "../http/compression";
 import * as lifecycle from "../http/lifecycle";
+import type { Layer as RootLayerType } from "../index";
+
+const acceptsRootLayerType = (_layer: RootLayerType<unknown, never, { readonly ready: true }>): boolean => true;
 
 describe("public barrel modules", () => {
   it("load the runtime, core, engine, HTTP, compression, and lifecycle barrels", async () => {
@@ -18,19 +21,47 @@ describe("public barrel modules", () => {
 
     expect(root.Runtime).toBe(core.Runtime);
     expect(root.asyncSucceed).toBe(core.asyncSucceed);
+    expect(root.Cause.pretty(root.Cause.fail("x"))).toBe('Fail("x")');
+    expect(root.formatCause(root.Cause.interrupt())).toBe("Interrupt");
+    expect(root.uninterruptible(root.succeed("x"))._tag).toBe("Interruptibility");
+    expect(root.uninterruptibleMask((restore) => restore(root.succeed("x")))._tag).toBe("InterruptibilityMask");
+    await expect(root.makeRuntime({}).toPromise(root.asyncSucceed("x"))).resolves.toBe("x");
+    await expect(root.runPromise(root.asyncSucceed(1))).resolves.toBe(1);
+    await expect(root.runExit(root.asyncSucceed("exit"))).resolves.toEqual(root.Exit.succeed("exit"));
+    expect(root.makeFiberRef("x").get()).toMatchObject({ _tag: "Sync" });
+    expect(root.Layer.succeed({ ready: true })._tag).toBe("Layer");
+    expect(acceptsRootLayerType(root.Layer.succeed({ ready: true }))).toBe(true);
+    expect(root.LayerContext.empty().size()).toBe(0);
+    expect(root.formatLayerError(new root.MissingLayerServiceError("Config"))).toContain("Config");
+    expect(root.defineService("Public")).toMatchObject({ _tag: "ServiceTag", name: "Public" });
+    expect(root.Layer.service(root.defineService("Svc"))).toMatchObject({ _tag: "Sync" });
+    expect(root.makeServiceTag("Public")._tag).toBe("ServiceTag");
+    expect(root.buildLayer).toBe(core.buildLayer);
+    expect(root.makeLayerScope).toBe(core.makeLayerScope);
+    expect(root.provideLayerContext).toBe(core.provideLayerContext);
+    expect(root.provide).toBe(core.provide);
     expect(root.Resource).toBe(core.Resource);
     expect(root.makeResource).toBe(core.makeResource);
     expect(root.fibonacci).toBe(core.fibonacci);
     expect(root.windowed).toBe(core.windowed);
     expect(root.jitter).toBe(core.jitter);
+    expect(root.Schedule.fixed(1)._tag).toBe("Schedule");
+    expect(root.makeScheduleDriver(root.Schedule.fixed(1)).next("x")).toMatchObject({ delayMs: 1, attempt: 0 });
+    expect(root.runSchedule(root.Schedule.once(), ["x"])).toHaveLength(1);
     expect(root.Supervisor).toBe(core.Supervisor);
     expect(root.makeSupervisor).toBe(core.makeSupervisor);
     expect(root.EventBus).toBe(core.EventBus);
+    expect(root.makeRuntimeRecorder).toBeTypeOf("function");
+    expect(root.TestClock).toBe(core.TestClock);
+    expect(root.TestScheduler).toBe(core.TestScheduler);
+    expect(root.liveClock.now()).toBeTypeOf("number");
     expect(root.consoleJsonLogger).toBe(core.consoleJsonLogger);
     expect(root.RuntimeRegistry).toBe(core.RuntimeRegistry);
     expect(root.InMemoryTracer).toBe(core.InMemoryTracer);
     expect(root.defaultTracer).toBe(core.defaultTracer);
     expect(engine.JsFiberEngine).toBeTypeOf("function");
+    expect(root.Stream.from).toBeTypeOf("function");
+    expect(root.Pipeline.map).toBeTypeOf("function");
     expect(http.makeHttpClient).toBeTypeOf("function");
     expect(http.makeDefaultHttpClient).toBeTypeOf("function");
     expect(http.httpClientBuilder).toBeTypeOf("function");
@@ -38,6 +69,8 @@ describe("public barrel modules", () => {
     expect(http.route).toBeTypeOf("function");
     expect(http.makeNodeHttpServer).toBeTypeOf("function");
     expect(http.makeHttpServerResource).toBeTypeOf("function");
+    expect(http.HttpServer.route).toBe(http.route);
+    expect(http.HttpServer.router).toBe(http.makeHttpRouter);
     expect(http.makeRuntimeHealthRoute).toBeTypeOf("function");
     expect(http.makeRuntimeReadinessRoute).toBeTypeOf("function");
     expect(http.adaptiveLimiterPresets).toBeTypeOf("object");
@@ -51,6 +84,8 @@ describe("public barrel modules", () => {
     expect(schema.s.email).toBeTypeOf("function");
     expect(schema.s.nonEmptyString).toBeTypeOf("function");
     expect(schema.Schema.object).toBeTypeOf("function");
+    expect(schema.formatConfigError(new schema.ConfigValidationError("Config", []))).toContain("Config");
+    expect(schema.isConfigValidationError(new schema.ConfigValidationError("Config", []))).toBe(true);
     expect(http.s).toBe(schema.s);
     expect(observability.formatPrometheusMetrics).toBeTypeOf("function");
     expect(observability.makeObservability).toBeTypeOf("function");

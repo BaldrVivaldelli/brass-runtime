@@ -4,6 +4,7 @@ export * from "./core/types/option";
 export * from "./core/types/cancel";
 
 export * from "./core/runtime/combinators";
+export * from "./core/runtime/dx";
 export {
   bracket,
   ensuring,
@@ -23,11 +24,24 @@ export {
 export * from "./core/runtime/semaphore";
 export * from "./core/runtime/circuitBreaker";
 export * from "./core/runtime/ref";
+export * from "./core/runtime/fiberRef";
 export {
-  type Schedule,
+  Schedule,
   type ScheduleDecision,
+  type ScheduleDriver,
+  type ScheduleDriverDecision,
+  type ScheduleDriverOptions,
+  type ScheduleDriverSnapshot,
+  type ScheduleObserver,
+  type ScheduleObserverEvent,
+  type ScheduleStepContext,
   recurs,
+  forever,
+  never,
+  once,
   fixed,
+  spaced,
+  linear,
   exponential,
   fibonacci,
   jittered,
@@ -36,33 +50,68 @@ export {
   windowed,
   elapsed,
   whileInput,
+  untilInput,
+  whileOutput,
+  untilOutput,
+  maxDelay,
+  maxElapsed,
+  upTo,
+  named as namedSchedule,
+  tapDecision,
   intersect,
   union,
+  makeScheduleDriver,
+  scheduleDriver,
+  runSchedule,
   retryWithSchedule,
+  retry as retryWithScheduleAlias,
   repeatWithSchedule,
+  repeat as repeatWithScheduleAlias,
+  poll as pollWithSchedule,
   map as mapSchedule,
   contramap as contramapSchedule,
   andThen as andThenSchedule,
   take as takeSchedule,
 } from "./core/runtime/schedule";
 export * from "./core/runtime/shutdown";
+export * from "./core/runtime/clock";
 export * from "./core/runtime/testing";
 export {
-  type Layer,
+  Layer,
+  LayerContext,
+  type LayerScope,
+  type ServiceTag,
+  type BuiltLayer,
+  MissingLayerServiceError,
+  makeServiceTag,
+  serviceTag,
+  defineService,
   layer,
   layerFrom,
+  layerValue,
+  layerEffect,
+  defineLayer,
+  layerFromContext,
   layerSucceed,
   layerFail,
   compose as composeLayer,
   merge as mergeLayer,
   mapLayer,
+  buildLayer,
+  makeLayerScope,
+  getService,
   provideLayer,
+  provide,
+  provideLayerContext,
+  provideContext,
+  formatLayerError,
 } from "./core/runtime/layer";
 export * from "./core/runtime/workerPool";
 export * from "./core/runtime/tracing";
 export * from "./core/runtime/metrics";
 export * from "./core/runtime/events";
 export * from "./core/runtime/eventBus";
+export * from "./core/runtime/recorder";
 export * from "./core/runtime/loggerSink";
 export * from "./core/runtime/registry";
 export * from "./core/runtime/dump";
@@ -101,6 +150,7 @@ export * from "./core/runtime/boundedRingBuffer";
 export * from "./core/runtime/engine";
 
 export * from "./core/stream/stream";
+export * from "./core/stream/dx";
 export * from "./core/stream/buffer";
 export * from "./core/stream/structuredConcurrency";
 export * from "./core/stream/hub";

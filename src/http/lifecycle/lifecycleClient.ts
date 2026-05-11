@@ -445,7 +445,7 @@ function trackRequest(
       const finish = (exit0: Exit<HttpError, HttpWireResponse>) => {
         if (done) return;
         done = true;
-        const exit = abortedByPreviousSignal && exit0._tag === "Failure" && exit0.cause._tag === "Interrupt"
+        const exit = abortedByPreviousSignal && exit0._tag === "Failure" && Cause.isInterruptedOnly(exit0.cause)
           ? { _tag: "Failure" as const, cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) }
           : exit0;
         previousSignal?.removeEventListener("abort", abortFromPrevious);

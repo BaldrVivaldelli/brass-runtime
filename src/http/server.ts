@@ -4,7 +4,7 @@ import { async, asyncFlatMap, asyncFold, asyncSucceed, type Async } from "../cor
 import type { RuntimeOptions } from "../core/runtime/runtime";
 import { Runtime } from "../core/runtime/runtime";
 import { resource, type Resource } from "../core/runtime/resource";
-import { fixed, take, type Schedule } from "../core/runtime/schedule";
+import { fixed, makeScheduleDriver, take, type Schedule } from "../core/runtime/schedule";
 import type { Observability } from "../observability/setup";
 import {
   healthToHttpResponse,
@@ -437,6 +437,22 @@ export function nodeHttpServerResource<R extends object = {}>(
 export const makeNodeHttpServerResource = nodeHttpServerResource;
 export const makeHttpServerResource = nodeHttpServerResource;
 
+export const HttpServer = Object.freeze({
+  route,
+  httpRoute,
+  router: makeHttpRouter,
+  listen: makeNodeHttpServer,
+  resource: nodeHttpServerResource,
+  json,
+  text,
+  empty,
+  healthRoute: makeRuntimeHealthRoute,
+  readinessRoute: makeRuntimeReadinessRoute,
+  middleware: Object.freeze({
+    header: withResponseHeader,
+  }),
+});
+
 function handleRouteMatch(
   request: HttpServerRequest,
   match: HttpRouteMatch,
@@ -768,7 +784,7 @@ function closeNodeServer<R extends object>(
   return new Promise((resolve, reject) => {
     const startedAt = Date.now();
     const schedule = options.shutdownPollSchedule ?? defaultShutdownPollSchedule(options.gracefulShutdownMs ?? 5_000);
-    let state = schedule.initial();
+    const driver = makeScheduleDriver(schedule, { name: schedule.name ?? "http.server.shutdown", startedAtMs: startedAt });
     let finished = false;
 
     const done = (error?: Error) => {
@@ -787,11 +803,10 @@ function closeNodeServer<R extends object>(
         return;
       }
 
-      const [decision, nextState] = schedule.step(state, {
+      const decision = driver.next({
         listening: server.listening,
         elapsedMs: Date.now() - startedAt,
       });
-      state = nextState;
       if (!decision.continue) {
         server.closeAllConnections?.();
         done();

@@ -3,8 +3,9 @@ import type { Exit } from "./effect";
 import { Canceler } from "./cancel";
 import { Scope } from "../runtime/scope";
 
+export type InterruptibilityMode = "uninterruptible" | "interruptible";
 
-
+export type RestoreInterruptibility = <R, E, A>(effect: Async<R, E, A>) => Async<R, E, A>;
 
 export type Async<R, E, A> =
     | { readonly _tag: "Succeed"; readonly value: A }
@@ -16,7 +17,11 @@ export type Async<R, E, A> =
     }
     | { readonly _tag: "FlatMap"; readonly first: Async<any, any, any>; readonly andThen: (a: any) => Async<any, any, A> }
     | { readonly _tag: "Fold"; readonly first: Async<any, any, any>; readonly onFailure: (e: any) => Async<any, any, A>; readonly onSuccess: (a: any) => Async<any, any, A> }
-    | { readonly _tag: "Fork"; readonly effect: Async<any, any, any>; readonly scopeId?: number };
+    | { readonly _tag: "Fork"; readonly effect: Async<any, any, any>; readonly scopeId?: number }
+    | { readonly _tag: "Interruptibility"; readonly mode: InterruptibilityMode; readonly effect: Async<any, any, A> }
+    | { readonly _tag: "InterruptibilityMask"; readonly body: (restore: RestoreInterruptibility) => Async<any, any, A> }
+    | { readonly _tag: "InterruptibilityRestore"; readonly depth: number; readonly effect: Async<any, any, A> }
+    | { readonly _tag: "FiberRefLocally"; readonly refId: number; readonly value: unknown; readonly effect: Async<any, any, A> };
 
 // ✅ VALUE: constructores (esto arregla TS2693)
 export const Async = {
@@ -26,6 +31,10 @@ export const Async = {
     async: <R, E, A>(
         register: (env: R, cb: (exit: Exit<E, A>) => void) => void | (() => void)
     ): Async<R, E, A> => ({ _tag: "Async", register }),
+    interruptibility: <R, E, A>(
+        mode: InterruptibilityMode,
+        effect: Async<R, E, A>
+    ): Async<R, E, A> => ({ _tag: "Interruptibility", mode, effect }),
 };
 
 

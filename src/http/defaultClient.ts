@@ -222,9 +222,7 @@ const DEFAULT_PRESET_CONFIG: LifecycleClientConfig = {
     ttlSeconds: 60,
     maxEntries: 1_024,
     staleWhileRevalidate: true,
-    cachePolicy: (req, res) => ({
-      cacheable: DEFAULT_CACHEABLE_METHODS.has(req.method) && res.status >= 200 && res.status < 400,
-    }),
+    cachePolicy: (req, res) => ({ cacheable: isDefaultCacheableResponse(req, res) }),
   },
   priority: {
     concurrency: 64,
@@ -245,6 +243,25 @@ const PRESET_CONFIGS: Record<DefaultHttpClientPreset, LifecycleClientConfig> = {
   balanced: BALANCED_PRESET_CONFIG,
   default: DEFAULT_PRESET_CONFIG,
 };
+
+function isDefaultCacheableResponse(req: HttpRequest, res: HttpWireResponse): boolean {
+  if (!DEFAULT_CACHEABLE_METHODS.has(req.method)) return false;
+  if (res.status < 200 || res.status >= 400) return false;
+
+  const cacheControl = headerValue(res.headers, "cache-control")?.toLowerCase();
+  if (cacheControl) {
+    const directives = cacheControl.split(",").map((part) => part.trim());
+    if (directives.includes("no-store") || directives.includes("no-cache")) return false;
+  }
+
+  if (headerValue(res.headers, "pragma")?.toLowerCase() === "no-cache") return false;
+  if (headerValue(res.headers, "set-cookie") !== undefined) return false;
+  return true;
+}
+
+function headerValue(headers: Record<string, string>, name: string): string | undefined {
+  return headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+}
 
 export const defaultHttpClientPreset: DefaultHttpClientPreset = "default";
 

@@ -2,7 +2,7 @@ import type { AsyncWithPromise } from "../core/types/asyncEffect";
 import { asyncSucceed } from "../core/types/asyncEffect";
 import type { HttpResponse } from "./httpClient";
 import { makeDefaultHttpClient } from "./defaultClient";
-import { json, route, type RoutePathParams } from "./server";
+import { HttpServer, json, route, type RoutePathParams } from "./server";
 import { s, type InferSchema } from "../schema";
 
 type Equal<A, B> =
@@ -83,4 +83,11 @@ route("GET", "/users/:id", {
   // @ts-expect-error params schema overrides raw path-param strings.
   const raw: string = ctx.params.id;
   return asyncSucceed(json({ id, raw }));
+});
+
+HttpServer.route("GET", "/teams/:teamId", (ctx) => {
+  const teamId: string = ctx.params.teamId;
+  // @ts-expect-error helper object preserves path-param inference.
+  ctx.params.missing;
+  return asyncSucceed(HttpServer.json({ teamId }));
 });

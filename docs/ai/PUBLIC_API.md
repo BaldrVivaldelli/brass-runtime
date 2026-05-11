@@ -12,6 +12,7 @@ Defined in `package.json`:
 - `brass-runtime/http/testing` -> `dist/http/testing.*`
 - `brass-runtime/schema` -> `dist/schema/index.*`
 - `brass-runtime/observability` -> `dist/observability/index.*`
+- `brass-runtime/perf` -> `dist/perf/index.*`
 - `brass-runtime/agent` -> `dist/agent/index.*`
 - `brass-runtime/package.json`
 - `brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js`
@@ -20,8 +21,10 @@ Defined in `package.json`:
 CLI:
 
 - `brass-agent` -> `dist/agent/cli/main.cjs`
+- `brass-perf` -> `dist/perf/cli.cjs`
 
-Bundle entries are defined in `tsup.config.ts`.
+Bundle entries are defined in `tsup.config.ts`. Package files include `dist`,
+`wasm/pkg`, `README.md`, `CHANGELOG.md`, `docs`, `LICENSE`, and `package.json`.
 
 ## Root export: `brass-runtime`
 
@@ -34,21 +37,33 @@ root surface by default.
 
 Primary categories:
 
-- effect/core types: `Effect`, `Async`, `Exit`, `Option`, cancel types
-- runtime execution: `Runtime`, `fork`, `toPromise`, scheduler/fiber/scope
+- effect/core types: `Async`, `ZIO`, `Exit`, `Cause`, `Option`, cancel types
+- runtime execution: `Runtime`, `makeRuntime`, `runPromise`, `runExit`,
+  `runEffect`, `fork`, `toPromise`, scheduler/fiber/scope
 - resources and structured concurrency helpers: `Resource`, `managed`,
   `Supervisor`, `makeSupervisor`, `joinSupervised`
-- semaphore, circuit breaker, ref, declarative `Schedule`, shutdown, testing
-- layers, worker pool, tracing, metrics, runtime observability hooks/events
+- interruptibility helpers: `uninterruptible`, `interruptible`,
+  `uninterruptibleMask`
+- semaphore, circuit breaker, `Ref`, `FiberRef`, declarative `Schedule`,
+  `ScheduleDriver`, Schedule 2.0 combinators/observers, shutdown, TS
+  `TestRuntime`, `TestScheduler`, `TestClock`, and testing helpers
+- Layer 2.0 dependency graph helpers: `Layer`, `LayerContext`,
+  `ServiceTag`, `makeServiceTag`, `layerValue`, `layerEffect`,
+  `defineService`, `getService`, `formatLayerError`, `buildLayer`,
+  `makeLayerScope`, `provide`, and `provideLayerContext`
+- worker pool, tracing, metrics, runtime observability hooks/events
 - typed errors
 - runtime engines and capabilities
-- streams, buffers, queues, hubs, pipelines, chunks, operators
+- streams, buffers, queues, hubs, pipelines, chunks, operators, and root-level
+  `Stream` / `Pipeline` DX facades
 
 When adding a root export:
 
 - Check whether it belongs in core or a subpath.
 - Avoid exporting test/benchmark/internal implementation details.
 - Add or update docs/examples when the export is user-facing.
+- Keep `Cause<E>` compatible with typed failures, defects, interruptions, and
+  composed `Then` / `Both` failure trees.
 
 ## Core export: `brass-runtime/core`
 
@@ -60,10 +75,13 @@ the lower-level engine, scheduler queue, ring-buffer, and WASM bridge internals
 that remain available from the root export for compatibility.
 
 Observability helpers include `RuntimeHooks`, `RuntimeEvent`,
-`RuntimeEventRecord`, `EventBus`, `consoleJsonLogger`, `RuntimeRegistry`,
-`dumpAllFibers`, and `InMemoryTracer`. Core also exposes `Resource`,
-`makeResource`, `resourceAll`, `Schedule` constructors/combinators, and
-supervisor APIs.
+`RuntimeEventRecord`, `EventBus`, `makeRuntimeRecorder`, `consoleJsonLogger`,
+`RuntimeRegistry`, `dumpAllFibers`, and `InMemoryTracer`. Core also exposes
+`Resource`, `makeResource`, `resourceAll`, `Schedule` constructors/combinators,
+`Schedule.driver` / `makeScheduleDriver`, runtime-clock-aware schedule runners,
+supervisor APIs, `makeRuntime` / `runPromise` / `runExit`, and Layer 2.0
+primitives for typed service tags, immutable contexts, scoped memoized builds,
+missing-service formatting, and idempotent release.
 
 ## HTTP export: `brass-runtime/http`
 
@@ -79,6 +97,9 @@ Recommended API order:
   effect-based middleware, schema validation, observability, runtime
   health/readiness probes, typed path params, and managed `.listen()`
   lifecycle.
+- `HttpServer` for the discoverable server DX object: routes, router, listen,
+  resource, JSON/text/empty responses, health/readiness routes, and simple
+  middleware helpers.
 - `httpClient` for day-to-day typed text/JSON calls.
 - `s` / `schema` and `validatedJson` for dependency-free HTTP JSON
   validation with typed validation errors.
@@ -107,7 +128,8 @@ Primary categories:
 - lifecycle cache/dedup/priority/stats APIs
 - retry middleware
 - retry middleware accepts an optional declarative `Schedule` for retry delays
-  while preserving `Retry-After`, max retries, and elapsed-budget behavior
+  while preserving `Retry-After`, max retries, elapsed-budget behavior, and
+  `onScheduleDecision` observability through the Schedule 2.0 driver
 - response and request compression middleware
 - request batching middleware
 - connection pre-warming utilities and middleware
@@ -136,7 +158,8 @@ needs runtime data validation:
 - primitive/object/array/record/union/literal/enum/custom schemas
 - shortcuts: `email`, `url`, `uuid`, `int`, `positive`, `nonEmptyString`, `dateIso`
 - `optional`, `nullable`, `refine`, `transform`
-- `formatIssues`, `validateValue`, `parseConfig`
+- `formatIssues`, `validateValue`, `parseConfig`, `formatConfigError`,
+  `isConfigValidationError`
 - `SchemaValidationException`, `ConfigValidationError`
 
 When changing HTTP API:
@@ -199,6 +222,50 @@ When changing observability API:
 - Do not let sink/exporter failures affect effect semantics.
 - Keep high-cardinality labels opt-in.
 - Add tests under `src/observability/__tests__`.
+
+## Performance export: `brass-runtime/perf`
+
+Source: `src/perf/index.ts`
+
+This is the built-in performance profiling surface for runtime and HTTP work.
+It is intentionally a separate subpath because it depends on runtime, HTTP, and
+observability modules.
+
+Primary categories:
+
+- `makePerfRecorder` and `summarizePerfEvents` for low-overhead local
+  measurement with a bounded ring buffer.
+- `captureMemorySnapshot`, `diffMemorySnapshots`, and
+  `profileMemoryRetention` for heap/rss/external memory reports with optional
+  forced GC.
+- `profileRuntimePrimitives` for sampled runtime primitive throughput.
+- `diagnoseRuntimeProfile` for hot primitive, fiber pressure, and hook/recorder
+  diagnostics.
+- `profileRuntimeAb` / `formatRuntimeAbReport` for runtime-only baseline vs
+  candidate comparisons.
+- `profileRuntimeSoak` / `formatRuntimeSoakReport` for repeated runtime-only
+  soak profiles.
+- `runRuntimePerfBudget` for CI-friendly runtime profiler budgets.
+- `profileHttpLayers` for local HTTP layer comparison across `node:http`, wire
+  client, default presets, adaptive limiter, and observability.
+- `profileHttpMemoryLab` / `formatHttpMemoryLabReport` for long-run HTTP
+  memory comparisons with heap/rss totals, heap per 10k requests, GC signal,
+  and per-variant verdicts.
+- `createPerfHistoryEntry`, `recordPerfHistoryRun`, `readPerfHistory`,
+  `savePerfBaseline`, `loadPerfBaseline`, `comparePerfToBaseline`, and
+  `formatPerfBaselineComparison` for local JSONL perf history and named
+  baseline regression checks.
+- `recommendPerformance` for heuristic warnings and next actions.
+- `runBrassPerformanceProfile` and `formatPerformanceReport` for the complete
+  report used by `npm run perf`, `npm run perf:json`, `npm run benchmark:perf`,
+  `npm run perf:history`, and the `brass-perf` binary.
+
+When changing performance API:
+
+- Keep profiler defaults small enough for local iteration.
+- Keep long, stable regression checks in `src/benchmarks` and budget scripts.
+- Do not make core depend on HTTP or observability.
+- Prefer JSON-friendly report shapes.
 
 ## Agent export: `brass-runtime/agent`
 

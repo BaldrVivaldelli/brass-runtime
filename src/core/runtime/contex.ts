@@ -42,4 +42,5 @@ export type TraceContext = {
 export type FiberContext = {
     log: ContextNode;
     trace: TraceContext | null;
+    fiberRefs?: Map<number, unknown>;
 };

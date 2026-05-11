@@ -7,7 +7,7 @@ brass-runtime provides helpers for testing effects deterministically.
 ```ts
 import { makeTestRuntime } from "brass-runtime";
 
-const { runtime, run, runExit } = makeTestRuntime();
+const { runtime, run, runExit, clock, advance, flushAll } = makeTestRuntime();
 
 // run() returns the value (throws on failure)
 const value = await run(myEffect);
@@ -16,6 +16,49 @@ const value = await run(myEffect);
 const exit = await runExit(myEffect);
 if (exit._tag === "Success") console.log(exit.value);
 else console.log(exit.cause);
+```
+
+`makeTestRuntime()` uses the TypeScript runtime engine with:
+
+- `TestScheduler`, a deterministic scheduler you can inspect and flush.
+- `TestClock`, a virtual clock used by `sleep`, `timeout`, retry backoff,
+  `delayedEffect`, and `Runtime.delay`.
+- The same fiber interpreter as production TS mode.
+
+The scheduler auto-flushes by default for ergonomic tests. Disable that when
+you need to inspect queued work:
+
+```ts
+import { makeTestRuntime, succeed } from "brass-runtime";
+
+const { runtime, scheduler, flushAll } = makeTestRuntime({}, { autoFlush: false });
+
+const pending = runtime.toPromise(succeed("ok"));
+expect(scheduler.size()).toBe(1);
+
+flushAll();
+await expect(pending).resolves.toBe("ok");
+```
+
+## Virtual Time
+
+```ts
+import { makeTestRuntime, sleep, timeout, neverEffect } from "brass-runtime";
+
+const { run, runExit, clock, advance } = makeTestRuntime();
+
+const sleeping = run(sleep(1_000));
+expect(clock.pendingTimers()).toHaveLength(1);
+
+advance(1_000);
+await sleeping;
+
+const timedOut = runExit(timeout(neverEffect(), 50));
+advance(50);
+expect(await timedOut).toMatchObject({
+  _tag: "Failure",
+  cause: { _tag: "Fail", error: { _tag: "TimeoutError", ms: 50 } },
+});
 ```
 
 ## Assertion helpers
@@ -80,20 +123,18 @@ it("fails after exhausting retries", async () => {
 ```ts
 import { timeout, delayedEffect, neverEffect, makeTestRuntime } from "brass-runtime";
 
-const { run } = makeTestRuntime();
+const { run, advance } = makeTestRuntime();
 
 it("succeeds before timeout", async () => {
-  const result = await run(timeout(delayedEffect(10, "fast"), 1000));
-  expect(result).toBe("fast");
+  const result = run(timeout(delayedEffect(10, "fast"), 1000));
+  advance(10);
+  await expect(result).resolves.toBe("fast");
 });
 
 it("times out on slow effect", async () => {
-  try {
-    await run(timeout(neverEffect(), 50));
-    fail("should have thrown");
-  } catch (e) {
-    expect(e._tag).toBe("TimeoutError");
-  }
+  const result = run(timeout(neverEffect(), 50));
+  advance(50);
+  await expect(result).rejects.toMatchObject({ _tag: "TimeoutError", ms: 50 });
 });
 ```
 

@@ -11,6 +11,8 @@ const requiredFiles = [
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
   "dist/observability/index.cjs",
+  "dist/perf/index.cjs",
+  "dist/perf/cli.cjs",
   "dist/agent/index.cjs",
   "wasm/pkg/brass_runtime_wasm_engine.js",
   "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
@@ -30,6 +32,7 @@ const cjsFiles = [
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
   "dist/observability/index.cjs",
+  "dist/perf/index.cjs",
   "dist/agent/index.cjs",
 ];
 

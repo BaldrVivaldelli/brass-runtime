@@ -27,6 +27,7 @@ npm run context -- --module http
 - Streams are library code on top of core: `src/core/stream`.
 - Schema is a tiny first-party validation module: `src/schema`.
 - HTTP is a high-level module on top of effects/fibers: `src/http`.
+- Perf is a Node-focused profiling subpath: `src/perf`.
 - Brass Agent is an application/library layer: `src/agent`.
 - WASM is an optional strict engine/accelerator: `crates/brass-runtime-wasm-engine`, `wasm/pkg`.
 
@@ -138,6 +139,24 @@ npm run validate:cjs
 
 `npm run build` requires `wasm-pack` and a valid WASM toolchain.
 
+Before the first public release or any release-candidate cut:
+
+```bash
+npm run release:check
+```
+
+Performance-sensitive changes should also run the focused profiler path:
+
+```bash
+npm run perf -- --profile runtime-ab
+npm run perf -- --profile runtime-soak
+npm run perf:history -- --profile runtime-ab
+```
+
+Use `--record-history`, `--save-baseline NAME`, and `--compare-baseline NAME`
+to keep comparable local performance evidence under `.brass/perf-history`.
+Do not commit that local history unless explicitly requested.
+
 ## Current repo shape
 
 The repo intentionally contains multiple products:
@@ -145,6 +164,7 @@ The repo intentionally contains multiple products:
 - Runtime package exported at `brass-runtime`.
 - HTTP subpath exported at `brass-runtime/http`.
 - Schema subpath exported at `brass-runtime/schema`.
+- Perf subpath and CLI exported at `brass-runtime/perf` and `brass-perf`.
 - Agent subpath and CLI exported at `brass-runtime/agent` and `brass-agent`.
 - Rust/WASM engine sources under `crates/`.
 

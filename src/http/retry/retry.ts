@@ -8,7 +8,7 @@ import type {
 } from "../client";
 import { async as asyncRegister, asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../../core/types/asyncEffect";
 import type { Async } from "../../core/types/asyncEffect";
-import type { Schedule } from "../../core/runtime/schedule";
+import { makeScheduleDriver, type Schedule, type ScheduleDriver, type ScheduleObserver } from "../../core/runtime/schedule";
 import { makeWasmRetryPlanner } from "./wasmRetryPlanner";
 
 /**
@@ -61,6 +61,8 @@ export type RetryPolicy = {
     maxDelayMs: number;
     /** Optional declarative schedule. When present, it provides retry delays. */
     schedule?: Schedule<RetryScheduleInput, unknown>;
+    /** Optional observer for declarative schedule decisions. */
+    onScheduleDecision?: ScheduleObserver<RetryScheduleInput, unknown>;
 
     /** Optional total retry budget, including request attempts and sleeps. */
     maxElapsedMs?: number;
@@ -163,21 +165,20 @@ export const withRetry =
                 attempt: number,
                 startedAt: number,
                 retryable: boolean,
-                scheduleState: unknown,
+                scheduleDriver: ScheduleDriver<RetryScheduleInput, unknown> | undefined,
                 input: RetryScheduleInput,
-            ): { delayMs: number; scheduleState: unknown } | undefined => {
+            ): { delayMs: number } | undefined => {
                 if (!retryable) return undefined;
                 const remainingBudget = epMaxElapsedMs === undefined ? Number.POSITIVE_INFINITY : epMaxElapsedMs - (performance.now() - startedAt);
                 if (remainingBudget <= 0) return undefined;
-                if (ep.schedule) {
-                    const [decision, nextScheduleState] = ep.schedule.step(scheduleState, input);
+                if (scheduleDriver) {
+                    const decision = scheduleDriver.next(input);
                     if (!decision.continue) return undefined;
                     const rawDelay = input.retryAfterMs === undefined
                         ? decision.delayMs
                         : Math.min(input.retryAfterMs, ep.maxDelayMs);
                     return {
                         delayMs: Math.max(0, Math.min(rawDelay, remainingBudget)),
-                        scheduleState: nextScheduleState,
                     };
                 }
                 if (wasmPlanner && retryId !== undefined) {
@@ -186,12 +187,12 @@ export const withRetry =
                         retryable,
                         retryAfterMs: input.retryAfterMs,
                     });
-                    return delay === undefined ? undefined : { delayMs: delay, scheduleState };
+                    return delay === undefined ? undefined : { delayMs: delay };
                 }
                 const rawDelay = input.retryAfterMs === undefined
                     ? backoffDelayMs(attempt, ep.baseDelayMs, ep.maxDelayMs)
                     : Math.min(input.retryAfterMs, ep.maxDelayMs);
-                return { delayMs: Math.max(0, Math.min(rawDelay, remainingBudget)), scheduleState };
+                return { delayMs: Math.max(0, Math.min(rawDelay, remainingBudget)) };
             };
 
             const sleepWithCleanup = (ms: number, onCancel: () => void): Async<unknown, never, void> => {
@@ -205,7 +206,7 @@ export const withRetry =
                 });
             };
 
-            const loop = (req: HttpRequest, attempt: number, startedAt: number, retryId: number | undefined, ep: RetryPolicy, epMaxElapsedMs: number | undefined, epRetryOnStatus: (s: number) => boolean, epRetryOnError: (e: HttpError) => boolean, originalPriority: number, safeDrop: (id: number | undefined) => void, scheduleState: unknown): Async<unknown, HttpError, HttpWireResponse> => {
+            const loop = (req: HttpRequest, attempt: number, startedAt: number, retryId: number | undefined, ep: RetryPolicy, epMaxElapsedMs: number | undefined, epRetryOnStatus: (s: number) => boolean, epRetryOnError: (e: HttpError) => boolean, originalPriority: number, safeDrop: (id: number | undefined) => void, scheduleDriver: ScheduleDriver<RetryScheduleInput, unknown> | undefined): Async<unknown, HttpError, HttpWireResponse> => {
                 if (!isMethodRetryable(req)) return next(req);
 
                 // Boost priority for retry attempts (attempt > 0)
@@ -225,7 +226,7 @@ export const withRetry =
                         }
 
                         const retryable = attempt < ep.maxRetries && epRetryOnError(e) && remainingBudget() > 0;
-                        const retryDecision = nextDelay(ep, epMaxElapsedMs, retryId, attempt, startedAt, retryable, scheduleState, {
+                        const retryDecision = nextDelay(ep, epMaxElapsedMs, retryId, attempt, startedAt, retryable, scheduleDriver, {
                             attempt,
                             elapsedMs: performance.now() - startedAt,
                             request: req,
@@ -246,12 +247,12 @@ export const withRetry =
                                 timestamp: Date.now(),
                             });
                         }
-                        return asyncFlatMap(sleepWithCleanup(retryDecision.delayMs, () => safeDrop(retryId)) as any, () => loop(req, attempt + 1, startedAt, retryId, ep, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, retryDecision.scheduleState));
+                        return asyncFlatMap(sleepWithCleanup(retryDecision.delayMs, () => safeDrop(retryId)) as any, () => loop(req, attempt + 1, startedAt, retryId, ep, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, scheduleDriver));
                     },
                     (w) => {
                         const retryable = attempt < ep.maxRetries && epRetryOnStatus(w.status) && remainingBudget() > 0;
                         const ra = ep.respectRetryAfter === false ? undefined : retryAfterMs(w.headers);
-                        const retryDecision = nextDelay(ep, epMaxElapsedMs, retryId, attempt, startedAt, retryable, scheduleState, {
+                        const retryDecision = nextDelay(ep, epMaxElapsedMs, retryId, attempt, startedAt, retryable, scheduleDriver, {
                             attempt,
                             elapsedMs: performance.now() - startedAt,
                             request: req,
@@ -273,7 +274,7 @@ export const withRetry =
                                 timestamp: Date.now(),
                             });
                         }
-                        return asyncFlatMap(sleepWithCleanup(retryDecision.delayMs, () => safeDrop(retryId)) as any, () => loop(req, attempt + 1, startedAt, retryId, ep, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, retryDecision.scheduleState));
+                        return asyncFlatMap(sleepWithCleanup(retryDecision.delayMs, () => safeDrop(retryId)) as any, () => loop(req, attempt + 1, startedAt, retryId, ep, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, scheduleDriver));
                     }
                 );
             };
@@ -307,7 +308,13 @@ export const withRetry =
                     }
                 };
 
-                const scheduleState = effectivePolicy.schedule?.initial();
-                return loop(req, 0, startedAt, retryId, effectivePolicy, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, scheduleState);
+                const scheduleDriver = effectivePolicy.schedule
+                    ? makeScheduleDriver(effectivePolicy.schedule, {
+                        name: effectivePolicy.schedule.name ?? "http.retry",
+                        startedAtMs: startedAt,
+                        onDecision: effectivePolicy.onScheduleDecision,
+                    })
+                    : undefined;
+                return loop(req, 0, startedAt, retryId, effectivePolicy, epMaxElapsedMs, epRetryOnStatus, epRetryOnError, originalPriority, safeDrop, scheduleDriver);
             };
         };
