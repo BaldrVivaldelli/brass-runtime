@@ -70,9 +70,12 @@ export function registerHttpEffect<E, A>(
               run(current.onSuccess(exit.value), cont as any);
               return;
             }
-            if (exit.cause._tag === "Fail") {
-              run(current.onFailure(exit.cause.error), cont as any);
-              return;
+            if (Cause.isFailureOnly(exit.cause)) {
+              const failure = Cause.firstFailure(exit.cause);
+              if (failure._tag === "Some") {
+                run(current.onFailure(failure.value), cont as any);
+                return;
+              }
             }
             cont(exit as any);
           } catch (e) {
@@ -82,6 +85,14 @@ export function registerHttpEffect<E, A>(
         return;
       case "Fork":
         cont({ _tag: "Success", value: undefined as any });
+        return;
+      case "Interruptibility":
+      case "InterruptibilityRestore":
+      case "FiberRefLocally":
+        run(current.effect, cont as any);
+        return;
+      case "InterruptibilityMask":
+        run(current.body((effect) => effect), cont as any);
         return;
     }
   };

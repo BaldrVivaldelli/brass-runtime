@@ -7,6 +7,7 @@ import { async, Async, asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "
 import { Cause, Exit } from "../types/effect";
 import { Canceler } from "../types/cancel";
 import { unsafeGetCurrentRuntime } from "./fiber";
+import { runtimeClockFromEnv, type RuntimeClock } from "./clock";
 
 // ---------------------------------------------------------------------------
 // sleep — generic delay (cancellable)
@@ -18,10 +19,10 @@ export type TimeoutError = { readonly _tag: "TimeoutError"; readonly ms: number 
  * Suspends the fiber for `ms` milliseconds. Cancellable via fiber interruption.
  */
 export function sleep(ms: number): Async<unknown, never, void> {
-  return async((_env, cb) => {
-    const delay = Math.max(0, Math.floor(ms));
-    const id = setTimeout(() => cb({ _tag: "Success", value: undefined }), delay);
-    return () => clearTimeout(id);
+  return async((env, cb) => {
+    const clock = runtimeClockFromEnv(env);
+    const id = clock.setTimeout(() => cb({ _tag: "Success", value: undefined }), ms);
+    return () => clock.clearTimeout(id);
   });
 }
 
@@ -45,30 +46,31 @@ export function timeout<R, E, A>(
   // The effect runs first; if it completes, we return its result.
   // If it doesn't complete within ms, we fail with TimeoutError.
   return async((env, cb) => {
+    const clock = runtimeClockFromEnv(env);
     let done = false;
-    let timerId: ReturnType<typeof setTimeout> | undefined;
-    let effectRunning = true;
+    let timerId: unknown;
+    let fiber: ReturnType<ReturnType<typeof unsafeGetCurrentRuntime>["fork"]> | undefined;
 
     // Start the timeout timer
-    timerId = setTimeout(() => {
+    timerId = clock.setTimeout(() => {
       if (done) return;
       done = true;
-      effectRunning = false;
+      fiber?.interrupt();
       cb({
         _tag: "Failure",
         cause: { _tag: "Fail", error: { _tag: "TimeoutError", ms } as E | TimeoutError },
       });
-    }, Math.max(0, Math.floor(ms)));
+    }, ms);
 
     // Fork the effect — we need to use the runtime to execute it
     // Since we're inside an Async register, we have access to env.
     const runtime = unsafeGetCurrentRuntime();
 
-    const fiber = runtime.fork(effect as any);
+    fiber = runtime.fork(effect as any);
     fiber.join((exit: any) => {
       if (done) return;
       done = true;
-      clearTimeout(timerId!);
+      clock.clearTimeout(timerId);
       cb(exit);
     });
 
@@ -76,7 +78,7 @@ export function timeout<R, E, A>(
     return () => {
       if (done) return;
       done = true;
-      clearTimeout(timerId!);
+      clock.clearTimeout(timerId);
       fiber.interrupt();
     };
   });
@@ -134,7 +136,7 @@ export function retry<R, E, A>(
     return Math.floor(Math.random() * capped);
   };
 
-  const loop = (attempt: number, startedAt: number): Async<R, E, A> =>
+  const loop = (attempt: number, startedAt: number, clock: RuntimeClock): Async<R, E, A> =>
     asyncFold(
       effect,
       (error: E) => {
@@ -144,20 +146,23 @@ export function retry<R, E, A>(
 
         // Check time budget
         if (maxElapsedMs !== undefined) {
-          const elapsed = performance.now() - startedAt;
+          const elapsed = clock.now() - startedAt;
           if (elapsed >= maxElapsedMs) return asyncFail(error);
         }
 
         // Compute delay and retry
         const delay = computeDelay(attempt);
-        return asyncFlatMap(sleep(delay), () => loop(attempt + 1, startedAt));
+        return asyncFlatMap(sleep(delay), () => loop(attempt + 1, startedAt, clock));
       },
       (value: A) => asyncSucceed(value)
     );
 
   return asyncFlatMap(
-    { _tag: "Sync", thunk: () => performance.now() } as Async<R, E, number>,
-    (startedAt) => loop(0, startedAt as unknown as number)
+    { _tag: "Sync", thunk: (env: R) => {
+      const clock = runtimeClockFromEnv(env);
+      return { clock, startedAt: clock.now() };
+    } } as Async<R, E, { clock: RuntimeClock; startedAt: number }>,
+    ({ clock, startedAt }) => loop(0, startedAt, clock)
   ) as Async<R, E, A>;
 }
 

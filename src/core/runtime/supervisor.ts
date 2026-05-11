@@ -1,9 +1,10 @@
 import type { Async } from "../types/asyncEffect";
 import { async } from "../types/asyncEffect";
-import type { Exit } from "../types/effect";
+import { Cause, type Exit } from "../types/effect";
 import type { Fiber } from "./fiber";
 import type { Runtime } from "./runtime";
-import type { Schedule } from "./schedule";
+import { makeScheduleDriver, type Schedule, type ScheduleDriver } from "./schedule";
+import { liveClock, type RuntimeClock } from "./clock";
 
 export type SupervisorStrategy = "one-for-one" | "all-for-one";
 export type SupervisorEscalation = "ignore" | "shutdown";
@@ -78,7 +79,7 @@ type ChildRecord<R, E = any, A = any> = {
   status: SupervisedChildStatus;
   restartCount: number;
   restartTimes: number[];
-  scheduleState?: unknown;
+  scheduleDriver?: ScheduleDriver<SupervisorRestartContext, unknown>;
   generation: number;
   plannedRestart: boolean;
   terminalExit?: Exit<E, A>;
@@ -329,9 +330,11 @@ export class Supervisor<R> {
     record.restartTimes.push(now);
 
     if (record.restart.schedule) {
-      const state = record.scheduleState ?? record.restart.schedule.initial();
-      const [decision, nextState] = record.restart.schedule.step(state, context);
-      record.scheduleState = nextState;
+      record.scheduleDriver ??= makeScheduleDriver(record.restart.schedule, {
+        name: record.restart.schedule.name ?? "supervisor.restart",
+        clock: this.scheduleClock(),
+      });
+      const decision = record.scheduleDriver.next(context);
       return decision.continue ? Math.max(0, Math.floor(decision.delayMs)) : undefined;
     }
 
@@ -382,6 +385,14 @@ export class Supervisor<R> {
     this.onEvent?.(event);
     this.runtime.emit(toRuntimeEvent(event));
   }
+
+  private scheduleClock(): RuntimeClock {
+    return {
+      now: this.clock,
+      setTimeout: liveClock.setTimeout,
+      clearTimeout: liveClock.clearTimeout,
+    };
+  }
 }
 
 export function makeSupervisor<R>(runtime: Runtime<R>, config: SupervisorConfig = {}): Supervisor<R> {
@@ -412,7 +423,7 @@ function resolveRestartPolicy(policy: SupervisorRestartPolicy): ResolvedRestartP
 }
 
 function shouldRestart(mode: SupervisorRestartMode, exit: Exit<any, any>): boolean {
-  if (exit._tag === "Failure" && exit.cause._tag === "Interrupt") return false;
+  if (exit._tag === "Failure" && Cause.isInterruptedOnly(exit.cause)) return false;
   if (mode === "never") return false;
   if (mode === "always") return true;
   return exit._tag === "Failure";
@@ -420,7 +431,7 @@ function shouldRestart(mode: SupervisorRestartMode, exit: Exit<any, any>): boole
 
 function statusFromExit(exit: Exit<any, any>): SupervisedChildStatus {
   if (exit._tag === "Success") return "succeeded";
-  return exit.cause._tag === "Interrupt" ? "interrupted" : "failed";
+  return Cause.isInterruptedOnly(exit.cause) ? "interrupted" : "failed";
 }
 
 function toRuntimeEvent(event: SupervisorEvent) {

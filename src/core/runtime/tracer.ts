@@ -1,4 +1,5 @@
 import { Baggage, TraceContext } from "./contex";
+import type { RuntimeClock } from "./clock";
 
 export type TraceSamplingInput = {
     readonly traceId: string;
@@ -33,5 +34,6 @@ export type BrassEnv = {
     respectRemoteSampled?: boolean;
     forceSampleOnError?: boolean;
     childName?: (parentName?: string) => string | undefined;
+    clock?: RuntimeClock;
   };
 };

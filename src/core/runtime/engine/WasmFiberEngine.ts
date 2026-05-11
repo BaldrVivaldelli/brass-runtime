@@ -524,15 +524,33 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
       return;
     }
     const cause = exit.cause;
-    if (cause._tag === "Interrupt") {
+    if (Cause.isInterruptedOnly(cause)) {
       this.interruptState(state, cause);
       return;
     }
-    if (cause._tag === "Fail") {
-      this.resumeWithError(state, cause.error);
-      return;
+    if (Cause.isFailureOnly(cause)) {
+      const failure = Cause.firstFailure(cause);
+      if (failure._tag === "Some") {
+        this.resumeWithError(state, failure.value);
+        return;
+      }
     }
-    this.completeDie(state, cause.defect);
+    this.completeCause(state, cause);
+  }
+
+  private completeCause(state: WasmFiberState<R, any, any>, cause: Cause<any>): void {
+    if (state.completed) return;
+    state.completed = true;
+    const interrupted = Cause.isInterruptedOnly(cause);
+    state.status = interrupted ? "interrupted" : "failed";
+    this.fiberRegistry?.markDone(state.fiberId, interrupted ? "interrupted" : "failed");
+    if (interrupted) {
+      this.interruptedFibers += 1;
+    } else {
+      this.failedFibers += 1;
+    }
+    this.cleanupState(state);
+    state.handle.complete(Exit.failCause(cause));
   }
 
   private resumeWithValue(state: WasmFiberState<R, any, any>, value: unknown): void {

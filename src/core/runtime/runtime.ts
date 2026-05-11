@@ -1,6 +1,6 @@
 import { async, Async } from "../types/asyncEffect";
 import { globalScheduler, inferCallerLaneFromStack, Scheduler } from "./scheduler";
-import { Fiber, getCurrentFiber } from "./fiber";
+import { Fiber, getCurrentFiber, withCurrentFiber } from "./fiber";
 import { Cause, Exit } from "../types/effect";
 import type { RuntimeEvent, RuntimeEmitContext, RuntimeHooks } from "./events";
 import { makeForkPolicy } from "./forkPolicy";
@@ -12,6 +12,7 @@ import type { FiberEngine, RuntimeEngineMode } from "./engine/types";
 import type { EngineStats } from "./engineStats";
 import { runtimeCapabilities } from "./capabilities";
 import { Schema, parseConfig } from "../../schema";
+import { runtimeClockFromEnv } from "./clock";
 
 // fallback hooks (no-op)
 export const NoopHooks: RuntimeHooks = {
@@ -198,23 +199,49 @@ export class Runtime<R> {
         effect: Async<R, E, A>,
         cb: (exit: Exit<E, A>) => void
     ): void {
+        if (this.tryRunNativeTopLevel(effect, cb)) return;
+
         const fiber = this.fork(effect);
         fiber.join(cb);
     }
 
     toPromise<E, A>(effect: Async<R, E, A>): Promise<A> {
         return new Promise((resolve, reject) => {
+            const complete = (exit: Exit<E, A>) => {
+                if (exit._tag === "Success") {
+                    resolve(exit.value);
+                    return;
+                }
+                const failure = Cause.firstFailure(exit.cause);
+                if (failure._tag === "Some") reject(failure.value);
+                else {
+                    const defect = Cause.firstDefect(exit.cause);
+                    if (defect._tag === "Some") {
+                        reject(defect.value instanceof Error ? defect.value : new Error(String(defect.value)));
+                    } else if (Cause.containsInterrupt(exit.cause)) {
+                        reject(new Error("Interrupted"));
+                    } else {
+                        reject(Cause.toError(exit.cause));
+                    }
+                }
+            };
+            if (this.tryRunNativeTopLevel(effect, complete)) return;
+
             const fiber = this.fork(effect);
             fiber.join((exit) => {
-                if (exit._tag === "Success") resolve(exit.value);
-                else {
-                    const c: any = (exit as any).cause;
-                    if (c?._tag === "Fail") reject(c.error);
-                    else if (c?._tag === "Die") reject(c.defect instanceof Error ? c.defect : new Error(String(c.defect)));
-                    else reject(new Error("Interrupted"));
-                }
+                complete(exit);
             });
         });
+    }
+
+    private tryRunNativeTopLevel<E, A>(effect: Async<R, E, A>, cb: (exit: Exit<E, A>) => void): boolean {
+        if (this.hooks !== NoopHooks) return false;
+        if (getCurrentFiber() !== null) return false;
+        if (this.scheduler !== globalScheduler) return false;
+        if (this.lane !== undefined || this.inferLane) return false;
+        if (this.engineMode !== "ts") return false;
+        new NativeTopLevelRunner(this, effect, cb).start();
+        return true;
     }
 
     // helper: correr un efecto y “tirar” el resultado
@@ -224,12 +251,13 @@ export class Runtime<R> {
 
     delay<E, A>(ms: number, eff: Async<R, E, A>): Async<R, E, A> {
         return async((_env, cb) => {
-            const handle = setTimeout(() => {
+            const clock = runtimeClockFromEnv(this.env);
+            const handle = clock.setTimeout(() => {
                 this.unsafeRunAsync(eff, cb);
             }, ms);
 
             // Canceler
-            return () => clearTimeout(handle);
+            return () => clock.clearTimeout(handle);
         });
     }
 
@@ -249,6 +277,297 @@ export class Runtime<R> {
     /** Convenience logger: emits a RuntimeEvent of type "log". */
     log(level: "debug" | "info" | "warn" | "error", message: string, fields?: Record<string, unknown>): void {
         this.emit({ type: "log", level, message, fields });
+    }
+}
+
+type NativeContinuation<R, E> =
+    | { _tag: "SuccessCont"; k: (a: any) => Async<R, E, any> }
+    | {
+        _tag: "FoldCont";
+        onFailure: (e: any) => Async<R, E, any>;
+        onSuccess: (a: any) => Async<R, E, any>;
+    }
+    | { _tag: "InterruptibilityCont" }
+    | { _tag: "FiberRefCont"; refId: number; hadValue: boolean; previousValue: unknown };
+
+const NATIVE_FAST_PATH_STEP_BUDGET = 32768;
+
+class NativeTopLevelRunner<R, E, A> {
+    private current: Async<R, E, any>;
+    private readonly stack: NativeContinuation<R, E>[] = [];
+    private readonly joiners: Array<(exit: Exit<E, A>) => void> = [];
+    private readonly finalizers: Array<(exit: Exit<E, A>) => void | Async<any, any, any>> = [];
+    private result: Exit<E, A> | undefined;
+    private yielded = false;
+
+    private readonly frame: any;
+
+    constructor(
+        private readonly runtime: Runtime<R>,
+        effect: Async<R, E, A>,
+        cb: (exit: Exit<E, A>) => void,
+    ) {
+        this.current = effect;
+        this.joiners.push(cb);
+        this.frame = {
+            id: 0,
+            runtime,
+            name: "native-fast-path",
+            fiberContext: { trace: null },
+            lane: runtime.lane,
+            status: () => this.result ? "Done" : "Running",
+            join: (joiner: (exit: Exit<E, A>) => void) => {
+                if (this.result) joiner(this.result);
+                else this.joiners.push(joiner);
+            },
+            interrupt: () => undefined,
+            addFinalizer: (finalizer: (exit: Exit<E, A>) => void | Async<any, any, any>) => {
+                this.finalizers.push(finalizer);
+            },
+        };
+    }
+
+    start(): void {
+        this.runLoop();
+    }
+
+    private runLoop(): void {
+        this.withFrame(() => {
+            this.yielded = false;
+            let budget = NATIVE_FAST_PATH_STEP_BUDGET;
+
+            while (!this.result && budget-- > 0) {
+                const current: any = this.current;
+
+                switch (current._tag) {
+                    case "Succeed":
+                        this.onSuccess(current.value);
+                        break;
+
+                    case "Fail":
+                        this.onCause(Cause.fail(current.error as E));
+                        break;
+
+                    case "Sync":
+                        try {
+                            this.onSuccess(current.thunk(this.runtime.env));
+                        } catch (error) {
+                            this.onCause(Cause.fail(error as E));
+                        }
+                        break;
+
+                    case "FlatMap":
+                        this.stack.push({ _tag: "SuccessCont", k: current.andThen });
+                        this.current = current.first;
+                        break;
+
+                    case "Fold":
+                        this.stack.push({
+                            _tag: "FoldCont",
+                            onFailure: current.onFailure,
+                            onSuccess: current.onSuccess,
+                        });
+                        this.current = current.first;
+                        break;
+
+                    case "Async":
+                        if (this.runAsync(current)) break;
+                        return;
+
+                    case "Fork":
+                        this.onSuccess(this.runtime.fork(current.effect, current.scopeId) as any);
+                        break;
+
+                    case "Interruptibility":
+                        this.stack.push({ _tag: "InterruptibilityCont" });
+                        this.current = current.effect;
+                        break;
+
+                    case "InterruptibilityMask":
+                        this.stack.push({ _tag: "InterruptibilityCont" });
+                        try {
+                            this.current = current.body((effect: Async<any, any, any>) => ({
+                                _tag: "InterruptibilityRestore",
+                                depth: 0,
+                                effect,
+                            }));
+                        } catch (error) {
+                            this.onCause(Cause.die<E>(error));
+                        }
+                        break;
+
+                    case "InterruptibilityRestore":
+                        this.stack.push({ _tag: "InterruptibilityCont" });
+                        this.current = current.effect;
+                        break;
+
+                    case "FiberRefLocally": {
+                        const refs = this.fiberRefs();
+                        const hadValue = refs.has(current.refId);
+                        const previousValue = refs.get(current.refId);
+                        refs.set(current.refId, current.value);
+                        this.stack.push({
+                            _tag: "FiberRefCont",
+                            refId: current.refId,
+                            hadValue,
+                            previousValue,
+                        });
+                        this.current = current.effect;
+                        break;
+                    }
+
+                    default:
+                        this.onCause(Cause.fail(new Error(`Unknown opcode: ${current._tag}`) as E));
+                        break;
+                }
+            }
+
+            if (!this.result && !this.yielded) {
+                this.yielded = true;
+                queueMicrotask(() => this.runLoop());
+            }
+        });
+    }
+
+    private runAsync(current: { register: (env: R, cb: (exit: Exit<E, any>) => void) => void | (() => void) }): boolean {
+        let registered = false;
+        let settled = false;
+        let syncExit: Exit<E, any> | undefined;
+
+        const resume = (exit: Exit<E, any>) => {
+            if (settled) return;
+            settled = true;
+            if (!registered) {
+                syncExit = exit;
+                return;
+            }
+            queueMicrotask(() => this.resumeAsync(exit));
+        };
+
+        try {
+            current.register(this.runtime.env, resume);
+        } catch (error) {
+            this.onCause(Cause.die<E>(error));
+            return true;
+        }
+
+        registered = true;
+        if (syncExit) {
+            this.consumeExit(syncExit);
+            return true;
+        }
+        return false;
+    }
+
+    private resumeAsync(exit: Exit<E, any>): void {
+        if (this.result) return;
+        this.withFrame(() => this.consumeExit(exit));
+        if (!this.result) this.runLoop();
+    }
+
+    private consumeExit(exit: Exit<E, any>): void {
+        if (exit._tag === "Success") this.onSuccess(exit.value);
+        else this.onCause(exit.cause);
+    }
+
+    private onSuccess(value: any): void {
+        let currentValue = value;
+        while (true) {
+            const frame = this.stack.pop();
+            if (!frame) {
+                this.notify(Exit.succeed(currentValue));
+                return;
+            }
+
+            if (frame._tag === "InterruptibilityCont") continue;
+
+            if (frame._tag === "FiberRefCont") {
+                this.restoreFiberRef(frame);
+                continue;
+            }
+
+            if (frame._tag === "SuccessCont") {
+                try {
+                    this.current = frame.k(currentValue);
+                } catch (error) {
+                    this.notify(Exit.failCause(Cause.die<E>(error)));
+                }
+                return;
+            }
+
+            try {
+                this.current = frame.onSuccess(currentValue);
+            } catch (error) {
+                this.notify(Exit.failCause(Cause.die<E>(error)));
+            }
+            return;
+        }
+    }
+
+    private onCause(cause: Cause<E>): void {
+        let currentCause = cause;
+
+        while (this.stack.length > 0) {
+            const frame = this.stack.pop()!;
+            if (frame._tag === "InterruptibilityCont") continue;
+
+            if (frame._tag === "FiberRefCont") {
+                this.restoreFiberRef(frame);
+                continue;
+            }
+
+            if (frame._tag === "FoldCont") {
+                if (!Cause.isFailureOnly(currentCause)) continue;
+                const failure = Cause.firstFailure(currentCause);
+                if (failure._tag === "None") break;
+                try {
+                    this.current = frame.onFailure(failure.value);
+                    return;
+                } catch (error) {
+                    currentCause = Cause.fail(error as E);
+                    continue;
+                }
+            }
+        }
+
+        this.notify(Exit.failCause(currentCause));
+    }
+
+    private notify(exit: Exit<E, A>): void {
+        if (this.result) return;
+        this.result = exit;
+        this.runFinalizers(exit);
+        for (const joiner of this.joiners) joiner(exit);
+        this.joiners.length = 0;
+    }
+
+    private runFinalizers(exit: Exit<E, A>): void {
+        while (this.finalizers.length > 0) {
+            const finalizer = this.finalizers.pop()!;
+            try {
+                const result = finalizer(exit);
+                if (result && typeof result === "object" && "_tag" in result) {
+                    this.runtime.unsafeRunAsync(result as any, () => undefined);
+                }
+            } catch {
+                // Best effort, matching RuntimeFiber finalizer behavior.
+            }
+        }
+    }
+
+    private fiberRefs(): Map<number, unknown> {
+        this.frame.fiberContext.fiberRefs ??= new Map<number, unknown>();
+        return this.frame.fiberContext.fiberRefs;
+    }
+
+    private restoreFiberRef(frame: { refId: number; hadValue: boolean; previousValue: unknown }): void {
+        const refs = this.fiberRefs();
+        if (frame.hadValue) refs.set(frame.refId, frame.previousValue);
+        else refs.delete(frame.refId);
+    }
+
+    private withFrame<T>(body: () => T): T {
+        return withCurrentFiber(this.frame, body);
     }
 }
 

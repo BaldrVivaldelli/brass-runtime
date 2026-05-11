@@ -541,13 +541,15 @@ function makeRuntimeTraceIdGenerator(): RuntimeTraceIdGenerator {
   };
 }
 
+const HEX_BYTE = Array.from({ length: 256 }, (_, byte) => byte.toString(16).padStart(2, "0"));
+
 function randomHexId(length: number): string {
   const cryptoLike = (globalThis as any).crypto;
 
   if (typeof cryptoLike?.getRandomValues === "function") {
     const bytes = new Uint8Array(Math.ceil(length / 2));
     cryptoLike.getRandomValues(bytes);
-    return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").slice(0, length);
+    return bytesToHex(bytes, length);
   }
 
   if (typeof cryptoLike?.randomUUID === "function") {
@@ -560,4 +562,12 @@ function randomHexId(length: number): string {
     out += Math.floor(Math.random() * 0xffff_ffff).toString(16).padStart(8, "0");
   }
   return out.slice(0, length);
+}
+
+function bytesToHex(bytes: Uint8Array, length: number): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i++) {
+    out += HEX_BYTE[bytes[i]!]!;
+  }
+  return out.length === length ? out : out.slice(0, length);
 }

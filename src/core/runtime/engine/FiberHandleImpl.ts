@@ -1,5 +1,5 @@
 import { Cause, Exit, type Exit as ExitType } from "../../types/effect";
-import type { Fiber, FiberId, FiberStatus } from "../fiber";
+import { withCurrentFiber, type Fiber, type FiberId, type FiberStatus } from "../fiber";
 import type { RuntimeEvent } from "../events";
 import { laneTag } from "../scheduler";
 import type { Joiner, WasmEngineRuntime } from "./types";
@@ -39,7 +39,7 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
 
   status(): FiberStatus {
     if (this.result == null) return "Running";
-    if (this.result._tag === "Failure" && this.result.cause._tag === "Interrupt") return "Interrupted";
+    if (this.result._tag === "Failure" && Cause.isInterruptedOnly(this.result.cause)) return "Interrupted";
     return "Done";
   }
 
@@ -129,9 +129,9 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
     if (this.result != null) return;
     this.runFinalizersOnce(exit);
     this.result = exit;
-    this.internalStatus = exit._tag === "Success" ? "done" : exit.cause._tag === "Interrupt" ? "interrupted" : "failed";
+    this.internalStatus = exit._tag === "Success" ? "done" : Cause.isInterruptedOnly(exit.cause) ? "interrupted" : "failed";
 
-    const status = exit._tag === "Success" ? "success" : exit.cause._tag === "Interrupt" ? "interrupted" : "failure";
+    const status = exit._tag === "Success" ? "success" : Cause.isInterruptedOnly(exit.cause) ? "interrupted" : "failure";
     this.emit({
       type: "fiber.end",
       fiberId: this.id,
@@ -146,16 +146,18 @@ export class EngineFiberHandle<R, E, A> implements Fiber<E, A> {
   private runFinalizersOnce(exit: ExitType<E, A>): void {
     if (this.finalizersDrained) return;
     this.finalizersDrained = true;
-    while (this.finalizers.length > 0) {
-      const finalizer = this.finalizers.pop()!;
-      try {
-        const eff = finalizer(exit);
-        if (eff && typeof eff === "object" && "_tag" in eff) {
-          this.runtime.fork(eff as any);
+    withCurrentFiber(this as any, () => {
+      while (this.finalizers.length > 0) {
+        const finalizer = this.finalizers.pop()!;
+        try {
+          const eff = finalizer(exit);
+          if (eff && typeof eff === "object" && "_tag" in eff) {
+            this.runtime.fork(eff as any);
+          }
+        } catch {
+          // best effort, like RuntimeFiber
         }
-      } catch {
-        // best effort, like RuntimeFiber
       }
-    }
+    });
   }
 }

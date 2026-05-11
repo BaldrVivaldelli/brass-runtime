@@ -69,7 +69,7 @@ export function computeCacheKey(
   extraHeaders: string[] = []
 ): string {
   const method = req.method.toUpperCase();
-  const resolvedUrl = new URL(req.url, baseUrl || undefined).toString();
+  const resolvedUrl = resolveKeyUrl(req.url, baseUrl);
 
   const relevantSet = new Set([
     ...DEFAULT_CACHE_RELEVANT_HEADERS,
@@ -86,6 +86,22 @@ export function computeCacheKey(
   const body = httpBodyKeyPart(req.body);
 
   return `${method}${SEPARATOR}${resolvedUrl}${SEPARATOR}${sortedHeaders}${SEPARATOR}${body}`;
+}
+
+export function resolveKeyUrl(url: string, baseUrl: string): string {
+  if (url.length > 0 && url.charCodeAt(0) === 47 && url.charCodeAt(1) !== 47 && baseUrl) {
+    const origin = absoluteOrigin(baseUrl);
+    if (origin) return `${origin}${url}`;
+  }
+  return new URL(url, baseUrl || undefined).toString();
+}
+
+function absoluteOrigin(url: string): string | undefined {
+  const schemeIdx = url.indexOf("://");
+  if (schemeIdx <= 0) return undefined;
+  const authorityStart = schemeIdx + 3;
+  const pathIdx = url.indexOf("/", authorityStart);
+  return pathIdx === -1 ? url : url.slice(0, pathIdx);
 }
 
 /**

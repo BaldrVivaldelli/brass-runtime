@@ -1,6 +1,7 @@
 # brass-runtime
 
-A ZIO-inspired effect runtime for TypeScript with structured concurrency, pull-based streams, and a production-grade HTTP client.
+A ZIO-inspired effect runtime for TypeScript with structured concurrency,
+runtime diagnostics, pull-based streams, and a production-grade HTTP client.
 
 Built without `Promise`/`async`/`await` as the primary semantic primitive. Effects are values — lazy, composable, and cancelable by default.
 
@@ -12,19 +13,27 @@ npm i brass-runtime
 
 ## What it does
 
-**Core runtime** — algebraic effects, fibers, scopes, scheduler, layers, semaphores, circuit breakers, metrics, tracing.
+**Runtime** — algebraic effects, fibers, scopes, scheduler, interruptibility
+regions, fiber-local refs, typed layers, semaphores, circuit breakers, rich
+`Cause<E>` failures, metrics, tracing, and an opt-in flight recorder.
 
-**Streams** — pull-based with backpressure, bounded buffers, queues, hubs, pipelines, fusion optimization.
+**Streams** — pull-based streams with backpressure, bounded buffers, hubs,
+pipelines, fusion optimization, and a small fluent DX facade.
 
-**HTTP client** — lazy/cancelable requests with a full middleware pipeline: adaptive concurrency, compression, batching, connection pre-warming, caching, deduplication, priority scheduling, and retry with backoff.
+**HTTP** — lazy/cancelable client and server primitives with schema validation,
+adaptive concurrency, compression, batching, prewarm, cache, dedup, priority,
+retry, and observability.
 
-**Schema validation** — dependency-free runtime schemas for JSON, config, and protocol boundaries, with typed inference and path-rich validation issues.
+**Production signals** — dependency-free schemas, Prometheus/OTLP exporters,
+structured logs, W3C trace propagation, sampling, redaction, bounded exporters,
+and explicit flush/shutdown.
 
-**Observability export** — Prometheus metrics, OTLP metrics/traces/logs, structured logging, W3C trace-context propagation, request adapters, sampling, redaction, bounded exporters, and production flush/shutdown controls.
+**Performance profiler** — runtime primitives, HTTP layer comparison, memory
+retention reports, observability overhead, CLI/JSON output, and actionable
+recommendations.
 
-**WASM engine** — optional Rust/WASM-backed state machines for strict scheduling and bounded queues.
-
-**Brass Agent** — experimental CLI coding agent with workspace inspection, LLM integration, and VS Code extension.
+**Optional engine and tools** — Rust/WASM-backed state machines plus the
+experimental Brass Agent CLI/VS Code workflow.
 
 ---
 
@@ -43,11 +52,85 @@ npm i brass-runtime
 ### Run an effect
 
 ```ts
-import { Runtime, succeed } from "brass-runtime";
+import { runPromise, succeed } from "brass-runtime";
 
-const runtime = Runtime.make({});
-const value = await runtime.toPromise(succeed(42));
+const value = await runPromise(succeed(42));
 ```
+
+Use `makeRuntime` when you want explicit runtime options, and `runExit` when
+you want the full `Exit`/`Cause` instead of a rejected promise.
+
+### Inspect failure causes
+
+```ts
+import { Cause, formatCause } from "brass-runtime";
+
+const cause = Cause.then(
+  Cause.fail("database unavailable"),
+  Cause.both(Cause.interrupt(), Cause.die(new Error("release failed"))),
+);
+
+console.log(formatCause(cause));
+```
+
+`Cause<E>` preserves typed failures, defects, interruptions, and sequential or
+parallel composition (`Then` / `Both`) so diagnostics can explain what happened
+without flattening every failure into a single thrown value.
+
+### Mask interruption
+
+```ts
+import { async, flatMap, succeed, uninterruptibleMask } from "brass-runtime";
+
+const effect = uninterruptibleMask((restore) =>
+  flatMap(succeed("acquired"), (resource) =>
+    restore(async((_env, cb) => {
+      setTimeout(() => cb({ _tag: "Success", value: `used:${resource}` }), 10);
+    })),
+  ),
+);
+```
+
+Use `uninterruptible(effect)` for critical regions and
+`uninterruptibleMask((restore) => ...)` when only part of the region should be
+interruptible again. Pending interruption is deferred until the protected region
+exits; restored sub-effects remain cancelable.
+
+### Fiber-local context
+
+```ts
+import { Runtime, makeFiberRef } from "brass-runtime";
+
+const requestId = makeFiberRef("anonymous");
+const runtime = Runtime.make({});
+
+const result = await runtime.toPromise(
+  requestId.locally("req-123", requestId.get()),
+);
+```
+
+`FiberRef` values are local to the running fiber, inherited by child fibers at
+fork time, isolated from child mutations, and restored after `locally` regions
+even when the region fails or is interrupted.
+
+### Explain runtime behavior
+
+```ts
+import { Runtime, async, makeRuntimeRecorder } from "brass-runtime";
+
+const recorder = makeRuntimeRecorder({ maxEvents: 5000 });
+const runtime = new Runtime({ env: {}, hooks: recorder.hooks });
+
+await runtime.toPromise(async((_env, cb) => {
+  setTimeout(() => cb({ _tag: "Success", value: "ok" }), 10);
+}));
+
+console.log(recorder.explain());
+```
+
+The flight recorder is opt-in and keeps a bounded ring buffer of runtime events:
+fiber start/end/suspend/resume, scopes, supervisor events, logs, spans, and
+trace context when available.
 
 ### Recommended HTTP client
 
@@ -271,6 +354,58 @@ the wrapped client owns a limiter, exposing gauges for current limit, queue
 depth, utilization, error rate, request/completion rate, rejection rate, and
 state count.
 
+### Performance profiler
+
+```bash
+npm run perf
+npm run perf:json
+npm run benchmark:perf
+npm run perf:runtime:ab
+npm run perf:runtime:soak
+npm run perf:runtime:budget
+npm run perf:http:memory
+npm run perf:history
+```
+
+```ts
+import { runBrassPerformanceProfile } from "brass-runtime/perf";
+
+const report = await runBrassPerformanceProfile({
+  http: {
+    calls: 20_000,
+    concurrency: 512,
+    delayMs: 2,
+    forceGc: true,
+    variants: ["default-json", "default-json-observed"],
+  },
+});
+
+console.log(report.recommendations);
+```
+
+The profiler compares runtime primitives, runtime A/B variants, runtime-only
+soak behavior, `node:http`, Brass wire/default HTTP clients, HTTP long-run
+memory, observability overhead, history/baseline regressions, and memory deltas. Use
+[`docs/performance-profiler.md`](docs/performance-profiler.md) for focused
+commands and `node --expose-gc` runs.
+
+Perf runs can be persisted and compared locally:
+
+```bash
+npm run perf -- --profile runtime-ab --record-history --save-baseline runtime-main
+npm run perf -- --profile runtime-ab --compare-baseline runtime-main --fail-on-baseline-regression
+```
+
+### First-release recipes
+
+Copyable happy paths live in [`docs/recipes`](docs/recipes/README.md):
+
+- runtime execution
+- typed layers
+- HTTP server
+- testing
+- performance baselines
+
 ### Structured concurrency
 
 ```ts
@@ -289,12 +424,13 @@ await runtime.toPromise(
 ### Streams
 
 ```ts
-import { Runtime, collectStream, fromArray, mapP, via } from "brass-runtime";
+import { Runtime, Stream } from "brass-runtime";
 
 const runtime = Runtime.make({});
-const numbers = fromArray([1, 2, 3, 4, 5]);
-const doubled = via(numbers, mapP((n: number) => n * 2));
-const result = await runtime.toPromise(collectStream(doubled));
+const result = await Stream
+  .from([1, 2, 3, 4, 5])
+  .map((n) => n * 2)
+  .collect(runtime);
 // [2, 4, 6, 8, 10]
 ```
 
@@ -389,6 +525,12 @@ npm test              # vitest suite
 npm run test:types    # TypeScript type checking
 npm run test:coverage # coverage with baseline gate
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
+npm run benchmark:runtime        # Runtime Performance Track
+npm run benchmark:runtime:budget # Runtime Performance Track regression budget
+npm run perf:runtime:ab          # Runtime A/B Performance Lab
+npm run perf:runtime:soak        # Runtime-only soak profile
+npm run perf:runtime:budget      # Runtime profiler budget
+npm run perf:http:memory         # HTTP long-run memory lab
 npm run benchmark -- http-concurrent # HTTP compare mode variants
 node --expose-gc --import tsx src/benchmarks/runner.ts http-concurrent # HTTP memory/limiter diagnostics
 npm run benchmark:adaptive
@@ -426,10 +568,16 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 
 - [x] Sync effect values via `ZIO<R, E, A>` aliases
 - [x] Algebraic async: `Async<R, E, A>`
+- [x] Rich `Cause<E>` failure trees with pretty printing
+- [x] Interruptibility regions with `uninterruptible` / `uninterruptibleMask`
+- [x] Fiber-local refs with fork inheritance and scoped restoration
+- [x] TS TestRuntime with deterministic scheduler and virtual clock
+- [x] Schedule 2.0 with drivers, runtime-clock budgets, observability, and HTTP integration
 - [x] Cooperative scheduler (observable, testable)
 - [x] Fibers with interruption & finalizers
 - [x] Structured scopes & resource safety
-- [x] Layers, semaphores, circuit breakers
+- [x] Runtime flight recorder for bounded execution traces
+- [x] Layer 2.0 typed contexts, semaphores, circuit breakers
 - [x] Metrics, tracing, runtime hooks
 - [x] Worker pools
 - [x] WASM engine (optional)
@@ -437,6 +585,7 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 ### Streams
 
 - [x] Pull-based streams with backpressure
+- [x] Fluent `Stream` / `Pipeline` DX facade
 - [x] Bounded buffers, queues, hubs
 - [x] Pipelines with fusion optimization
 - [x] Stream merge, zip, broadcast

@@ -28,6 +28,12 @@ function safeEmit(
   }
 }
 
+function causeDefectMessage(cause: Cause<unknown>): string {
+  const defect = Cause.firstDefect(cause);
+  if (defect._tag === "Some") return String(defect.value);
+  return Cause.pretty(cause, { singleLine: true });
+}
+
 /**
  * Internal entry tracking an in-flight deduplicated request.
  */
@@ -189,19 +195,20 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
               return;
             }
 
-            if (exit.cause._tag === "Interrupt") {
+            if (Cause.isInterruptedOnly(exit.cause)) {
               rejectAll(entry, { _tag: "Abort" });
               finishCaller({ _tag: "Failure", cause: Cause.interrupt() });
               return;
             }
 
-            if (exit.cause._tag === "Fail") {
-              rejectAll(entry, exit.cause.error);
+            const failure = Cause.firstFailure(exit.cause);
+            if (failure._tag === "Some") {
+              rejectAll(entry, failure.value);
               finishCaller(exit);
               return;
             }
 
-            const err: HttpError = { _tag: "FetchError", message: String((exit.cause as any).defect ?? "unknown") };
+            const err: HttpError = { _tag: "FetchError", message: causeDefectMessage(exit.cause) };
             rejectAll(entry, err);
             finishCaller({ _tag: "Failure", cause: Cause.fail(err) });
           });

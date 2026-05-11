@@ -38,6 +38,11 @@
       "import": "./dist/observability/index.mjs",
       "require": "./dist/observability/index.cjs"
     },
+    "./perf": {
+      "types": "./dist/perf/index.d.ts",
+      "import": "./dist/perf/index.mjs",
+      "require": "./dist/perf/index.cjs"
+    },
     "./agent": {
       "types": "./dist/agent/index.d.ts",
       "import": "./dist/agent/index.mjs",
@@ -51,6 +56,8 @@
     "dist",
     "wasm/pkg",
     "README.md",
+    "CHANGELOG.md",
+    "docs",
     "LICENSE",
     "package.json"
   ],
@@ -106,13 +113,25 @@
     "agent:vscode:reinstall:global": "npm run agent:vscode:uninstall:global && npm run agent:vscode:install:global",
     "benchmark": "tsx src/benchmarks/runner.ts",
     "benchmark:json": "tsx src/benchmarks/runner.ts --json",
+    "benchmark:runtime": "tsx src/benchmarks/runner.ts runtime-performance-track",
+    "benchmark:runtime:budget": "node scripts/check-runtime-benchmark-budget.mjs",
     "benchmark:http": "tsx src/benchmarks/runner.ts http-concurrent",
     "benchmark:http:soak": "BRASS_HTTP_BENCH_MODE=soak tsx src/benchmarks/runner.ts http-concurrent",
     "benchmark:http:budget": "node scripts/check-http-benchmark-budget.mjs",
+    "benchmark:http:ramp": "tsx src/benchmarks/runner.ts http-ramp-tps",
     "benchmark:adaptive": "tsx src/benchmarks/runner.ts adaptive-limiter-soak",
     "benchmark:adaptive:soak": "BRASS_ADAPTIVE_BENCH_MODE=soak tsx src/benchmarks/runner.ts adaptive-limiter-soak",
     "benchmark:observability": "tsx src/benchmarks/runner.ts observability-overhead",
     "benchmark:observability:budget": "node scripts/check-observability-benchmark-budget.mjs",
+    "benchmark:perf": "tsx src/perf/cli.ts --json",
+    "perf": "tsx src/perf/cli.ts",
+    "perf:json": "tsx src/perf/cli.ts --json",
+    "perf:runtime:ab": "tsx src/perf/cli.ts --profile runtime-ab",
+    "perf:runtime:soak": "tsx src/perf/cli.ts --profile runtime-soak",
+    "perf:runtime:budget": "tsx src/perf/budgetCli.ts",
+    "perf:http:memory": "tsx src/perf/cli.ts --profile http-memory",
+    "perf:history": "tsx src/perf/cli.ts --record-history",
+    "release:check": "npm run test:types && npm test && npm run build:ts && npm run validate:cjs && npm run perf:runtime:budget && npm run benchmark:runtime:budget && npm run benchmark:http:budget && npm run benchmark:observability:budget",
     "example:observability:express": "tsx src/examples/observabilityExpress.ts",
     "example:observability:fastify": "tsx src/examples/observabilityFastify.ts",
     "example:observability:nest": "tsx src/examples/observabilityNest.ts",
@@ -144,6 +163,7 @@
   },
   "homepage": "https://github.com/BaldrVivaldelli/brass-runtime#readme",
   "bin": {
-    "brass-agent": "dist/agent/cli/main.cjs"
+    "brass-agent": "dist/agent/cli/main.cjs",
+    "brass-perf": "dist/perf/cli.cjs"
   }
 }

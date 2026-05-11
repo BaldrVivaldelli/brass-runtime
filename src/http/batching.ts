@@ -156,11 +156,7 @@ export function withRequestBatching(config: RequestBatchingConfig): HttpMiddlewa
       const effect = downstream(batchReq);
       group.cancel = runEffect(effect, entries[0]!.env, (exit) => {
         if (exit._tag === "Failure") {
-          const err = exit.cause._tag === "Fail"
-            ? exit.cause.error
-            : exit.cause._tag === "Interrupt"
-              ? ({ _tag: "Abort" } satisfies HttpError)
-              : toFetchError((exit.cause as any).defect);
+          const err = causeToHttpError(exit.cause);
           failEntries(config, key, entries, err);
           return;
         }
@@ -200,6 +196,13 @@ function failEntries(config: RequestBatchingConfig, key: string, entries: readon
 function toFetchError(error: unknown): HttpError {
   if (isHttpError(error)) return error;
   return { _tag: "FetchError", message: error instanceof Error ? error.message : String(error) };
+}
+
+function causeToHttpError(cause: Cause<HttpError>): HttpError {
+  const failure = Cause.firstFailure(cause);
+  if (failure._tag === "Some") return failure.value;
+  if (Cause.isInterruptedOnly(cause)) return { _tag: "Abort" };
+  return toFetchError(Cause.toError(cause));
 }
 
 function isHttpError(error: unknown): error is HttpError {
@@ -273,10 +276,13 @@ function runEffect<E, A>(
           try {
             if (exit._tag === "Success") {
               run(eff.onSuccess(exit.value), k);
-            } else if (exit.cause._tag === "Fail") {
-              run(eff.onFailure(exit.cause.error), k);
             } else {
-              k(exit);
+              const failure = Cause.isFailureOnly(exit.cause) ? Cause.firstFailure(exit.cause) : undefined;
+              if (failure?._tag === "Some") {
+                run(eff.onFailure(failure.value), k);
+              } else {
+                k(exit);
+              }
             }
           } catch (e) {
             k({ _tag: "Failure", cause: Cause.die(e) as any });
@@ -285,6 +291,14 @@ function runEffect<E, A>(
         return;
       case "Fork":
         k({ _tag: "Success", value: undefined });
+        return;
+      case "Interruptibility":
+      case "InterruptibilityRestore":
+      case "FiberRefLocally":
+        run(eff.effect, k);
+        return;
+      case "InterruptibilityMask":
+        run(eff.body(<R, E, A>(effect: Async<R, E, A>) => effect), k);
         return;
     }
   };

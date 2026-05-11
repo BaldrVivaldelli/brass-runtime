@@ -194,12 +194,16 @@ function streamToRaceWithHandler<R, E, A>(
         }
 
         // failure: Option<E> o Interrupt
-        if (exit.cause._tag === "Interrupt") {
+        if (Cause.isInterruptedOnly(exit.cause)) {
             // Propagamos la interrupción (no contamina E)
             return async((_env, cb) => { cb(Exit.failCause(Cause.interrupt())) });
         }
 
-        const opt = (exit.cause as any).error as Option<E>;
+        const failure = Cause.firstFailure(exit.cause);
+        if (failure._tag === "None") {
+            return async((_env, cb) => { cb(Exit.failCause(exit.cause as any)); });
+        }
+        const opt = failure.value as Option<E>;
 
 
         // End(None): NO cancelamos el otro. Seguimos con el stream del otro lado.
@@ -327,7 +331,8 @@ export function uncons<R, E, A>(
                 const closeWith = (exit: Exit<any, any>) => {
                     // End-of-stream = Failure(None) => para finalizers suele ser más útil tratarlo como Success
                     if (exit._tag === "Failure") {
-                        const err = (exit.cause as any).error as any;
+                        const failure = Cause.firstFailure(exit.cause);
+                        const err = failure._tag === "Some" ? failure.value as any : undefined;
                         if (err && typeof err === "object" && err._tag === "None") {
                             scope.close({ _tag: "Success", value: undefined });
                             return;
@@ -363,7 +368,10 @@ export function uncons<R, E, A>(
                     if (ex._tag === "Failure") {
                         // 👇 IMPORTANTE: NO registramos finalizer si acquire falló
                         closeWith(ex as any);
-                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(((ex.cause as any).error) as any) } } as any); // E -> Option<E>
+                        const failure = Cause.firstFailure(ex.cause);
+                        cb(failure._tag === "Some"
+                            ? { _tag: "Failure", cause: Cause.fail(some(failure.value as any)) } as any
+                            : { _tag: "Failure", cause: ex.cause } as any); // E -> Option<E>
                         return;
                     }
 
@@ -387,7 +395,8 @@ export function uncons<R, E, A>(
                 const closeWith = (exit: Exit<any, any>) => {
                     // End-of-stream = Failure(None) => para finalizers suele ser más útil tratarlo como Success
                     if (exit._tag === "Failure") {
-                        const err = (exit.cause as any).error as any;
+                        const failure = Cause.firstFailure(exit.cause);
+                        const err = failure._tag === "Some" ? failure.value as any : undefined;
                         if (err && typeof err === "object" && err._tag === "None") {
                             scope.close({ _tag: "Success", value: undefined });
                             return;
@@ -399,7 +408,10 @@ export function uncons<R, E, A>(
                 scope.fork(self.acquire as any).join((ex) => {
                     if (ex._tag === "Failure") {
                         scope.close(ex as any);
-                        cb({ _tag: "Failure", cause: { _tag: "Fail", error: some(((ex.cause as any).error) as any) } } as any);
+                        const failure = Cause.firstFailure(ex.cause);
+                        cb(failure._tag === "Some"
+                            ? { _tag: "Failure", cause: Cause.fail(some(failure.value as any)) } as any
+                            : { _tag: "Failure", cause: ex.cause } as any);
                         return;
                     }
 

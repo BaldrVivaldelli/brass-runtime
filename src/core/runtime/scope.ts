@@ -89,15 +89,16 @@ class Scope<R> {
             const status =
                 exit._tag === "Success"
                     ? "success"
-                    : exit.cause._tag === "Interrupt"
+                    : Cause.isInterruptedOnly(exit.cause)
                         ? "interrupted"
                         : "failure";
+            const failure = exit._tag === "Failure" ? Cause.firstFailure(exit.cause) : undefined;
 
             this.runtime.emit({
                 type: "scope.close",
                 scopeId: this.id,
                 status,
-                error: exit._tag === "Failure" && exit.cause._tag === "Fail" ? (exit.cause as any).error : undefined,
+                error: failure?._tag === "Some" ? failure.value : exit._tag === "Failure" ? exit.cause : undefined,
             });
         }
     }

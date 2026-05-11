@@ -1,7 +1,7 @@
 // src/http/lifecycle/dedupKey.ts
 import type { HttpRequest } from "../client";
 import { httpBodyKeyPart } from "../body";
-import { SEPARATOR } from "./cacheKey";
+import { resolveKeyUrl, SEPARATOR } from "./cacheKey";
 
 /**
  * Hop-by-hop headers excluded from dedup key computation.
@@ -36,7 +36,7 @@ export const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  */
 export function computeDedupKey(req: HttpRequest, baseUrl: string): string {
   const method = req.method.toUpperCase();
-  const resolvedUrl = new URL(req.url, baseUrl || undefined).toString();
+  const resolvedUrl = resolveKeyUrl(req.url, baseUrl);
 
   const headers = req.headers ?? {};
   const sortedHeaders = Object.keys(headers)

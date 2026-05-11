@@ -26,6 +26,7 @@ export function makeForkPolicy<R>(env: R, hooks: RuntimeHooks) {
             fiber.fiberContext = {
                 log: parentCtx?.log ?? emptyContext,
                 trace,
+                fiberRefs: parentCtx?.fiberRefs ? new Map(parentCtx.fiberRefs) : undefined,
             };
 
             // 2) meta “ligera” en el fiber (si querés)

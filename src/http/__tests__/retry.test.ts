@@ -4,6 +4,7 @@ import { asyncSucceed, asyncFail } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import { Runtime } from "../../core/runtime/runtime";
+import { fixed, named } from "../../core/runtime/schedule";
 
 /**
  * Mock the WASM retry planner module so we can track `drop()` calls.
@@ -234,6 +235,39 @@ describe("WASM planner drop on cancellation", () => {
     ]);
     expect(retryEvents).toEqual([
       expect.objectContaining({ attempt: 0, delayMs: 0, status: 503 }),
+    ]);
+  });
+
+  it("observes HTTP schedule decisions through ScheduleDriver integration", async () => {
+    const scheduleEvents: any[] = [];
+    let requestCount = 0;
+    const client: HttpClientFn = (_req: HttpRequest) => {
+      requestCount++;
+      return asyncSucceed(makeResponse(requestCount === 1 ? 503 : 200));
+    };
+
+    const retryClient = withRetry({
+      maxRetries: 3,
+      baseDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      engine: "ts",
+      schedule: named("api.retry", fixed(0)),
+      onScheduleDecision: (event) => scheduleEvents.push(event),
+    })(client);
+
+    const exit = await new Promise<Exit<HttpError, HttpWireResponse>>((resolve) => {
+      rt.unsafeRunAsync(retryClient(makeRequest()), resolve);
+    });
+
+    expect(exit._tag).toBe("Success");
+    expect(requestCount).toBe(2);
+    expect(scheduleEvents).toEqual([
+      expect.objectContaining({
+        name: "api.retry",
+        attempt: 0,
+        input: expect.objectContaining({ status: 503, attempt: 0 }),
+        decision: expect.objectContaining({ continue: true, delayMs: 0 }),
+      }),
     ]);
   });
 });

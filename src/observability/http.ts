@@ -346,15 +346,18 @@ function spanStartAttributes(req: HttpRequest, options: ResolvedHttpObservabilit
   const custom = typeof spanOptions === "function" ? spanOptions(req) : spanOptions ?? {};
   const host = requestHost(req);
   const route = requestRoute(req, options);
+  const sanitizedUrl = sanitizeUrl(req.url);
+  const scheme = urlScheme(req.url);
+  const path = urlPath(req.url);
 
   return {
     "span.kind": "client",
     "http.method": req.method,
     "http.request.method": req.method,
-    "http.url": sanitizeUrl(req.url),
-    "url.full": sanitizeUrl(req.url),
-    ...(urlScheme(req.url) ? { "url.scheme": urlScheme(req.url) } : {}),
-    ...(urlPath(req.url) ? { "url.path": urlPath(req.url) } : {}),
+    "http.url": sanitizedUrl,
+    "url.full": sanitizedUrl,
+    ...(scheme ? { "url.scheme": scheme } : {}),
+    ...(path ? { "url.path": path } : {}),
     ...(host ? { "server.address": host } : {}),
     ...(route ? { "http.route": route } : {}),
     ...custom,
@@ -362,10 +365,11 @@ function spanStartAttributes(req: HttpRequest, options: ResolvedHttpObservabilit
 }
 
 function requestBaseLabels(req: HttpRequest, options: ResolvedHttpObservabilityOptions): Record<string, string> {
+  const route = requestRoute(req, options);
   return compactLabels({
     method: req.method,
     ...(options.includeHostLabel ? { host: requestHost(req) } : {}),
-    ...(requestRoute(req, options) ? { route: requestRoute(req, options) } : {}),
+    ...(route ? { route } : {}),
   });
 }
 
@@ -445,6 +449,7 @@ function currentTraceExemplar(value: number, timestamp: number) {
 }
 
 function requestHost(req: HttpRequest): string | undefined {
+  if (!isAbsoluteUrl(req.url)) return undefined;
   try {
     return new URL(req.url).host;
   } catch {
@@ -453,6 +458,9 @@ function requestHost(req: HttpRequest): string | undefined {
 }
 
 function urlScheme(url: string): string | undefined {
+  if (url.startsWith("https://")) return "https";
+  if (url.startsWith("http://")) return "http";
+  if (!isAbsoluteUrl(url)) return undefined;
   try {
     return new URL(url).protocol.replace(/:$/, "");
   } catch {
@@ -461,6 +469,10 @@ function urlScheme(url: string): string | undefined {
 }
 
 function urlPath(url: string): string | undefined {
+  if (!isAbsoluteUrl(url)) {
+    const path = stripQueryAndHash(url);
+    return path.startsWith("/") ? path : undefined;
+  }
   try {
     return new URL(url).pathname;
   } catch {
@@ -469,6 +481,7 @@ function urlPath(url: string): string | undefined {
 }
 
 function sanitizeUrl(url: string): string {
+  if (!isAbsoluteUrl(url)) return stripQueryAndHash(url);
   try {
     const parsed = new URL(url);
     parsed.search = "";
@@ -479,6 +492,22 @@ function sanitizeUrl(url: string): string {
     const [withoutQuery] = withoutHash.split("?", 1);
     return withoutQuery;
   }
+}
+
+function isAbsoluteUrl(url: string): boolean {
+  const schemeIdx = url.indexOf("://");
+  if (schemeIdx <= 0) return false;
+  const firstSlash = url.indexOf("/");
+  return firstSlash === -1 || schemeIdx < firstSlash;
+}
+
+function stripQueryAndHash(url: string): string {
+  const hashIdx = url.indexOf("#");
+  const queryIdx = url.indexOf("?");
+  let end = url.length;
+  if (hashIdx >= 0) end = Math.min(end, hashIdx);
+  if (queryIdx >= 0) end = Math.min(end, queryIdx);
+  return url.slice(0, end);
 }
 
 function compactLabels(labels: Record<string, string | undefined>): Record<string, string> {

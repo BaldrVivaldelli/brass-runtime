@@ -71,6 +71,34 @@ describe("makeDefaultHttpClient", () => {
     });
   });
 
+  it("does not cache default responses that opt out via cache-control", async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ cached: false }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "cache-control": "no-store",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      compression: false,
+    });
+
+    await client.getJson<{ cached: boolean }>("/no-store").unsafeRunPromise();
+    await client.getJson<{ cached: boolean }>("/no-store").unsafeRunPromise();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(client.stats()).toMatchObject({
+      cacheHits: 0,
+      cacheMisses: 2,
+      requestsCompleted: 2,
+    });
+  });
+
   it("keeps minimal preset cheap unless features are explicitly enabled", () => {
     vi.stubGlobal("fetch", vi.fn());
 

@@ -25,11 +25,15 @@ import {
   end,
   fail,
   flatMap,
+  formatCause,
+  interruptible,
   map,
   mapError,
   orElseOptional,
   succeed,
   sync,
+  uninterruptible,
+  uninterruptibleMask,
 } from "../effect";
 import { none, some } from "../option";
 import {
@@ -128,8 +132,43 @@ describe("Effect facade", () => {
     expect(Cause.fail("e")).toEqual({ _tag: "Fail", error: "e" });
     expect(Cause.interrupt()).toEqual({ _tag: "Interrupt" });
     expect(Cause.die("defect")).toEqual({ _tag: "Die", defect: "defect" });
+    expect(Cause.then(Cause.fail("first"), Cause.fail("second"))).toEqual({
+      _tag: "Then",
+      left: { _tag: "Fail", error: "first" },
+      right: { _tag: "Fail", error: "second" },
+    });
+    expect(Cause.both(Cause.fail("left"), Cause.interrupt())).toEqual({
+      _tag: "Both",
+      left: { _tag: "Fail", error: "left" },
+      right: { _tag: "Interrupt" },
+    });
     expect(Exit.succeed(1)).toEqual({ _tag: "Success", value: 1 });
     expect(Exit.failCause(Cause.fail("e"))).toEqual({ _tag: "Failure", cause: { _tag: "Fail", error: "e" } });
+  });
+
+  it("analyzes, squashes and pretty-prints rich causes", () => {
+    const defect = new Error("boom");
+    const cause = Cause.then(
+      Cause.fail("domain"),
+      Cause.both(Cause.die(defect), Cause.interrupt()),
+    );
+
+    expect(Cause.isCause(cause)).toBe(true);
+    expect(Cause.isCause({ _tag: "Then", left: Cause.fail("x") })).toBe(false);
+    expect(Cause.failures(cause)).toEqual(["domain"]);
+    expect(Cause.defects(cause)).toEqual([defect]);
+    expect(Cause.firstFailure(cause)).toEqual(some("domain"));
+    expect(Cause.firstDefect(cause)).toEqual(some(defect));
+    expect(Cause.containsFailure(cause)).toBe(true);
+    expect(Cause.containsDefect(cause)).toBe(true);
+    expect(Cause.containsInterrupt(cause)).toBe(true);
+    expect(Cause.isFailureOnly(Cause.both(Cause.fail("a"), Cause.fail("b")))).toBe(true);
+    expect(Cause.isInterruptedOnly(Cause.then(Cause.interrupt(), Cause.interrupt()))).toBe(true);
+    expect(Cause.squash(Cause.fail("domain"))).toBe("domain");
+    expect(Cause.toError(Cause.die("defect")).message).toBe("defect");
+    expect(formatCause(Cause.fail("x"))).toBe('Fail("x")');
+    expect(Cause.pretty(cause)).toContain("Then");
+    expect(Cause.pretty(cause, { singleLine: true })).toContain("right: Both");
   });
 
   it("runs succeed, fail, sync, map, flatMap, mapError and catchAll", async () => {
@@ -140,6 +179,22 @@ describe("Effect facade", () => {
     await expect(run(flatMap(succeed(2), (n) => succeed(n * 4)))).resolves.toBe(8);
     await expect(run(mapError(fail("x"), (e) => `${e}!`))).rejects.toBe("x!");
     await expect(run(catchAll(fail("x"), (e) => succeed(`ok:${e}`)))).resolves.toBe("ok:x");
+  });
+
+  it("creates interruptibility regions", () => {
+    const effect = succeed("ok");
+    expect(uninterruptible(effect)).toEqual({
+      _tag: "Interruptibility",
+      mode: "uninterruptible",
+      effect,
+    });
+    expect(interruptible(effect)).toEqual({
+      _tag: "Interruptibility",
+      mode: "interruptible",
+      effect,
+    });
+    const masked = uninterruptibleMask((restore) => restore(effect));
+    expect(masked._tag).toBe("InterruptibilityMask");
   });
 
   it("orElseOptional falls back on None, preserves Some failures and end fails with None", async () => {

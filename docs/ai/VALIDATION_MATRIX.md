@@ -33,6 +33,7 @@ Notes:
 | `src/core/runtime` | `npm run test:types`; `npm test -- src/core/runtime/__tests__` | engine parity tests; scheduler/fiber/scope/resource/supervisor invariants |
 | `src/core/runtime/engine` | `npm run test:types`; `npm test -- src/core/runtime/__tests__/engine` | `docs/wasm-fiber-engine.md`; TS/WASM parity |
 | `src/observability` | `npm run test:types`; `npm test -- src/observability/__tests__ src/core/runtime/__tests__/eventBus.test.ts` | `docs/observability.md`; `docs/ai/PUBLIC_API.md` |
+| `src/perf` | `npm run test:types`; `npm test -- src/perf/__tests__`; `npm run perf -- --profile runtime`; `npm run perf:history -- --profile runtime`; `npm run perf:runtime:ab`; `npm run perf:runtime:soak`; `npm run perf:runtime:budget`; `npm run perf:http:memory -- --calls 1000 --concurrency 64 --warmup 0 --variants default-json,default-json-observed`; optional `node --expose-gc --import tsx src/perf/cli.ts --profile http-memory --calls 1000 --concurrency 64 --force-gc` | `docs/performance-profiler.md`; `docs/ai/PUBLIC_API.md` |
 | `src/examples/observability*` | `npm run example:observability:express`; `npm run example:observability:fastify`; `npm run example:observability:nest` after installing optional framework deps | `docs/observability-framework-examples.md` |
 | observability collector smoke | `npm run build:ts`; `docker compose -f docker-compose.observability.yml up`; `npm run smoke:observability:collector` | `docs/observability-collector-smoke.md`; `docs/otel-collector-smoke.yaml` |
 | `src/core/stream` | `npm run test:types`; `npm test -- src/core/stream/__tests__` | stream ordering, backpressure, cancellation |
@@ -46,8 +47,9 @@ Notes:
 | `extensions/vscode-brass-agent` | extension build/test command if present; `npm run agent:vscode:package` | VS Code install/clean docs |
 | `crates/brass-runtime-wasm-engine` | `npm run build:wasm`; `npm test -- src/core/runtime/__tests__/engine src/core/runtime/__tests__/scheduler` | Rust code, generated bridge shape |
 | `package.json`, `tsup.config.ts`, exports | `npm run build`; `npm run validate:cjs`; `npm run test:types` | `docs/ai/PUBLIC_API.md`; `README.md` install examples |
+| release candidate | `npm run release:check`; optional GC-aware `node --expose-gc --import tsx src/perf/cli.ts --profile http-memory --calls 100000 --concurrency 512 --delay-ms 2 --force-gc` | `docs/release.md`; `CHANGELOG.md`; `docs/recipes/` |
 | docs only | link/path review; optional `npm run context` | `docs/README.md`; public API examples |
-| benchmarks | `npm run benchmark`; `npm run benchmark:json`; `npm run benchmark:http:budget`; `npm run benchmark:observability`; `npm run benchmark:observability:budget`; related tests | benchmark thresholds, warnings, and heap-per-suspended-fiber details |
+| benchmarks | `npm run benchmark`; `npm run benchmark:json`; `npm run benchmark:runtime`; `npm run benchmark:runtime:budget`; `npm run benchmark:http:budget`; `npm run benchmark:observability`; `npm run benchmark:observability:budget`; `npm run benchmark:perf`; `npm run perf:runtime:budget`; related tests | benchmark thresholds, warnings, profiler output, and heap-per-suspended-fiber details |
 
 ## Property tests
 

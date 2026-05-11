@@ -1,6 +1,7 @@
 // src/http/lifecycle/responseCache.ts
 import type { Async } from "../../core/types/asyncEffect";
 import type { Exit } from "../../core/types/effect";
+import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
 import { computeCacheKey } from "./cacheKey";
@@ -221,7 +222,7 @@ export function withCache(config?: CacheConfig): {
         safeEmit(onEvent, {
           type: "revalidation-failure",
           cacheKey: key,
-          error: exit.cause._tag === "Fail" ? exit.cause.error : undefined,
+          error: Cause.squash(exit.cause),
         });
       }
     };
