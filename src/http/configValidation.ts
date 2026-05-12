@@ -120,6 +120,35 @@ const retryConfig = Schema.union([
   }, { unknownKeys: "passthrough" }),
 ]);
 
+const requestRetryOverrideConfig = Schema.union([
+  Schema.literal(false),
+  Schema.object({
+    maxRetries: Schema.number({ min: 0, int: true }).optional(),
+    baseDelayMs: Schema.number({ min: 0, int: true }).optional(),
+    maxDelayMs: Schema.number({ min: 0, int: true }).optional(),
+    schedule: object.optional(),
+    retryOnStatus: fn.optional(),
+  }, { unknownKeys: "passthrough" }),
+]);
+
+const requestPolicyConfig = Schema.object({
+  preset: Schema.string({ minLength: 1 }).optional(),
+  lane: Schema.string({ minLength: 1 }).optional(),
+  dedupKey: Schema.string({ minLength: 1 }).optional(),
+  priority: Schema.number({ min: 0, max: 9, int: true }).optional(),
+  retry: requestRetryOverrideConfig.optional(),
+  poolKey: Schema.string({ minLength: 1 }).optional(),
+}, { unknownKeys: "passthrough" });
+
+const policyPresetsConfig = Schema.record(Schema.union([requestPolicyConfig, fn]));
+
+const compressionConfig = Schema.union([
+  Schema.literal(false),
+  Schema.object({
+    encodings: Schema.array(Schema.enum(["gzip", "br", "deflate"] as const)).optional(),
+  }, { unknownKeys: "passthrough" }),
+]);
+
 const prewarmConfig = Schema.union([
   Schema.literal(false),
   Schema.object({
@@ -148,6 +177,8 @@ const wireConfig = Schema.object({
   baseUrl: Schema.string().optional(),
   headers: Schema.record(Schema.string()).optional(),
   timeoutMs: Schema.number({ min: 1, int: true }).optional(),
+  transport: fn.optional(),
+  streamTransport: fn.optional(),
   pool: poolConfig.optional(),
   adaptiveLimiter: adaptiveLimiterConfig.optional(),
 }, { unknownKeys: "passthrough" });
@@ -156,6 +187,8 @@ const lifecycleConfig = Schema.object({
   baseUrl: Schema.string().optional(),
   headers: Schema.record(Schema.string()).optional(),
   timeoutMs: Schema.number({ min: 1, int: true }).optional(),
+  transport: fn.optional(),
+  streamTransport: fn.optional(),
   pool: poolConfig.optional(),
   adaptiveLimiter: adaptiveLimiterConfig.optional(),
   dedup: Schema.union([Schema.literal(false), object]).optional(),
@@ -165,12 +198,15 @@ const lifecycleConfig = Schema.object({
   retry: retryConfig.optional(),
   prewarm: prewarmConfig.optional(),
   onEvent: fn.optional(),
+  policyPresets: policyPresetsConfig.optional(),
 }, { unknownKeys: "passthrough" });
 
 const defaultClientConfig = Schema.object({
   baseUrl: Schema.string().optional(),
   headers: Schema.record(Schema.string()).optional(),
   timeoutMs: Schema.number({ min: 1, int: true }).optional(),
+  transport: fn.optional(),
+  streamTransport: fn.optional(),
   pool: poolConfig.optional(),
   adaptiveLimiter: adaptiveLimiterConfig.optional(),
   dedup: Schema.union([Schema.literal(false), object]).optional(),
@@ -180,9 +216,10 @@ const defaultClientConfig = Schema.object({
   retry: retryConfig.optional(),
   prewarm: prewarmConfig.optional(),
   onEvent: fn.optional(),
-  preset: Schema.enum(["minimal", "balanced", "default"] as const).optional(),
-  compression: Schema.union([Schema.literal(false), object]).optional(),
+  preset: Schema.enum(["minimal", "balanced", "default", "production"] as const).optional(),
+  compression: compressionConfig.optional(),
   middleware: Schema.array(fn).optional(),
+  policyPresets: policyPresetsConfig.optional(),
 }, { unknownKeys: "passthrough" });
 
 export function validateMakeHttpConfig(config: MakeHttpConfig): void {

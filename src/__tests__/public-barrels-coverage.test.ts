@@ -78,6 +78,8 @@ describe("public barrel modules", () => {
     expect(http.s.object).toBeTypeOf("function");
     expect(http.isHttpError).toBeTypeOf("function");
     expect(http.formatHttpError).toBeTypeOf("function");
+    expect(http.defineHttpPolicyPresets).toBeTypeOf("function");
+    expect(http.httpPolicy).toBeTypeOf("object");
     expect(httpTesting.makeMockHttpClient).toBeTypeOf("function");
     expect(httpTesting.withMockFetch).toBeTypeOf("function");
     expect(schema.s.object).toBeTypeOf("function");
@@ -90,6 +92,7 @@ describe("public barrel modules", () => {
     expect(observability.formatPrometheusMetrics).toBeTypeOf("function");
     expect(observability.makeObservability).toBeTypeOf("function");
     expect(observability.withHttpObservability).toBeTypeOf("function");
+    expect(observability.HTTP_OBSERVABILITY_CONTRACT).toBeTypeOf("object");
     expect(observability.makeStructuredLogSink).toBeTypeOf("function");
     expect(observability.withSpan).toBeTypeOf("function");
     expect(observability.parseTraceparent).toBeTypeOf("function");

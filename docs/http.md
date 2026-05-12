@@ -26,7 +26,8 @@ Recommended entry points:
 
 ### 1) Wire layer (transport)
 
-Lowest level. Talks to `fetch`, returns raw HTTP data.
+Lowest level. Talks to an effect-based transport. The default transport uses
+`fetch`, but callers can provide their own backend.
 
 ```
 Async<R, HttpError, HttpWireResponse>
@@ -132,7 +133,7 @@ console.log(result.body.title);
 Validation failures reject with `{ _tag: "ValidationError", message, body,
 issues }`, where each issue includes the schema path that failed.
 
-This makes the HTTP layer more than a typed `fetch` wrapper: response schemas,
+This makes the HTTP layer more than a typed transport wrapper: response schemas,
 request-body schemas, construction-time config validation, cancellation,
 retry/cache/dedup/compression, and observability all stay in the same lazy
 effect pipeline. Callers can adopt schema validation without adding a second
@@ -153,23 +154,34 @@ await http.postJson(
 ```
 
 The body argument is inferred from `bodySchema`. If `bodySchema` fails, the
-effect rejects with `phase: "request"` and `fetch` is never called.
+effect rejects with `phase: "request"` and the transport is never called.
 
-HTTP also exports error helpers:
+HTTP also exports error helpers and normalizers:
 
 ```ts
-import { formatHttpError, isValidationError, matchHttpError } from "brass-runtime/http";
+import {
+  formatHttpError,
+  isRetryableHttpError,
+  isTimeoutHttpError,
+  isValidationError,
+  matchHttpError,
+  toHttpError,
+} from "brass-runtime/http";
 
 try {
   await http.getJson("/posts/1", { schema: Post }).unsafeRunPromise();
 } catch (error) {
   if (isValidationError(error)) console.error(error.issues);
+  if (isTimeoutHttpError(error)) console.error("timeout/backpressure timeout");
+  if (isRetryableHttpError(error)) console.error("safe to retry later");
   console.error(formatHttpError(error));
   matchHttpError(error, {
     Timeout: (err) => console.error(err.timeoutMs),
     PoolClosed: (err) => console.error(err.key),
   });
 }
+
+const mapped = toHttpError(axiosError); // understands AbortError, timeout codes, Axios-like response.status
 ```
 
 The same schema module can be used outside HTTP:
@@ -180,6 +192,128 @@ import { s } from "brass-runtime/schema";
 const Config = s.object({ port: s.int({ min: 1 }), callbackUrl: s.url() });
 const parsed = Config.parse({ port: 3000, callbackUrl: "https://example.com/cb" });
 ```
+
+## Custom Transports
+
+The wire client uses `fetch` by default, but the transport boundary is now an
+effect. `makeHttp`, `httpClient`, `makeLifecycleClient`, and
+`makeDefaultHttpClient` accept `transport`, a function from normalized
+`HttpRequest` + resolved `URL` + `AbortSignal` to
+`Async<unknown, HttpError, HttpWireResponse>`.
+
+That keeps timeout, pool/adaptive limiter, stats, retry, cache, deduplication
+and cancellation in Brass while letting the final I/O backend be `fetch`,
+Axios, undici, a test double, or an internal client.
+
+```ts
+import {
+  makeDefaultHttpClient,
+  makePromiseHttpTransport,
+  promiseHttpTransport,
+  normalizeHttpHeaders,
+} from "brass-runtime/http";
+
+const transport = makePromiseHttpTransport({
+  request: ({ request, url, signal }) =>
+    myHttpLibrary.request({
+      url: url.toString(),
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      signal,
+    }),
+  response: (res) => ({
+    status: res.status,
+    statusText: res.statusText ?? "",
+    headers: normalizeHttpHeaders(res.headers),
+    bodyText: typeof res.data === "string" ? res.data : JSON.stringify(res.data),
+  }),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  transport,
+});
+```
+
+For Axios-style clients, the consuming app owns the dependency and only injects
+the adapter. The fluent builder covers the common `status` / `statusText` /
+`headers` / `data` response shape:
+
+```ts
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({
+    url: url.toString(),
+    method: request.method,
+    headers: request.headers,
+    data: request.body,
+    responseType: "json",
+  }))
+  .send((config) => axiosInstance.request(config))
+  .json();
+```
+
+Brass injects the `AbortSignal` into object configs before `send`, so the
+runtime still owns real cancellation without making callers spell out
+`signal`. Promise transports use `toHttpError` by default, so Axios-like
+timeouts, aborts, and `response.status` failures become typed `HttpError`
+values.
+
+If the external client has a different shape, keep the same fluent order and
+map only the pieces that differ:
+
+```ts
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({ method: request.method, url }))
+  .send((config) => internalClient.send(config))
+  .json((res) => res.payload, (res) => ({
+    status: res.code,
+    statusText: res.message,
+    headers: res.headerMap,
+    transportMeta: { upstream: res.node },
+  }));
+```
+
+Per-request execution knobs live under `policy`, so they compose with all
+transports and lifecycle middleware:
+
+```ts
+await http.getJson("/users", {
+  policy: {
+    priority: 1,
+    dedupKey: "users:list",
+    poolKey: "users-api",
+    retry: false,
+  },
+}).unsafeRunPromise();
+```
+
+For repeated intent, define named presets once and reference them per request:
+
+```ts
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    priority: 2,
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
+
+`DefaultHttpClientConfig`, `LifecycleClientConfig`, and
+`HttpObservabilityOptions` are validated at construction boundaries with
+`ConfigValidationError`. Invalid policy preset fields, compression encodings,
+and observability policy label keys fail before the first request.
 
 ## Adaptive Limiter
 
@@ -222,14 +356,20 @@ backoff hint.
 
 Named presets are available as `conservative`, `balanced`, and `aggressive`.
 The default HTTP client uses `balanced` for `preset: "balanced"` and
-`aggressive` for `preset: "default"`. Use `adaptiveLimiterPresets` or
+`aggressive` for `preset: "default"` / `preset: "production"`.
+`production` is the explicit name for the full production-ready default stack;
+`default` remains as the compatibility name. Use `adaptiveLimiterPresets` or
 `makeAdaptiveLimiterConfig(preset, overrides)` when you want a documented
-baseline with a few local overrides.
+adaptive limiter baseline with a few local overrides.
 
 When `withHttpObservability` wraps a client that owns an adaptive limiter, it
 records limiter gauges such as limit, in-flight, queue depth, utilization,
 error rate, request/completion rate, rejection rate, and state count. The same
 snapshot is attached to HTTP client span events.
+The middleware also reads structured per-request `policy`. Logs and span
+attributes receive `preset`, `lane`, `poolKey`, `dedupKey`, `priority`, and retry
+overrides automatically, while metric labels stay opt-in through
+`policy.labelKeys` to avoid accidental high-cardinality metrics.
 
 See [`http-recipes.md`](http-recipes.md) for typed API client, testing,
 observability, retry, adaptive limiter, and config validation recipes.
@@ -334,7 +474,7 @@ import { httpClientBuilder } from "brass-runtime/http";
 
 const http = httpClientBuilder()
   .baseUrl("https://api.example.com")
-  .balanced()
+  .production()
   .balancedLimiter({ maxLimit: 128 })
   .header("authorization", `Bearer ${token}`)
   .cache({ ttlSeconds: 30, maxEntries: 512 })
@@ -438,7 +578,7 @@ All requests are **cooperatively cancelable**.
 const fiber = fork(http.getJson<Post>("/posts/1"), {});
 
 setTimeout(() => {
-  fiber.interrupt(); // aborts underlying fetch
+  fiber.interrupt(); // aborts the underlying transport
 }, 50);
 ```
 
@@ -478,7 +618,7 @@ const http = httpClient({
 });
 ```
 
-`timeoutMs` cubre espera de pool, `fetch` y lectura de body en respuestas no-streaming.
+`timeoutMs` cubre espera de pool, transporte y lectura de body en respuestas no-streaming.
 
 El pool permite rechazar temprano en vez de dejar requests vivos hasta un `504`:
 
@@ -505,7 +645,9 @@ http.withRetry({
 });
 ```
 
-El retry default reintenta `FetchError`, `Timeout` y `PoolTimeout`, pero no reintenta `Abort`, `BadUrl` ni `PoolRejected`.
+El retry default reintenta `Timeout`, `PoolTimeout` y `FetchError` sin status o
+con status retriable (`408`, `429`, `5xx` relevantes). No reintenta `Abort`,
+`BadUrl`, `PoolRejected` ni `FetchError` con status no retriable como `404`.
 
 Stats:
 

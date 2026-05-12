@@ -1,4 +1,6 @@
 export * from "./client";
+export * from "./requestPolicy";
+export * from "./transport";
 export * from "./httpClient";
 export * from "./pool";
 export * from "./circuitBreaker";

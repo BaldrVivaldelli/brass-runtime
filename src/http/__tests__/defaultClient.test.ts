@@ -4,6 +4,7 @@ import type { HttpMiddleware } from "../client";
 import {
   makeDefaultHttpClient,
 } from "../defaultClient";
+import { getHttpRequestPolicy } from "../requestPolicy";
 import {
   formatPrometheusMetrics,
   makeObservability,
@@ -137,6 +138,25 @@ describe("makeDefaultHttpClient", () => {
     });
   });
 
+  it("supports production as an explicit alias for the full default preset", () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    const client = makeDefaultHttpClient({
+      preset: "production",
+      compression: false,
+    });
+
+    expect(client.preset).toBe("production");
+    expect(client.features).toMatchObject({
+      dedup: true,
+      cache: true,
+      priority: true,
+      retry: true,
+      adaptiveLimiter: true,
+    });
+    expect(client.wire.adaptiveLimiter?.stats().limit).toBe(32);
+  });
+
   it("applies caller middleware outermost for observability/auth style extensions", async () => {
     const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
     vi.stubGlobal("fetch", fetchMock);
@@ -165,6 +185,48 @@ describe("makeDefaultHttpClient", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       headers: expect.objectContaining({ "x-observed": "1" }),
     });
+  });
+
+  it("resolves named policy presets before user middleware and lifecycle layers", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const captured: unknown[] = [];
+
+    const capture: HttpMiddleware = (next) => (req) => {
+      captured.push(req);
+      return next(req);
+    };
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      preset: "balanced",
+      compression: false,
+      policyPresets: {
+        readModel: {
+          lane: "read-model",
+          poolKey: "users-api",
+          priority: 1,
+          retry: { maxRetries: 1 },
+        },
+      },
+      middleware: [capture],
+    });
+
+    await expect(client.getText("/users/1", {
+      policy: { preset: "readModel", dedupKey: "users:1" },
+    }).unsafeRunPromise()).resolves.toMatchObject({ body: "ok" });
+
+    expect(captured).toHaveLength(1);
+    expect(getHttpRequestPolicy(captured[0] as any)).toEqual({
+      preset: "readModel",
+      lane: "read-model",
+      poolKey: "users-api",
+      priority: 1,
+      retry: { maxRetries: 1 },
+      dedupKey: "users:1",
+    });
+    expect((captured[0] as any).poolKey).toBe("users-api");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves adaptive limiter metadata for observability middleware", async () => {

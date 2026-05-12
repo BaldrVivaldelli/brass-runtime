@@ -4,6 +4,7 @@ import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
+import { getHttpRequestPolicy } from "../requestPolicy";
 import { PriorityQueue, clampPriority } from "./priorityQueue";
 
 /**
@@ -33,12 +34,12 @@ const DEFAULT_CONCURRENCY = 32;
 
 /**
  * Extracts the priority value from a request.
- * Looks at `(req as any).priority` first, then `(req.init as any)?.priority`.
+ * Looks at `req.policy.priority` first, then legacy top-level/init values.
  * Returns default of 5 if not found, clamps to [0, 9].
  */
 function extractPriority(req: HttpRequest): number {
-  const fromReq = (req as any).priority;
-  if (fromReq !== undefined) return clampPriority(fromReq);
+  const fromPolicy = getHttpRequestPolicy(req).priority;
+  if (fromPolicy !== undefined) return clampPriority(fromPolicy);
 
   const fromInit = (req.init as any)?.priority;
   if (fromInit !== undefined) return clampPriority(fromInit);

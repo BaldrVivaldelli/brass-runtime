@@ -104,7 +104,7 @@ describe("makeHttp and decorators", () => {
 
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network"); }));
     const client2 = makeHttp({ baseUrl: "https://example.test" });
-    await expect(run(client2({ method: "GET", url: "/x" }))).rejects.toMatchObject({ _tag: "FetchError", message: "Error: network" });
+    await expect(run(client2({ method: "GET", url: "/x" }))).rejects.toMatchObject({ _tag: "FetchError", message: "network" });
   });
 
   it("decorates clients and composes middleware", async () => {
@@ -457,7 +457,7 @@ describe("HTTP streaming and sleep", () => {
     });
     await expect(run(adaptiveFailure({ method: "GET", url: "/adaptive-failure" }))).rejects.toMatchObject({
       _tag: "FetchError",
-      message: "Error: stream failed",
+      message: "stream failed",
     });
     expect(adaptiveFailure.stats()).toMatchObject({ failed: 1, adaptiveLimiter: expect.any(Object) });
 

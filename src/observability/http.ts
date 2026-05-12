@@ -3,11 +3,14 @@ import { getCurrentFiber } from "../core/runtime/fiber";
 import type { MetricsRegistry } from "../core/runtime/metrics";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../http/client";
 import type { AdaptiveLimiterStats } from "../http/adaptiveLimiter";
+import { httpErrorStatus, isRetryableHttpError } from "../http/errors";
+import { getHttpRequestPolicy, type HttpRequestPolicy, type HttpRequestRetryOverride } from "../http/requestPolicy";
 import type { Observability } from "./setup";
 import { logEffect, type LogLevel } from "./logs";
 import { spanEvent, withSpan, type SpanAttributes } from "./traces";
 import { exemplarFromTraceContext } from "./metrics";
 import { injectTraceContext } from "./traceContext";
+import { validateHttpObservabilityOptions } from "./configValidation";
 
 export type HttpOutcome =
   | "success"
@@ -41,11 +44,23 @@ export type HttpAdaptiveLimiterObservabilityOptions = {
   readonly includeKeyLabel?: boolean;
 };
 
+export type HttpPolicyLabelKey = "preset" | "lane" | "poolKey" | "dedupKey" | "priority" | "retry";
+
+export type HttpPolicyObservabilityOptions = {
+  readonly enabled?: boolean;
+  /**
+   * Adds selected policy fields as metric labels. Disabled by default because
+   * pool keys, lanes, and dedup keys may be high-cardinality in user systems.
+   */
+  readonly labelKeys?: readonly HttpPolicyLabelKey[];
+};
+
 export type HttpObservabilityOptions = {
   readonly metrics?: MetricsRegistry | false;
   readonly logs?: false | HttpObservabilityLogOptions;
   readonly spans?: false | HttpObservabilitySpanOptions;
   readonly adaptiveLimiter?: boolean | HttpAdaptiveLimiterObservabilityOptions;
+  readonly policy?: boolean | HttpPolicyObservabilityOptions;
   readonly injectTraceHeaders?: boolean;
   readonly includeHostLabel?: boolean;
   readonly route?: string | ((req: HttpRequest) => string | undefined);
@@ -61,13 +76,93 @@ type ResolvedHttpObservabilityOptions = Required<Pick<
   readonly logs: false | HttpObservabilityLogOptions;
   readonly spans: false | HttpObservabilitySpanOptions;
   readonly adaptiveLimiter: Required<HttpAdaptiveLimiterObservabilityOptions>;
+  readonly policy: ResolvedHttpPolicyObservabilityOptions;
   readonly route?: string | ((req: HttpRequest) => string | undefined);
   readonly durationBuckets?: readonly number[];
 };
 
+type ResolvedHttpPolicyObservabilityOptions = {
+  readonly enabled: boolean;
+  readonly labelKeys: readonly HttpPolicyLabelKey[];
+};
+
 const DEFAULT_DURATION_BUCKETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const POLICY_LABEL_NAMES: Record<HttpPolicyLabelKey, string> = {
+  preset: "policy",
+  lane: "lane",
+  poolKey: "pool_key",
+  dedupKey: "dedup_key",
+  priority: "priority",
+  retry: "retry",
+};
+
+export const HTTP_OBSERVABILITY_CONTRACT = Object.freeze({
+  metrics: Object.freeze({
+    requestsTotal: "brass_http_client_requests_total",
+    durationMs: "brass_http_client_duration_ms",
+    inFlight: "brass_http_client_in_flight",
+    adaptiveLimiterLimit: "brass_http_adaptive_limiter_limit",
+    adaptiveLimiterInFlight: "brass_http_adaptive_limiter_in_flight",
+    adaptiveLimiterQueueDepth: "brass_http_adaptive_limiter_queue_depth",
+    adaptiveLimiterStateCount: "brass_http_adaptive_limiter_state_count",
+    adaptiveLimiterUtilization: "brass_http_adaptive_limiter_utilization",
+    adaptiveLimiterErrorRate: "brass_http_adaptive_limiter_error_rate",
+    adaptiveLimiterRequestsPerSecond: "brass_http_adaptive_limiter_requests_per_second",
+    adaptiveLimiterCompletionsPerSecond: "brass_http_adaptive_limiter_completions_per_second",
+    adaptiveLimiterRejectionRate: "brass_http_adaptive_limiter_rejection_rate",
+  }),
+  labels: Object.freeze({
+    method: "method",
+    host: "host",
+    route: "route",
+    outcome: "outcome",
+    status: "status",
+    adaptiveLimiterKey: "key",
+    lane: "lane",
+    poolKey: "pool_key",
+    dedupKey: "dedup_key",
+    priority: "priority",
+    retry: "retry",
+    policy: "policy",
+  }),
+  spanAttributes: Object.freeze({
+    method: "http.request.method",
+    url: "url.full",
+    route: "http.route",
+    host: "server.address",
+    durationMs: "http.duration_ms",
+    outcome: "http.outcome",
+    statusCode: "http.status_code",
+    retryable: "http.retryable",
+    policyLane: "http.request.policy.lane",
+    policyPreset: "http.request.policy.preset",
+    policyPoolKey: "http.request.policy.pool_key",
+    policyDedupKey: "http.request.policy.dedup_key",
+    policyPriority: "http.request.policy.priority",
+    policyRetry: "http.request.policy.retry",
+  }),
+  logMessages: Object.freeze({
+    request: "http.client.request",
+    response: "http.client.response",
+    error: "http.client.error",
+  }),
+  logFields: Object.freeze({
+    method: "method",
+    url: "url",
+    host: "host",
+    route: "route",
+    status: "status",
+    outcome: "outcome",
+    durationMs: "durationMs",
+    retryable: "retryable",
+    policy: "policy",
+  }),
+} as const);
 
 export function withHttpObservability(options?: Observability | HttpObservabilityOptions): HttpMiddleware {
+  if (!isObservabilityInstance(options)) {
+    validateHttpObservabilityOptions(options ?? {});
+  }
   const resolved = resolveHttpObservabilityOptions(options);
 
   return (next: HttpClientFn): HttpClientFn => {
@@ -167,7 +262,13 @@ function beginHttpObservation(
 
     return {
       finishWithResponse: (res) => finish(httpStatusOutcome(res.status), String(res.status)),
-      finishWithError: (error) => finish(httpErrorOutcome(error), undefined, { "error.type": error._tag }),
+      finishWithError: (error) => {
+        const status = httpErrorStatus(error);
+        return finish(httpErrorOutcome(error), status !== undefined ? String(status) : undefined, {
+          "error.type": error._tag,
+          "http.retryable": isRetryableHttpError(error),
+        });
+      },
     };
   }) as Async<unknown, never, ActiveHttpObservation>;
 }
@@ -212,17 +313,22 @@ function logHttpError(
 ): Async<unknown, never, void> {
   const level = options.logs === false ? false : options.logs.errorLevel ?? "error";
   if (!level) return asyncSucceed(undefined);
+  const status = httpErrorStatus(error);
+  const statusText = httpErrorStatusText(error);
   return logEffect(level, "http.client.error", {
     ...requestLogFields(req, options),
     outcome: finish.outcome,
     durationMs: finish.durationMs,
+    ...(status !== undefined ? { status } : {}),
+    ...(statusText ? { statusText } : {}),
+    retryable: isRetryableHttpError(error),
     errorTag: error._tag,
     message: httpErrorMessage(error),
   });
 }
 
 function resolveHttpObservabilityOptions(options?: Observability | HttpObservabilityOptions): ResolvedHttpObservabilityOptions {
-  const maybeObservability = options && "eventBus" in options && "prometheus" in options
+  const maybeObservability = isObservabilityInstance(options)
     ? options as Observability
     : undefined;
   const raw = maybeObservability ? { metrics: maybeObservability.metrics } satisfies HttpObservabilityOptions : options as HttpObservabilityOptions | undefined;
@@ -232,12 +338,22 @@ function resolveHttpObservabilityOptions(options?: Observability | HttpObservabi
     logs: raw?.logs ?? {},
     spans: raw?.spans ?? {},
     adaptiveLimiter: resolveAdaptiveLimiterObservabilityOptions(raw?.adaptiveLimiter),
+    policy: resolveHttpPolicyObservabilityOptions(raw?.policy),
     injectTraceHeaders: raw?.injectTraceHeaders ?? true,
     includeHostLabel: raw?.includeHostLabel ?? true,
     route: raw?.route,
     clock: raw?.clock ?? Date.now,
     durationBuckets: raw?.durationBuckets,
   };
+}
+
+function isObservabilityInstance(options: unknown): options is Observability {
+  return Boolean(
+    options &&
+    typeof options === "object" &&
+    "eventBus" in options &&
+    "prometheus" in options
+  );
 }
 
 type AdaptiveLimiterReadable = {
@@ -252,6 +368,17 @@ function resolveAdaptiveLimiterObservabilityOptions(
   return {
     enabled: options.enabled ?? true,
     includeKeyLabel: options.includeKeyLabel ?? false,
+  };
+}
+
+function resolveHttpPolicyObservabilityOptions(
+  options: HttpObservabilityOptions["policy"],
+): ResolvedHttpPolicyObservabilityOptions {
+  if (options === false) return { enabled: false, labelKeys: [] };
+  if (options === true || options === undefined) return { enabled: true, labelKeys: [] };
+  return {
+    enabled: options.enabled ?? true,
+    labelKeys: options.labelKeys ?? [],
   };
 }
 
@@ -310,7 +437,8 @@ function adaptiveLimiterLabels(
 }
 
 function inferAdaptiveLimiterKey(req: HttpRequest, stats: AdaptiveLimiterStats): string | undefined {
-  if (req.poolKey) return req.poolKey;
+  const policy = getHttpRequestPolicy(req);
+  if (policy.poolKey) return policy.poolKey;
   const host = requestHost(req);
   if (host) return host;
   return stats.keys?.length === 1 ? stats.keys[0] : undefined;
@@ -326,10 +454,14 @@ function setGauge(
   metrics.gauge(name, labels).set(value);
 }
 
-function compactSpanAttributes(attrs: Record<string, number | undefined>): SpanAttributes {
+function compactSpanAttributes(attrs: Record<string, string | number | boolean | undefined>): SpanAttributes {
   const out: SpanAttributes = {};
   for (const [key, value] of Object.entries(attrs)) {
-    if (value !== undefined && Number.isFinite(value)) out[key] = value;
+    if (typeof value === "number") {
+      if (Number.isFinite(value)) out[key] = value;
+    } else if (value !== undefined) {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -360,6 +492,7 @@ function spanStartAttributes(req: HttpRequest, options: ResolvedHttpObservabilit
     ...(path ? { "url.path": path } : {}),
     ...(host ? { "server.address": host } : {}),
     ...(route ? { "http.route": route } : {}),
+    ...requestPolicySpanAttributes(req, options),
     ...custom,
   };
 }
@@ -370,6 +503,7 @@ function requestBaseLabels(req: HttpRequest, options: ResolvedHttpObservabilityO
     method: req.method,
     ...(options.includeHostLabel ? { host: requestHost(req) } : {}),
     ...(route ? { route } : {}),
+    ...requestPolicyMetricLabels(req, options),
   });
 }
 
@@ -389,13 +523,103 @@ function requestFinishLabels(
 function requestLogFields(req: HttpRequest, options: ResolvedHttpObservabilityOptions): Record<string, unknown> {
   const host = requestHost(req);
   const route = requestRoute(req, options);
+  const policy = requestPolicyLogFields(req, options);
 
   return {
     method: req.method,
     url: sanitizeUrl(req.url),
     ...(host ? { host } : {}),
     ...(route ? { route } : {}),
+    ...(policy ? { policy } : {}),
   };
+}
+
+function requestPolicyLogFields(
+  req: HttpRequest,
+  options: ResolvedHttpObservabilityOptions,
+): Record<string, unknown> | undefined {
+  if (!options.policy.enabled) return undefined;
+  const policy = getHttpRequestPolicy(req);
+  const fields = {
+    ...(policy.preset ? { preset: policy.preset } : {}),
+    ...(policy.lane ? { lane: policy.lane } : {}),
+    ...(policy.poolKey ? { poolKey: policy.poolKey } : {}),
+    ...(policy.dedupKey ? { dedupKey: policy.dedupKey } : {}),
+    ...(policy.priority !== undefined ? { priority: policy.priority } : {}),
+    ...(policy.retry !== undefined ? { retry: retryPolicyLogValue(policy.retry) } : {}),
+  };
+  return Object.keys(fields).length > 0 ? fields : undefined;
+}
+
+function requestPolicySpanAttributes(
+  req: HttpRequest,
+  options: ResolvedHttpObservabilityOptions,
+): SpanAttributes {
+  if (!options.policy.enabled) return {};
+  const policy = getHttpRequestPolicy(req);
+  return {
+    ...compactSpanAttributes({
+      "http.request.policy.lane": policy.lane,
+      "http.request.policy.preset": policy.preset,
+      "http.request.policy.pool_key": policy.poolKey,
+      "http.request.policy.dedup_key": policy.dedupKey,
+      "http.request.policy.priority": policy.priority,
+    }),
+    ...retryPolicySpanAttributes(policy.retry),
+  };
+}
+
+function requestPolicyMetricLabels(
+  req: HttpRequest,
+  options: ResolvedHttpObservabilityOptions,
+): Record<string, string> {
+  if (!options.policy.enabled || options.policy.labelKeys.length === 0) return {};
+  const policy = getHttpRequestPolicy(req);
+  const values: Record<HttpPolicyLabelKey, string | undefined> = {
+    preset: policy.preset,
+    lane: policy.lane,
+    poolKey: policy.poolKey,
+    dedupKey: policy.dedupKey,
+    priority: policy.priority !== undefined ? String(policy.priority) : undefined,
+    retry: retryPolicyMetricValue(policy.retry),
+  };
+  const labels: Record<string, string | undefined> = {};
+
+  for (const key of options.policy.labelKeys) {
+    labels[POLICY_LABEL_NAMES[key]] = values[key];
+  }
+
+  return compactLabels(labels);
+}
+
+function retryPolicyLogValue(retry: HttpRequestRetryOverride): unknown {
+  if (retry === false) return "disabled";
+  return {
+    mode: "override",
+    ...(retry.maxRetries !== undefined ? { maxRetries: retry.maxRetries } : {}),
+    ...(retry.baseDelayMs !== undefined ? { baseDelayMs: retry.baseDelayMs } : {}),
+    ...(retry.maxDelayMs !== undefined ? { maxDelayMs: retry.maxDelayMs } : {}),
+    ...(retry.schedule ? { schedule: "custom" } : {}),
+    ...(retry.retryOnStatus ? { retryOnStatus: "custom" } : {}),
+  };
+}
+
+function retryPolicySpanAttributes(retry: HttpRequestPolicy["retry"]): SpanAttributes {
+  if (retry === undefined) return {};
+  if (retry === false) return { "http.request.policy.retry": "disabled" };
+  return compactSpanAttributes({
+    "http.request.policy.retry": "override",
+    "http.request.policy.retry.max_retries": retry.maxRetries,
+    "http.request.policy.retry.base_delay_ms": retry.baseDelayMs,
+    "http.request.policy.retry.max_delay_ms": retry.maxDelayMs,
+    "http.request.policy.retry.custom_schedule": retry.schedule ? true : undefined,
+    "http.request.policy.retry.custom_status": retry.retryOnStatus ? true : undefined,
+  });
+}
+
+function retryPolicyMetricValue(retry: HttpRequestPolicy["retry"]): string | undefined {
+  if (retry === undefined) return undefined;
+  return retry === false ? "disabled" : "override";
 }
 
 function requestRoute(req: HttpRequest, options: ResolvedHttpObservabilityOptions): string | undefined {
@@ -430,6 +654,10 @@ function httpErrorOutcome(error: HttpError): HttpOutcome {
 
 function httpErrorMessage(error: HttpError): string | undefined {
   return "message" in error ? error.message : undefined;
+}
+
+function httpErrorStatusText(error: HttpError): string | undefined {
+  return error._tag === "FetchError" ? error.statusText : undefined;
 }
 
 function injectCurrentTraceContext(req: HttpRequest): HttpRequest {

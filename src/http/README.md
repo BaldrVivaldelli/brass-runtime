@@ -5,8 +5,9 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 ## Objetivos de diseño
 
 - **Lazy**: no se ejecuta nada hasta “correr” el effect.
-- **Cancelable**: la interrupción del fiber / effect cancela `fetch` vía `AbortController` (usando `fromPromiseAbortable`).
+- **Cancelable**: la interrupción del fiber / effect cancela el transporte vía `AbortController`; el transporte default usa `fetch`.
 - **Componible**: un *wire client* simple (`makeHttp`) + helpers (`makeDefaultHttpClient`, `httpClient`, `makeHttpClient`, `httpClientWithMeta`, streaming).
+- **Transportable**: `fetch` es solo el transporte default; podés proveer un `HttpTransport` propio para Axios, undici, mocks o integraciones internas.
 - **Sin magia**: los tipos principales son chicos y fáciles de debuggear.
 
 ---
@@ -18,7 +19,7 @@ Cliente HTTP minimalista construido encima del runtime `Async` de Brass. La idea
 - `httpClientBuilder`: builder discoverable para presets, headers, lifecycle, compression y middleware.
 - `httpClient`: helper liviano para consumo normal cuando no necesitás lifecycle integrado.
 - `makeHttpClient` / `makeLifecycleClient`: opción lower-level para componer cache, dedup, prioridad, retry, eventos, stats o `cancelAll` manualmente.
-- `makeHttp` / `makeHttpStream`: wire layer para middlewares, tests y casos avanzados.
+- `makeHttp` / `makeHttpStream`: wire layer para middlewares, transportes custom, tests y casos avanzados.
 - `httpClientWithMeta`: helper de compatibilidad cuando querés respuesta + metadata.
 
 ---
@@ -31,7 +32,7 @@ Este módulo se exporta desde `src/http/index.ts`:
 import { makeDefaultHttpClient, httpClient, makeHttpClient, makeLifecycleClient, makeHttp } from "../http";
 ```
 
-> En Node necesitás una versión con `fetch` global (Node 18+), o un polyfill.
+> En Node necesitás una versión con `fetch` global (Node 18+), o un polyfill, solo si usás el transporte default. Con `transport` propio no hace falta `fetch` global.
 
 ---
 
@@ -51,10 +52,132 @@ import { makeDefaultHttpClient, httpClient, makeHttpClient, makeLifecycleClient,
     - `bodyText: string`
     - `ms: number`
 
+- **`HttpTransport`**
+    - recibe `{ request, url, signal }`
+    - devuelve `Async<unknown, HttpError, HttpWireResponse>`
+    - conserva timeout, pool, adaptive limiter, stats, retry/cache/dedup y cancelación del wire client
+
 - **`HttpError`**
     - `{ _tag: "Abort" }`
     - `{ _tag: "BadUrl"; message: string }`
-    - `{ _tag: "FetchError"; message: string }`
+- `{ _tag: "FetchError"; message: string }`
+
+### Transporte custom
+
+`makeHttp`, `httpClient`, `makeLifecycleClient` y `makeDefaultHttpClient`
+aceptan `transport`. El transporte es un effect más: no ejecuta nada hasta que
+el request se corre, y recibe un `AbortSignal` ya conectado al timeout,
+cancelación del fiber y `init.signal` del request.
+
+```ts
+import {
+  makeDefaultHttpClient,
+  makePromiseHttpTransport,
+  promiseHttpTransport,
+  normalizeHttpHeaders,
+} from "brass-runtime/http";
+
+const transport = makePromiseHttpTransport({
+  request: ({ request, url, signal }) =>
+    myHttpLibrary.request({
+      url: url.toString(),
+      method: request.method,
+      headers: request.headers,
+      body: request.body,
+      signal,
+    }),
+  response: (res) => ({
+    status: res.status,
+    statusText: res.statusText ?? "",
+    headers: normalizeHttpHeaders(res.headers),
+    bodyText: typeof res.data === "string" ? res.data : JSON.stringify(res.data),
+  }),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  transport,
+});
+```
+
+Para clientes Promise externos como Axios, el mapper default ya normaliza
+aborts, timeouts y errores con `response.status`:
+
+```ts
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({
+    url: url.toString(),
+    method: request.method,
+    headers: request.headers,
+    data: request.body,
+    responseType: "json",
+  }))
+  .send((config) => axiosInstance.request(config))
+  .json();
+```
+
+Brass inyecta `signal` automáticamente en configs objeto antes de `send`, así
+el runtime conserva cancelación real sin obligar al consumidor a escribirlo.
+Los transportes Promise usan `toHttpError` por default, así que aborts,
+timeouts y errores con `response.status` estilo Axios ya salen tipados.
+
+El builder fluent infiere por default respuestas estilo Axios/Fetch
+(`status`, `statusText`, `headers`, `data`/`json()`), pero podés mapear otro
+shape sin salirte de la misma lectura:
+
+```ts
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({ method: request.method, url }))
+  .send((config) => internalClient.send(config))
+  .json((res) => res.payload, (res) => ({
+    status: res.code,
+    statusText: res.message,
+    headers: res.headerMap,
+    transportMeta: { upstream: res.node },
+  }));
+```
+
+Los knobs por request viven en `policy`, así no dependen del transporte elegido:
+
+```ts
+await http.getJson("/users", {
+  policy: {
+    priority: 1,
+    dedupKey: "users:list",
+    poolKey: "users-api",
+    retry: false,
+  },
+}).unsafeRunPromise();
+```
+
+Cuando esos knobs se repiten, nombralos como presets en el default client:
+
+```ts
+import { defineHttpPolicyPresets, httpPolicy, makeDefaultHttpClient } from "brass-runtime/http";
+
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    priority: 2,
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+  writes: httpPolicy.lane("write-path", {
+    poolKey: "users-api",
+    priority: 1,
+    retry: false,
+  }),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
 
 ### DX layer (`httpClient`)
 
@@ -115,10 +238,11 @@ const wire = await http
 console.log(wire.status, wire.bodyText);
 ```
 
-El preset por defecto (`default`) prende timeout, dedup, priority, retry,
-adaptive limiter `aggressive`, cache para métodos seguros y response
-compression. Si querés evitar cache por default, usá `preset: "balanced"`; si
-querés solo wire + DX, usá `preset: "minimal"`.
+El preset explícito de producción (`production`) prende timeout, dedup,
+priority, retry, adaptive limiter `aggressive`, cache para métodos seguros y
+response compression. `default` es el mismo preset por compatibilidad. Si
+querés evitar cache por default, usá `preset: "balanced"`; si querés solo
+wire y DX, usá `preset: "minimal"`.
 
 El adaptive limiter mantiene estado por key con TTL (`stateTtlMs`), probe con
 jitter (`probeJitterRatio`), warmup explícito (`warmupRequests`), slow-start
@@ -176,24 +300,35 @@ await http.postJson(
 ).unsafeRunPromise();
 ```
 
-Si `bodySchema` falla, el effect falla con `phase: "request"` y no llama a
-`fetch`. El tipo del body también se infiere desde `bodySchema`.
+Si `bodySchema` falla, el effect falla con `phase: "request"` y no llama al
+transporte. El tipo del body también se infiere desde `bodySchema`.
 
 Los errores comunes se pueden manejar con helpers:
 
 ```ts
-import { formatHttpError, isValidationError, matchHttpError } from "brass-runtime/http";
+import {
+  formatHttpError,
+  isRetryableHttpError,
+  isTimeoutHttpError,
+  isValidationError,
+  matchHttpError,
+  toHttpError,
+} from "brass-runtime/http";
 
 try {
   await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
 } catch (error) {
   if (isValidationError(error)) console.error(error.issues);
+  if (isTimeoutHttpError(error)) console.error("timeout/backpressure timeout");
+  if (isRetryableHttpError(error)) console.error("safe to retry later");
   console.error(formatHttpError(error));
   matchHttpError(error, {
     Timeout: (err) => console.error(err.timeoutMs),
     PoolClosed: (err) => console.error(err.key),
   });
 }
+
+const mapped = toHttpError(axiosError); // entiende AbortError, timeout codes y response.status estilo Axios
 ```
 
 También podés usarla fuera de HTTP:
@@ -211,7 +346,7 @@ Si el JSON no parsea o no matchea el schema, el effect falla con:
 { _tag: "ValidationError", message, body, issues }
 ```
 
-Esto evita tener un wrapper de `fetch` más un validador externo pegado a mano:
+Esto evita tener un wrapper de transporte más un validador externo pegado a mano:
 schemas de response, schemas de request body, config validation, retry,
 compression, cancelación y observability corren en el mismo pipeline lazy.
 
@@ -314,7 +449,7 @@ import { httpClientBuilder } from "brass-runtime/http";
 
 const http = httpClientBuilder()
   .baseUrl("https://api.example.com")
-  .balanced()
+  .production()
   .balancedLimiter({ maxLimit: 128 })
   .header("authorization", `Bearer ${token}`)
   .cache({ ttlSeconds: 30, maxEntries: 256 })
@@ -350,6 +485,9 @@ const http = makeDefaultHttpClient({
 Si el cliente tiene adaptive limiter, `withHttpObservability` emite gauges de
 limit, in-flight, queue depth, utilization, error rate, throughput y rejection
 rate, y agrega el mismo snapshot a los eventos del span HTTP.
+Tambien lee `req.policy`: logs y spans reciben lane/pool/dedup/priority/retry,
+y las metric labels de policy se activan solo con
+`policy: { labelKeys: ["lane", "poolKey"] }`.
 
 ---
 
@@ -439,7 +577,7 @@ console.log(wire.status);
 
 - `baseUrl` + `url` se resuelven con `new URL(req.url, baseUrl)`.
 - `headers` “por request” viven en `req.headers`.
-- `init` está pensado para opciones de `fetch` (credentials, cache, redirect, etc.). El `signal` lo maneja el runtime.
+- `init` está pensado para opciones compatibles con el transporte default (`credentials`, `cache`, `redirect`, etc.). El `signal` lo conecta el runtime.
 
 ---
 
@@ -474,6 +612,11 @@ Errores nuevos:
 - `{ _tag: "Timeout" }`
 - `{ _tag: "PoolRejected" }`
 - `{ _tag: "PoolTimeout" }`
+
+El retry default reintenta `Timeout`, `PoolTimeout` y `FetchError` sin status o
+con status retriable (`408`, `429`, `500`, `502`, `503`, `504`). No reintenta
+`Abort`, `BadUrl`, `PoolRejected` ni `FetchError` con status no retriable como
+`404`.
 
 `http.stats()` y `http.wire.stats()` exponen presión actual de transporte: `inFlight`, `timedOut`, `poolRejected`, `poolTimeouts` y métricas por key del pool.
 

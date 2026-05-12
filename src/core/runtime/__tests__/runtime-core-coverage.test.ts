@@ -24,6 +24,7 @@ import {
 import { Scheduler } from "../scheduler";
 import { defaultTracer } from "../tracer";
 import { InMemoryTracer } from "../tracingSink";
+import { makeRuntime, runEffect, runExit, runPromise } from "../dx";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -102,6 +103,22 @@ describe("runtime helpers and observability coverage", () => {
     expect(failures).toEqual([]);
   });
 
+  it("covers compact runtime DX helpers", async () => {
+    const runtime = makeRuntime({ prefix: "dx" }, { inferLane: false });
+
+    await expect(runPromise(asyncSync((env: { prefix: string }) => `${env.prefix}:promise`), runtime))
+      .resolves.toBe("dx:promise");
+    await expect(runPromise(asyncSync((env: { prefix: string }) => `${env.prefix}:env`), { prefix: "plain" }))
+      .resolves.toBe("plain:env");
+    await expect(runEffect(asyncSucceed("alias"), runtime)).resolves.toBe("alias");
+
+    await expect(runExit(asyncFail("typed"), runtime)).resolves.toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: "typed" },
+    });
+    await expect(runExit(asyncSucceed("exit"), { prefix: "plain" })).resolves.toEqual(Exit.succeed("exit"));
+  });
+
   it("uses the pure top-level fast path only when hooks are inactive", async () => {
     const noopRuntime = Runtime.makeWithEngine({}, "ts", { inferLane: false });
     const before = noopRuntime.stats().data.startedFibers;
@@ -130,6 +147,81 @@ describe("runtime helpers and observability coverage", () => {
     await expect(activeRuntime.toPromise(asyncSucceed("observed"))).resolves.toBe("observed");
     await expect(activeRuntime.toPromise(asyncSync(() => "observed-sync"))).resolves.toBe("observed-sync");
     expect(activeRuntime.stats().data.startedFibers).toBe(activeBefore + 2);
+  });
+
+  it("covers native fast-path opcodes, finalizers, async resume, and fallback exits", async () => {
+    const native = Runtime.makeWithEngine({}, "ts", { inferLane: false });
+
+    await new Promise<void>((resolve) => {
+      native.unsafeRunAsync(asyncSucceed("unsafe"), (exit) => {
+        expect(exit).toEqual(Exit.succeed("unsafe"));
+        resolve();
+      });
+    });
+
+    await expect(native.toPromise(async((_env, cb) => {
+      queueMicrotask(() => cb(Exit.succeed("async")));
+    }))).resolves.toBe("async");
+
+    await expect(native.toPromise(async(() => {
+      throw new Error("register boom");
+    }))).rejects.toThrow("register boom");
+
+    const child = await native.toPromise({ _tag: "Fork", effect: asyncSucceed("child") } as any);
+    await expect(joinFiber(child)).resolves.toEqual(Exit.succeed("child"));
+
+    await expect(native.toPromise({
+      _tag: "Interruptibility",
+      effect: asyncSucceed("interruptible"),
+    } as any)).resolves.toBe("interruptible");
+
+    await expect(native.toPromise({
+      _tag: "InterruptibilityMask",
+      body: (restore: (effect: any) => any) => restore(asyncSucceed("restored")),
+    } as any)).resolves.toBe("restored");
+
+    await expect(native.toPromise({
+      _tag: "InterruptibilityMask",
+      body: () => {
+        throw new Error("mask boom");
+      },
+    } as any)).rejects.toThrow("mask boom");
+
+    const ref = makeFiberRef(0);
+    await expect(native.toPromise(
+      ref.locally(1, ref.locally(2, ref.get())),
+    )).resolves.toBe(2);
+
+    const finalizerEvents: string[] = [];
+    await expect(native.toPromise(asyncSync(() => {
+      getCurrentFiber()?.addFinalizer(() => asyncSync(() => {
+        finalizerEvents.push("effect");
+      }));
+      getCurrentFiber()?.addFinalizer(() => {
+        finalizerEvents.push("plain");
+      });
+      getCurrentFiber()?.addFinalizer(() => {
+        throw new Error("ignored native finalizer");
+      });
+      return "finalized";
+    }))).resolves.toBe("finalized");
+    await wait();
+    expect(finalizerEvents).toEqual(["plain", "effect"]);
+
+    await expect(native.toPromise(asyncFold(
+      async((_env, cb) => cb(Exit.failCause(Cause.die("native defect")))),
+      () => asyncSucceed("not handled"),
+      () => asyncSucceed("ok"),
+    ))).rejects.toThrow("native defect");
+
+    await expect(native.toPromise(async((_env, cb) => cb(Exit.failCause(Cause.interrupt())))))
+      .rejects.toThrow("Interrupted");
+
+    const longChain = Array.from({ length: 33_000 }).reduce(
+      (effect) => asyncFlatMap(effect, (n: number) => asyncSucceed(n + 1)),
+      asyncSucceed(0) as any,
+    );
+    await expect(native.toPromise(longChain)).resolves.toBe(33_000);
   });
 
   it("fromPromiseAbortable maps success, rejection and interruption", async () => {

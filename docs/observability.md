@@ -215,6 +215,9 @@ The exporters are dependency-free:
 - `withHttpObservability` adds client request spans, `traceparent` propagation,
   request metrics, structured HTTP logs, and adaptive limiter gauges/span
   attributes when the wrapped client owns a limiter.
+- HTTP request `policy` is included in logs and span attributes automatically.
+  Metric labels for policy fields are opt-in with `policy.labelKeys` so lanes
+  or dedup keys do not accidentally create high-cardinality series.
 - `parseTraceparent`, `extractTraceContext`, `formatTraceparent`, and
   `injectTraceContext` provide backend-neutral W3C trace-context helpers.
 - `baggage` is extracted, merged into the runtime trace seed, and propagated
@@ -232,6 +235,52 @@ The exporters are dependency-free:
   limiter health.
 - `makeObservability` returns `hooks`, `env`, `metrics`, `tracer`, exporters,
   plus `flush()`, `start()`, `stop()`, and `shutdown()`.
+
+### HTTP policy observability
+
+```ts
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+  middleware: [
+    withHttpObservability({
+      metrics: obs.metrics,
+      route: "/users/:id",
+      policy: { labelKeys: ["preset", "lane", "poolKey"] },
+    }),
+  ],
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
+
+The request log and HTTP span carry the policy context. Prometheus metrics only
+receive `policy`, `lane`, and `pool_key` because those labels were explicitly
+allowed.
+Fetch/transport errors with status metadata also flow into HTTP error metrics
+and span events, and include a `http.retryable` signal for retry dashboards.
+
+The stable dashboard contract is exported as `HTTP_OBSERVABILITY_CONTRACT`:
+
+| Signal | Contract |
+|--------|----------|
+| Requests | `brass_http_client_requests_total` with `method`, `host`, `route`, `outcome`, `status` |
+| Duration | `brass_http_client_duration_ms` histogram with the same labels |
+| In-flight | `brass_http_client_in_flight` with request labels only |
+| Policy labels | opt-in `policy`, `lane`, `pool_key`, `dedup_key`, `priority`, `retry` |
+| Adaptive limiter | `brass_http_adaptive_limiter_*` gauges, optional `key` label |
+| Span events | `http.client.response` / `http.client.error` |
+| Error attrs | `http.status_code`, `error.type`, `http.retryable` |
 
 ### Production hardening
 

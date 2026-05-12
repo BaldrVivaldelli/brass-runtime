@@ -37,10 +37,10 @@ The current full-report baseline is:
 
 | Metric | Coverage |
 | --- | ---: |
-| Statements | 95.16% |
-| Branches | 86.32% |
-| Functions | 97.51% |
-| Lines | 97.24% |
+| Statements | 95.06% |
+| Branches | 86.98% |
+| Functions | 97.31% |
+| Lines | 97.10% |
 
 Do not raise or exclude coverage to make the number look better. Prefer focused
 tests for uncovered behavior, then raise the baseline.
