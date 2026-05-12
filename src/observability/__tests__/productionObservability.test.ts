@@ -11,6 +11,7 @@ import {
   makeNoopObservability,
   makeObservability,
   makeObservabilityFromEnv,
+  makeOtlpOptions,
   runObservedHttpServerEffect,
   spansToOtlp,
   withSpan,
@@ -20,6 +21,49 @@ import {
 const flushEvents = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("production observability hardening", () => {
+  it("builds backend-neutral OTLP options from a collector endpoint", () => {
+    const fetch = async () => ({ ok: true, status: 202 });
+    const otlp = makeOtlpOptions({
+      endpoint: " http://collector:4318/ ",
+      headers: { Authorization: "Bearer token" },
+      fetch,
+      timeoutMs: 5_000,
+      retry: { attempts: 2, initialDelayMs: 50 },
+      pipeline: { batchSize: 128, maxQueueSize: 1_024 },
+    });
+
+    expect(otlp).toMatchObject({
+      metricsUrl: "http://collector:4318/v1/metrics",
+      tracesUrl: "http://collector:4318/v1/traces",
+      logsUrl: "http://collector:4318/v1/logs",
+      headers: { Authorization: "Bearer token" },
+      timeoutMs: 5_000,
+      retry: { attempts: 2, initialDelayMs: 50 },
+      pipeline: { batchSize: 128, maxQueueSize: 1_024 },
+    });
+    expect(otlp.fetch).toBe(fetch);
+  });
+
+  it("can target only selected OTLP signals", () => {
+    const otlp = makeOtlpOptions({
+      endpoint: "http://collector:4318",
+      signals: ["metrics", "logs"],
+    });
+
+    expect(otlp.metricsUrl).toBe("http://collector:4318/v1/metrics");
+    expect(otlp.logsUrl).toBe("http://collector:4318/v1/logs");
+    expect(otlp.tracesUrl).toBeUndefined();
+  });
+
+  it("rejects empty OTLP collector endpoints", () => {
+    expect(() => makeOtlpOptions({ endpoint: "  " })).toThrow(
+      "makeOtlpOptions endpoint must not be empty"
+    );
+    expect(() => makeOtlpOptions({ endpoint: "////" })).toThrow(
+      "makeOtlpOptions endpoint must not be empty"
+    );
+  });
+
   it("exports through a bounded retrying pipeline with drop metrics", async () => {
     const metrics = makeMetrics();
     let attempts = 0;

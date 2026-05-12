@@ -7,6 +7,10 @@ flush OTLP metrics/traces.
 They use optional framework dependencies so the runtime package does not force
 Express, Fastify, or Nest into normal installs.
 
+For production-style integration recipes across React, Next.js, Angular,
+Express, Fastify, and Nest, see
+[`docs/framework-integrations.md`](./framework-integrations.md).
+
 ## Express
 
 ```bash
@@ -61,9 +65,17 @@ curl http://localhost:3002/metrics
 
 Source: `src/examples/observabilityNest.ts`.
 
+For a production-style Nest module with DI tokens, Grafana/OTLP configuration,
+an observed Brass HTTP client, and shutdown wiring, see
+[`docs/frameworks/nestjs.md`](./frameworks/nestjs.md).
+
 ## What the examples demonstrate
 
 - `makeObservabilityFromEnv(process.env)` for deployment-style setup.
+- `makeOtlpOptions(...)` for collector endpoint configuration without adding
+  vendor-specific code to Brass.
+- `withHttpObservability(...)` around the Brass HTTP client for outbound
+  metrics, spans, logs, policy context, and trace propagation.
 - Framework-specific request adapters:
   - `makeExpressRequestObservabilityContext`
   - `makeFastifyRequestObservabilityContext`
