@@ -309,7 +309,7 @@ if (cancel) cancel();
 
 When deduplication is enabled, concurrent identical requests share a single in-flight network call. Cancellation is ref-counted: each caller that cancels decrements the reference count. The underlying network request is only aborted when all callers in the dedup group have cancelled (ref count reaches zero).
 
-This means cancelling one caller in a dedup group does not affect other callers waiting for the same response. Only when the last interested caller cancels is the underlying fetch aborted via `AbortController`.
+This means cancelling one caller in a dedup group does not affect other callers waiting for the same response. Only when the last interested caller cancels is the underlying transport aborted via `AbortController`.
 
 ### cancelAll()
 
@@ -343,7 +343,9 @@ Extends `MakeHttpConfig` with optional lifecycle layer configurations. Each laye
 |-------|------|---------|-------------|
 | `baseUrl` | `string` | `undefined` | Base URL prepended to relative request paths. Inherited from `MakeHttpConfig`. |
 | `headers` | `Record<string, string>` | `undefined` | Default headers merged into every request. Inherited from `MakeHttpConfig`. |
-| `timeoutMs` | `number` | `undefined` (disabled) | Request budget in milliseconds covering pool wait + fetch + body read. |
+| `timeoutMs` | `number` | `undefined` (disabled) | Request budget in milliseconds covering pool wait + transport + body read. |
+| `transport` | `HttpTransport` | fetch transport | Effect-based wire transport for non-streaming requests. |
+| `streamTransport` | `HttpStreamTransport` | fetch stream transport | Effect-based wire transport for streaming requests. |
 | `pool` | `false \| HttpPoolConfig` | `false` (disabled) | Downstream pool/concurrency limiter. Inherited from `MakeHttpConfig`. |
 | `dedup` | `DedupConfig \| false` | `undefined` (disabled) | Dedup layer configuration. Set to an object to enable, `false` to explicitly disable. |
 | `cache` | `CacheConfig \| false` | `undefined` (disabled) | Cache layer configuration. Set to an object to enable, `false` to explicitly disable. |

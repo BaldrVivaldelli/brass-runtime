@@ -15,6 +15,7 @@ import type { CompressionConfig } from "./compression";
 import type { HttpMiddleware } from "./client";
 import type { HttpPoolConfig } from "./pool";
 import type { RetryPolicy } from "./retry/retry";
+import type { HttpTransport } from "./transport";
 import {
   makeDefaultHttpClient,
   type DefaultHttpClient,
@@ -29,10 +30,12 @@ export type HttpClientBuilder = {
   readonly headers: (headers: Record<string, string>) => HttpClientBuilder;
   readonly timeoutMs: (timeoutMs: number) => HttpClientBuilder;
   readonly timeout: (timeoutMs: number) => HttpClientBuilder;
+  readonly transport: (transport: HttpTransport) => HttpClientBuilder;
   readonly preset: (preset: DefaultHttpClientPreset) => HttpClientBuilder;
   readonly minimal: () => HttpClientBuilder;
   readonly balanced: () => HttpClientBuilder;
   readonly defaultPreset: () => HttpClientBuilder;
+  readonly production: () => HttpClientBuilder;
   readonly dedup: (config?: DedupConfig | false) => HttpClientBuilder;
   readonly noDedup: () => HttpClientBuilder;
   readonly batch: (config: BatchConfig | false) => HttpClientBuilder;
@@ -144,10 +147,12 @@ function makeBuilder(config: MutableBuilderConfig): HttpClientBuilder {
       }),
     timeoutMs: (timeoutMs) => replace({ timeoutMs }),
     timeout: (timeoutMs) => replace({ timeoutMs }),
+    transport: (transport) => replace({ transport }),
     preset: (preset) => replace({ preset }),
     minimal: () => replace({ preset: "minimal" }),
     balanced: () => replace({ preset: "balanced" }),
     defaultPreset: () => replace({ preset: "default" }),
+    production: () => replace({ preset: "production" }),
     dedup: (layer = {}) => setLayer("dedup", layer),
     noDedup: () => setLayer("dedup", false),
     batch: (layer) => setLayer("batch", layer),

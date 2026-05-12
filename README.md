@@ -158,14 +158,80 @@ console.log(http.compression?.stats());
 `makeDefaultHttpClient` is the batteries-included entrypoint: timeout,
 deduplication, priority scheduling, retry, adaptive concurrency, safe-method
 response cache, decompression, stats, `cancelAll`, and JSON/text helpers. Use
+`preset: "production"` when you want that production-ready shape explicitly,
 `preset: "balanced"` to skip the default cache, or `preset: "minimal"` for a
-cheap wire client with the same helper API.
+cheap wire client with the same helper API. `preset: "default"` remains the
+same full preset for compatibility.
 
 The HTTP stack is meant to replace the usual `fetch` wrapper plus Zod/Valibot
 glue: schemas are dependency-free, responses and request bodies are validated in
 the same effect, config validation fails at construction time, and the client
 still owns cancellation, retries, compression, observability, and adaptive
 limits as one pipeline.
+
+Custom Promise clients such as Axios can be injected without making the
+consumer manage `AbortSignal` or `Async` plumbing:
+
+```ts
+import {
+  defineHttpPolicyPresets,
+  formatHttpError,
+  isRetryableHttpError,
+  makeDefaultHttpClient,
+  promiseHttpTransport,
+} from "brass-runtime/http";
+
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({
+    url: url.toString(),
+    method: request.method,
+    headers: request.headers,
+    data: request.body,
+    responseType: "json",
+  }))
+  .send((config) => axiosInstance.request(config))
+  .json();
+
+const axiosHttp = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  transport,
+});
+
+try {
+  await axiosHttp.getJson("/users/1").unsafeRunPromise();
+} catch (error) {
+  if (isRetryableHttpError(error)) {
+    console.warn("transient upstream failure");
+  }
+  console.error(formatHttpError(error));
+}
+```
+
+Brass injects the runtime `AbortSignal` into object configs before `send` and
+normalizes external failures with `toHttpError`, including Axios-like
+`response.status`, aborts, and common timeout codes.
+
+Repeated execution intent can be named once with policy presets:
+
+```ts
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    priority: 2,
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
 
 The default adaptive limiter uses the `aggressive` preset: warmup sample floor,
 P5 baseline, error-rate signal, priority-aware queueing, jittered probes,
@@ -253,7 +319,7 @@ declare const token: string;
 
 const http = httpClientBuilder()
   .baseUrl("https://api.example.com")
-  .balanced()
+  .production()
   .balancedLimiter({ maxLimit: 128 })
   .header("authorization", `Bearer ${token}`)
   .cache({ ttlSeconds: 30, maxEntries: 512 })
@@ -392,6 +458,10 @@ HTTP client observability automatically reads adaptive limiter diagnostics when
 the wrapped client owns a limiter, exposing gauges for current limit, queue
 depth, utilization, error rate, request/completion rate, rejection rate, and
 state count.
+It also reads `req.policy` automatically: logs and span attributes include
+`preset`, `lane`, `poolKey`, `dedupKey`, `priority`, and retry overrides when present.
+Metric labels stay conservative by default; opt into stable labels with
+`withHttpObservability({ policy: { labelKeys: ["preset", "lane", "poolKey"] } })`.
 
 ### Performance profiler
 
@@ -522,6 +592,8 @@ All layers emit lifecycle events, track stats, and support cancellation.
 The recommended `makeDefaultHttpClient` factory wires the default preset
 for you and accepts extra middleware, so observability can be attached with
 `middleware: [withHttpObservability(obs)]` without coupling HTTP to exporters.
+Per-request `policy` travels through that stack and is visible to observability
+without being forwarded to the host transport.
 
 ---
 

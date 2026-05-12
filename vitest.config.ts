@@ -41,6 +41,7 @@ export default defineConfig({
         "src/core/runtime/engine/types.ts",
         "src/http/lifecycle/types.ts",
         "src/http/prewarm/types.ts",
+        "src/core/runtime/dx-type-tests.ts",
         "src/http/schema-type-tests.ts",
         "src/**/bench/**",
         "src/benchmarks/**",

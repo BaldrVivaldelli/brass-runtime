@@ -5,8 +5,9 @@ Start here:
 - **[Getting started](./getting-started.md)** — installation, first effects, and running examples
 - **[Architecture](./ARCHITECTURE.md)** — how the runtime is structured
 - **[Cancellation & interruption](./cancellation.md)** — interruption semantics, scopes, and cancellable `Async`
-- **[Observability](./observability.md)** — hooks, events, sinks, and tracing
+- **[Observability](./observability.md)** — hooks, events, sinks, tracing, and HTTP policy context
 - **[HTTP client](./http.md)** — ZIO-style HTTP built on brass-runtime
+- **[HTTP recipes](./http-recipes.md)** — typed clients, custom transports, production adoption, observability, and config validation
 - **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths
 - **[API polish notes](./api-polish.md)** — first-release DX audit and compatibility posture
 - **[First release checklist](./release.md)** — local release gate and perf evidence workflow

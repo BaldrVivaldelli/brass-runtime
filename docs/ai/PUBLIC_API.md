@@ -90,8 +90,8 @@ Source: `src/http/index.ts`
 Recommended API order:
 
 - `makeDefaultHttpClient` for the one-stop default client with JSON/text
-  helpers, lifecycle defaults, compression, stats, cache controls, `cancelAll`,
-  and middleware integration.
+  helpers, lifecycle presets (`production`, `default`, `balanced`, `minimal`),
+  compression, stats, cache controls, `cancelAll`, and middleware integration.
 - `makeHttpRouter`, `route` / `httpRoute`, and `makeNodeHttpServerResource`
   for the first-party HTTP server MVP: Node adapter, simple router,
   effect-based middleware, schema validation, observability, runtime
@@ -111,11 +111,35 @@ Recommended API order:
   queues, retry, lifecycle events, stats, and bulk cancellation.
 - `makeHttp` / `makeHttpStream` for low-level wire behavior and middleware
   authors.
+- `HttpTransport`, `HttpStreamTransport`, `makeFetchTransport`, and
+  `makeFetchStreamTransport` for replacing the default fetch-backed transport
+  with an effect-based backend such as Axios, undici, or test doubles.
+- `makePromiseHttpTransport`, `promiseHttpTransport`, and
+  `normalizeHttpHeaders` for adapting Promise-based clients without writing
+  `Async.async` / `Cause.fail` plumbing in consuming projects; the fluent
+  builder supports `requestConfig(...).send(...).json()` for
+  Axios/Fetch-shaped responses with automatic `AbortSignal` injection.
+- `toHttpError`, `isAbortHttpError`, `isTimeoutHttpError`,
+  `isFetchHttpError`, `httpErrorStatus`, `isRetryableHttpStatus`, and
+  `isRetryableHttpError` for normalizing external client failures
+  (including Axios-like `response.status`, aborts, and timeout codes) and
+  deciding retryability.
+- `HttpRequestPolicy`, `HttpRequestPolicyRef`, `HttpPolicyPresets`,
+  `ResolveHttpRequestPolicyOptions`, `defineHttpPolicyPresets`, `httpPolicy`,
+  `getHttpRequestPolicy`, `withHttpRequestPolicy`, and `withHttpPolicyPresets`
+  for structured
+  per-request execution knobs (`preset`, `priority`, `dedupKey`, `retry`,
+  `poolKey`, `lane`) while preserving legacy top-level request fields.
+- `DefaultHttpClientConfig.policyPresets` for resolving `policy: "name"` and
+  `policy: { preset: "name", ...overrides }` before lifecycle middleware.
 - `httpClientWithMeta` for metadata-oriented compatibility helpers.
 
 Primary categories:
 
 - low-level HTTP client and request/response types
+- effect-based transport boundary with fetch as the default implementation
+- structured per-request policy shared by transport, retry, deduplication,
+  priority scheduling, pool/circuit-breaker keying, and DX request helpers
 - ergonomic HTTP client helpers
 - HTTP server router, Node adapter, response helpers, and server resources
 - HTTP runtime probe helpers: `makeRuntimeHealthRoute` and
@@ -198,7 +222,10 @@ Primary categories:
 - `withSpan` and `spanEvent` for trace spans across effect composition
 - `makeObservability` production preset with `flush()` and `shutdown()`
 - `withHttpObservability` middleware for HTTP client metrics, logs, spans, and
-  W3C `traceparent` injection
+  W3C `traceparent` injection, including request-policy context in logs/spans
+  and opt-in policy metric labels
+- `HTTP_OBSERVABILITY_CONTRACT` for stable dashboard metric names, label names,
+  span attribute names, and structured log message names
 - adaptive limiter gauges and HTTP span attributes when the wrapped client
   exposes an owned limiter
 - W3C trace-context helpers (`parseTraceparent`, `extractTraceContext`,

@@ -5,6 +5,17 @@ import type { ValidationError } from "./validation";
 export type KnownHttpError = HttpError | ValidationError | CircuitBreakerError;
 export type KnownHttpErrorTag = KnownHttpError["_tag"];
 
+export type ToHttpErrorOptions = {
+  readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
+  readonly phase?: "request" | "queue" | "retry";
+  readonly message?: string | ((error: unknown) => string);
+};
+
+export type RetryableHttpErrorOptions = {
+  readonly retryOnStatus?: (status: number) => boolean;
+};
+
 export type HttpErrorHandlers<R> = {
   readonly [K in KnownHttpErrorTag]?: (error: Extract<KnownHttpError, { readonly _tag: K }>) => R;
 } & {
@@ -22,6 +33,17 @@ const HTTP_ERROR_TAGS: ReadonlySet<HttpError["_tag"]> = new Set([
   "BatchSplitError",
 ]);
 
+const RETRYABLE_STATUS = new Set([408, 429, 500, 502, 503, 504]);
+const TIMEOUT_CODES = new Set([
+  "ECONNABORTED",
+  "ETIMEDOUT",
+  "ESOCKETTIMEDOUT",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_BODY_TIMEOUT",
+]);
+const ABORT_CODES = new Set(["ERR_CANCELED", "ABORT_ERR"]);
+
 export function isHttpError(error: unknown): error is HttpError {
   return hasTag(error) && HTTP_ERROR_TAGS.has(error._tag as HttpError["_tag"]);
 }
@@ -36,6 +58,95 @@ export function isCircuitBreakerOpen(error: unknown): error is CircuitBreakerErr
 
 export function isKnownHttpError(error: unknown): error is KnownHttpError {
   return isHttpError(error) || isValidationError(error) || isCircuitBreakerOpen(error);
+}
+
+export function isAbortHttpError(error: unknown): error is Extract<HttpError, { readonly _tag: "Abort" }> {
+  return isHttpError(error) && error._tag === "Abort";
+}
+
+export function isTimeoutHttpError(
+  error: unknown,
+): error is Extract<HttpError, { readonly _tag: "Timeout" | "PoolTimeout" }> {
+  return isHttpError(error) && (error._tag === "Timeout" || error._tag === "PoolTimeout");
+}
+
+export function isFetchHttpError(error: unknown): error is Extract<HttpError, { readonly _tag: "FetchError" }> {
+  return isHttpError(error) && error._tag === "FetchError";
+}
+
+export function httpErrorStatus(error: unknown): number | undefined {
+  if (!isFetchHttpError(error)) return undefined;
+  return typeof error.status === "number" && Number.isFinite(error.status)
+    ? error.status
+    : undefined;
+}
+
+export function isRetryableHttpStatus(status: number): boolean {
+  return RETRYABLE_STATUS.has(status);
+}
+
+export function isRetryableHttpError(
+  error: unknown,
+  options: RetryableHttpErrorOptions = {},
+): boolean {
+  if (!isHttpError(error)) return false;
+
+  switch (error._tag) {
+    case "Timeout":
+    case "PoolTimeout":
+      return true;
+    case "FetchError": {
+      const status = httpErrorStatus(error);
+      if (status !== undefined) return (options.retryOnStatus ?? isRetryableHttpStatus)(status);
+      return true;
+    }
+    default:
+      return false;
+  }
+}
+
+export function isExternalAbortError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as Record<string, unknown>;
+  return record.name === "AbortError" || ABORT_CODES.has(String(record.code ?? ""));
+}
+
+export function isExternalTimeoutError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const record = error as Record<string, unknown>;
+  return record.name === "TimeoutError" || TIMEOUT_CODES.has(String(record.code ?? ""));
+}
+
+export function toHttpError(error: unknown, options: ToHttpErrorOptions = {}): HttpError {
+  if (isHttpError(error)) return error;
+
+  if (options.signal?.aborted || isExternalAbortError(error)) {
+    return { _tag: "Abort" };
+  }
+
+  const status = externalStatus(error);
+  const statusText = externalStatusText(error);
+  const code = externalCode(error);
+  const message = resolveMessage(error, options.message);
+
+  if (isExternalTimeoutError(error)) {
+    return {
+      _tag: "Timeout",
+      timeoutMs: options.timeoutMs ?? 0,
+      phase: options.phase ?? "request",
+      message,
+    };
+  }
+
+  return {
+    _tag: "FetchError",
+    message,
+    ...(code !== undefined ? { code } : {}),
+    ...(status !== undefined ? { status } : {}),
+    ...(statusText !== undefined ? { statusText } : {}),
+    ...(retryAfterMsFromExternal(error) !== undefined ? { retryAfterMs: retryAfterMsFromExternal(error) } : {}),
+    cause: error,
+  };
 }
 
 export function matchHttpError<R>(
@@ -67,12 +178,13 @@ export function formatHttpError(error: unknown): string {
     case "Abort":
       return "HTTP request aborted";
     case "BadUrl":
-    case "FetchError":
     case "PoolRejected":
     case "PoolTimeout":
     case "PoolClosed":
     case "BatchSplitError":
       return error.message;
+    case "FetchError":
+      return formatFetchError(error);
     case "Timeout":
       return error.message;
   }
@@ -80,4 +192,65 @@ export function formatHttpError(error: unknown): string {
 
 function hasTag(error: unknown): error is { readonly _tag: string } {
   return typeof error === "object" && error !== null && typeof (error as any)._tag === "string";
+}
+
+function externalCode(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const code = (error as Record<string, unknown>).code;
+  return typeof code === "string" && code.length > 0 ? code : undefined;
+}
+
+function externalStatus(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as Record<string, unknown>;
+  const response = typeof record.response === "object" && record.response !== null
+    ? record.response as Record<string, unknown>
+    : undefined;
+  const status = response?.status ?? record.status ?? record.statusCode;
+  return typeof status === "number" && Number.isFinite(status) ? status : undefined;
+}
+
+function externalStatusText(error: unknown): string | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as Record<string, unknown>;
+  const response = typeof record.response === "object" && record.response !== null
+    ? record.response as Record<string, unknown>
+    : undefined;
+  const statusText = response?.statusText ?? record.statusText ?? record.statusMessage;
+  return typeof statusText === "string" && statusText.length > 0 ? statusText : undefined;
+}
+
+function retryAfterMsFromExternal(error: unknown): number | undefined {
+  if (typeof error !== "object" || error === null) return undefined;
+  const record = error as Record<string, unknown>;
+  const response = typeof record.response === "object" && record.response !== null
+    ? record.response as Record<string, unknown>
+    : undefined;
+  const headers = response?.headers ?? record.headers;
+  if (typeof headers !== "object" || headers === null) return undefined;
+  const headerRecord = headers as Record<string, unknown>;
+  const raw = headerRecord["retry-after"] ?? headerRecord["Retry-After"];
+  if (raw === undefined || raw === null) return undefined;
+  const seconds = Number(raw);
+  if (Number.isFinite(seconds)) return Math.max(0, Math.floor(seconds * 1000));
+  const dateMs = Date.parse(String(raw));
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - Date.now()) : undefined;
+}
+
+function resolveMessage(error: unknown, message: ToHttpErrorOptions["message"]): string {
+  if (typeof message === "function") return message(error);
+  if (typeof message === "string") return message;
+  if (error instanceof Error && error.message) return error.message;
+  if (typeof error === "object" && error !== null) {
+    const value = (error as Record<string, unknown>).message;
+    if (typeof value === "string" && value.length > 0) return value;
+  }
+  return String(error);
+}
+
+function formatFetchError(error: Extract<HttpError, { readonly _tag: "FetchError" }>): string {
+  const status = httpErrorStatus(error);
+  if (status === undefined) return error.message;
+  const statusText = error.statusText ? ` ${error.statusText}` : "";
+  return `HTTP ${status}${statusText}: ${error.message}`;
 }
