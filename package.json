@@ -1,6 +1,6 @@
 {
   "name": "brass-runtime",
-  "version": "1.14.0",
+  "version": "1.16.0",
   "description": "Effect runtime utilities for TypeScript",
   "license": "MIT",
   "author": "Augusto Vivaldelli",
