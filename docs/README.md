@@ -6,6 +6,8 @@ Start here:
 - **[Architecture](./ARCHITECTURE.md)** — how the runtime is structured
 - **[Cancellation & interruption](./cancellation.md)** — interruption semantics, scopes, and cancellable `Async`
 - **[Observability](./observability.md)** — hooks, events, sinks, tracing, and HTTP policy context
+- **[Framework integrations](./framework-integrations.md)** — Vanilla, React, Next.js, Angular, Express, Fastify, and Nest patterns
+- **[NestJS integration](./frameworks/nestjs.md)** — Brass module, Grafana/OTLP observability, HTTP client DI, and inbound spans
 - **[HTTP client](./http.md)** — ZIO-style HTTP built on brass-runtime
 - **[HTTP recipes](./http-recipes.md)** — typed clients, custom transports, production adoption, observability, and config validation
 - **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths

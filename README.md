@@ -420,6 +420,7 @@ const client = baseClient.with(middleware);
 import { Runtime, asyncSucceed } from "brass-runtime/core";
 import {
   makeObservability,
+  makeOtlpOptions,
   runObservedHttpServerEffect,
   withHttpObservability,
 } from "brass-runtime/observability";
@@ -431,11 +432,7 @@ const obs = makeObservability({
   sampling: { ratio: 0.25, respectRemoteSampled: true, forceSampleOnError: true },
   redaction: {},
   cardinality: { maxValuesPerLabel: 100 },
-  otlp: {
-    metricsUrl: "http://collector:4318/v1/metrics",
-    tracesUrl: "http://collector:4318/v1/traces",
-    logsUrl: "http://collector:4318/v1/logs",
-  },
+  otlp: makeOtlpOptions({ endpoint: "http://collector:4318" }),
   flushIntervalMs: 10_000,
 });
 
@@ -666,6 +663,8 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Cancellation & Interruption](./docs/cancellation.md)
 - [Observability: Hooks & Tracing](./docs/observability.md)
 - [Observability framework examples](./docs/observability-framework-examples.md)
+- [Framework integrations](./docs/framework-integrations.md)
+- [NestJS integration](./docs/frameworks/nestjs.md)
 - [Observability collector smoke](./docs/observability-collector-smoke.md)
 - [HTTP module](./docs/http.md)
 - [Production readiness](./docs/production-readiness.md)

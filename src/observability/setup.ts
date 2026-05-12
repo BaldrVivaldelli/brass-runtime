@@ -50,6 +50,36 @@ export type ObservabilityOtlpOptions = {
   readonly pipeline?: ExportPipelineTuning;
 };
 
+export type ObservabilityOtlpSignal = "metrics" | "traces" | "logs";
+
+export type MakeOtlpOptionsInput = {
+  readonly endpoint: string;
+  readonly headers?: ObservabilityOtlpOptions["headers"];
+  readonly fetch?: ObservabilityOtlpOptions["fetch"];
+  readonly timeoutMs?: ObservabilityOtlpOptions["timeoutMs"];
+  readonly retry?: ObservabilityOtlpOptions["retry"];
+  readonly pipeline?: ObservabilityOtlpOptions["pipeline"];
+  readonly signals?: readonly ObservabilityOtlpSignal[];
+};
+
+const DEFAULT_OTLP_SIGNALS: readonly ObservabilityOtlpSignal[] = ["metrics", "traces", "logs"];
+
+export function makeOtlpOptions(input: MakeOtlpOptionsInput): ObservabilityOtlpOptions {
+  const endpoint = normalizeOtlpEndpoint(input.endpoint);
+  const signals = input.signals ?? DEFAULT_OTLP_SIGNALS;
+
+  return {
+    ...(signals.includes("metrics") ? { metricsUrl: `${endpoint}/v1/metrics` } : {}),
+    ...(signals.includes("traces") ? { tracesUrl: `${endpoint}/v1/traces` } : {}),
+    ...(signals.includes("logs") ? { logsUrl: `${endpoint}/v1/logs` } : {}),
+    ...(input.headers ? { headers: input.headers } : {}),
+    ...(input.fetch ? { fetch: input.fetch } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.retry ? { retry: input.retry } : {}),
+    ...(input.pipeline ? { pipeline: input.pipeline } : {}),
+  };
+}
+
 export type ObservabilityOptions = {
   readonly serviceName?: string;
   readonly serviceVersion?: string;
@@ -135,6 +165,17 @@ export type Observability = {
   readonly stop: () => void;
   readonly shutdown: () => Promise<ObservabilityFlushResult>;
 };
+
+function normalizeOtlpEndpoint(endpoint: string): string {
+  const trimmed = endpoint.trim();
+  const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
+
+  if (!withoutTrailingSlash) {
+    throw new Error("makeOtlpOptions endpoint must not be empty");
+  }
+
+  return withoutTrailingSlash;
+}
 
 export function makeObservability(options: ObservabilityOptions = {}): Observability {
   validateObservabilityOptions(options);

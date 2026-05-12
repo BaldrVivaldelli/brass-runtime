@@ -234,6 +234,9 @@ Primary categories:
 - production hardening helpers for exporter pipelines, sampling, redaction,
   metric-cardinality limiting, environment presets, no-op setup, and inbound
   adapters for Fetch/Node/Express/Fastify-style request objects
+- `makeOtlpOptions` for turning a backend-neutral OTLP HTTP collector endpoint
+  into metrics/traces/logs URLs while forwarding headers, custom `fetch`,
+  timeout, retry, pipeline tuning, and optional signal selection
 - OTLP log export, server-side HTTP request metrics/spans, span retention
   pruning, single-flight flush behavior, collector smoke script, and
   observability benchmark budgets

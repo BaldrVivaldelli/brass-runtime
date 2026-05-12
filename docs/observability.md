@@ -327,6 +327,109 @@ collector does not create overlapping exports.
 Finished spans are pruned after successful export and can also be bounded with
 `traces.maxFinishedSpans` / `traces.maxSpanAgeMs`.
 
+### Vendor-neutral collector recipes
+
+Brass intentionally does not know about Grafana Cloud, AppDynamics, or any
+OpenTelemetry SDK implementation. The runtime only needs OTLP HTTP endpoint
+URLs, headers, and optional export tuning. Keep vendor naming in application
+code by writing small helpers that call the backend-neutral `makeOtlpOptions`.
+
+```ts
+import {
+  makeObservability,
+  makeOtlpOptions,
+  type ObservabilityOtlpOptions,
+} from "brass-runtime/observability";
+
+function productionOtlp(input: {
+  readonly endpoint: string;
+  readonly headers?: Record<string, string>;
+}): ObservabilityOtlpOptions {
+  return makeOtlpOptions({
+    endpoint: input.endpoint,
+    headers: input.headers,
+    timeoutMs: 10_000,
+    retry: { attempts: 3, initialDelayMs: 100, maxDelayMs: 2_000 },
+    pipeline: {
+      maxQueueSize: 10_000,
+      batchSize: 512,
+      dropPolicy: "drop-oldest",
+      shutdownTimeoutMs: 10_000,
+    },
+  });
+}
+```
+
+Grafana Cloud can be configured as a direct OTLP endpoint or through
+Grafana Alloy/OpenTelemetry Collector. The helper stays in your app and only
+returns Brass OTLP config:
+
+```ts
+function grafanaCloudCollector(input: {
+  readonly endpoint: string;
+  readonly authorization?: string;
+}): ObservabilityOtlpOptions {
+  return productionOtlp({
+    endpoint: input.endpoint,
+    headers: input.authorization
+      ? { Authorization: input.authorization }
+      : undefined,
+  });
+}
+
+const observability = makeObservability({
+  serviceName: "shopping-ms",
+  serviceVersion: "1.2.3",
+  resource: {
+    "service.namespace": "shopping",
+    "deployment.environment": "production",
+  },
+  otlp: grafanaCloudCollector({
+    endpoint: process.env.GRAFANA_OTLP_ENDPOINT!,
+    authorization: process.env.GRAFANA_OTLP_AUTHORIZATION,
+  }),
+});
+```
+
+For AppDynamics, prefer sending Brass telemetry to the AppDynamics/OpenTelemetry
+Collector deployed next to the service. Authentication and vendor-specific
+exporters stay in the collector config:
+
+```ts
+function appDynamicsCollector(input: {
+  readonly endpoint: string;
+}): ObservabilityOtlpOptions {
+  return productionOtlp({
+    endpoint: input.endpoint,
+  });
+}
+
+const observability = makeObservability({
+  serviceName: "car-rental-ms",
+  serviceVersion: "1.2.3",
+  resource: {
+    "service.namespace": "car-rental",
+    "deployment.environment": "production",
+  },
+  otlp: appDynamicsCollector({
+    endpoint: process.env.APPD_OTEL_COLLECTOR_ENDPOINT ?? "http://appd-otel-collector:4318",
+  }),
+});
+```
+
+Then attach the same observability instance to HTTP without changing the
+collector helpers:
+
+```ts
+import { makeDefaultHttpClient } from "brass-runtime/http";
+import { withHttpObservability } from "brass-runtime/observability";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  middleware: [withHttpObservability(observability)],
+});
+```
+
 Sampling can be configured globally, by ratio, or with rules:
 
 ```ts
@@ -423,6 +526,10 @@ const router = makeHttpRouter([
 
 Runnable framework examples live in
 [`docs/observability-framework-examples.md`](./observability-framework-examples.md).
+Production-style framework integration recipes live in
+[`docs/framework-integrations.md`](./framework-integrations.md).
+For a NestJS module recipe with Grafana/OTLP, DI tokens, HTTP client
+observability, and shutdown wiring, see [`docs/frameworks/nestjs.md`](./frameworks/nestjs.md).
 
 Collector smoke and performance budget helpers:
 

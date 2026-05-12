@@ -1,8 +1,11 @@
-import { asyncFlatMap, asyncSucceed } from "../core/types/asyncEffect";
+import { asyncFlatMap } from "../core/types/asyncEffect";
+import { makeDefaultHttpClient, promiseHttpTransport } from "../http";
 import {
   logEffect,
   makeExpressRequestObservabilityContext,
   makeObservabilityFromEnv,
+  makeOtlpOptions,
+  withHttpObservability,
   withLogContext,
 } from "../observability";
 import {
@@ -20,14 +23,57 @@ async function main() {
   const { NestFactory } = core;
   const { Controller, Get, Module, Req, Res } = common;
   const port = portFromEnv(3002);
+  const grafanaAuthorization = process.env.GRAFANA_OTLP_AUTHORIZATION;
   const observability = makeObservabilityFromEnv(process.env, {
     serviceName: "brass-nest-example",
-    otlp: {
-      metricsUrl: "http://example-collector.local/v1/metrics",
-      tracesUrl: "http://example-collector.local/v1/traces",
-      fetch: exampleOtlpFetch("nest"),
-    },
+    otlp: makeOtlpOptions({
+      endpoint: process.env.GRAFANA_OTLP_ENDPOINT
+        ?? process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+        ?? "http://example-collector.local",
+      headers: grafanaAuthorization ? { Authorization: grafanaAuthorization } : undefined,
+      fetch: process.env.BRASS_EXAMPLE_REAL_OTLP === "true" ? undefined : exampleOtlpFetch("nest"),
+      timeoutMs: 10_000,
+      retry: { attempts: 3, initialDelayMs: 100, maxDelayMs: 2_000 },
+      pipeline: { maxQueueSize: 10_000, batchSize: 512, dropPolicy: "drop-oldest" },
+    }),
     flushIntervalMs: 5_000,
+  });
+  const usersHttp = makeDefaultHttpClient({
+    baseUrl: process.env.USERS_API_BASE_URL ?? "https://users.example.local",
+    preset: "production",
+    policyPresets: {
+      readModel: {
+        lane: "read-model",
+        priority: 3,
+        retry: { maxRetries: 2, baseDelayMs: 100, maxDelayMs: 1_000 },
+      },
+    },
+    transport: promiseHttpTransport()
+      .requestConfig(({ request, url }) => ({
+        url: url.toString(),
+        method: request.method,
+        headers: request.headers,
+        body: request.body,
+      }))
+      .send(async (config) => ({
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        data: {
+          id: config.url.split("/").pop() ?? "unknown",
+          name: "Katherine Johnson",
+          observedSignal: config.signal.aborted ? "aborted" : "linked",
+        },
+      }))
+      .json(
+        (response) => response.data,
+        (response) => ({
+          status: response.status,
+          statusText: response.statusText,
+          headers: response.headers,
+        })
+      ),
+    middleware: [withHttpObservability(observability)],
   });
 
   class AppController {
@@ -45,13 +91,17 @@ async function main() {
                 userId: req.params.id,
                 authorization: req.headers.authorization,
               }),
-              () => asyncSucceed({ id: req.params.id, name: "Katherine Johnson" })
+              () => usersHttp.getJson(`/users/${req.params.id}`, {
+                policy: "readModel",
+                timeoutMs: 2_000,
+                headers: { "x-request-id": req.headers["x-request-id"] ?? "missing" },
+              })
             )
           )
         )
       );
 
-      return { user, traceId: ctx.trace?.traceId };
+      return { user: user.body, traceId: ctx.trace?.traceId };
     }
 
     metrics(_req: any, res: any) {
@@ -76,8 +126,12 @@ async function main() {
 
   console.log(`Nest observability example listening on http://localhost:${port}`);
   console.log(`Try: curl -H 'traceparent: 00-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-bbbbbbbbbbbbbbbb-01' http://localhost:${port}/users/42`);
+  console.log("Set BRASS_EXAMPLE_REAL_OTLP=true with GRAFANA_OTLP_ENDPOINT/GRAFANA_OTLP_AUTHORIZATION to send OTLP traffic to a collector.");
 
-  installShutdownHandlers(observability, () => app.close());
+  installShutdownHandlers(observability, async () => {
+    await usersHttp.shutdown();
+    await app.close();
+  });
 }
 
 function applyRoute(decorator: MethodDecorator, target: object, key: string): void {

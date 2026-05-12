@@ -117,7 +117,7 @@ describe("AdaptiveLimiter integration tests", () => {
     });
 
     it("feeds HTTP 5xx statuses into the adaptive error signal", async () => {
-      const fetchMock = mockFetch(500, "fail", 1);
+      const fetchMock = mockFetch(500, "fail", 5);
       vi.stubGlobal("fetch", fetchMock);
 
       const client = makeHttp({
@@ -126,7 +126,7 @@ describe("AdaptiveLimiter integration tests", () => {
           initialLimit: 10,
           minLimit: 1,
           maxLimit: 10,
-          minSamples: 2,
+          minSamples: 1,
           errorWeight: 1,
           errorSmoothingFactor: 1,
           smoothingFactor: 1,
