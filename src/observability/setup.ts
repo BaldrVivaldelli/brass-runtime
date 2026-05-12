@@ -168,13 +168,19 @@ export type Observability = {
 
 function normalizeOtlpEndpoint(endpoint: string): string {
   const trimmed = endpoint.trim();
-  const withoutTrailingSlash = trimmed.replace(/\/+$/, "");
+  let end = trimmed.length;
 
-  if (!withoutTrailingSlash) {
+  while (end > 0 && trimmed.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+
+  const normalized = trimmed.slice(0, end);
+
+  if (!normalized) {
     throw new Error("makeOtlpOptions endpoint must not be empty");
   }
 
-  return withoutTrailingSlash;
+  return normalized;
 }
 
 export function makeObservability(options: ObservabilityOptions = {}): Observability {
