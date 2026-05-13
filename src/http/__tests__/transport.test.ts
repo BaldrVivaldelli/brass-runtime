@@ -555,10 +555,7 @@ describe("HTTP effect transports", () => {
     });
 
     expect(cancelled).toBe(true);
-    // With allocation reduction optimization, when no external signal is present,
-    // the transport receives a shared no-op signal (never aborted). Cancellation
-    // is handled via the effect cancellation mechanism (cancelInner) instead.
-    expect(observedSignal?.aborted).toBe(false);
+    expect(observedSignal?.aborted).toBe(true);
     expect(client.stats()).toMatchObject({ inFlight: 0, started: 1, timedOut: 1 });
     expect(abortablePromiseStats()).toMatchObject({ active: 0, started: 1, timedOut: 1 });
   });

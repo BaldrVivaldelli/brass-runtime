@@ -1,11 +1,9 @@
 import {
   type HttpError,
-  type HttpInit,
   type HttpMethod,
   type HttpMiddleware,
   type HttpRequest,
   type HttpWireResponse,
-  normalizeHeadersInit,
 } from "./client";
 import { Cause, type Exit } from "../core/types/effect";
 import { isPromiseTransportDirect } from "./transport";
@@ -20,38 +18,42 @@ import {
   type CompressionConfig,
   type CompressionStats,
 } from "./compression";
-import { mergeHeaders, setHeaderIfMissing } from "./optics/request";
+import { setHeaderIfMissing } from "./optics/request";
 import type { HttpResponse } from "./httpClient";
 import { toPromise as runToPromise } from "../core/runtime/runtime";
 import {
   type Async,
   type AsyncWithPromise,
+  asyncFail,
   asyncFlatMap,
   asyncSucceed,
   mapTryAsync,
   withAsyncPromise,
 } from "../core/types/asyncEffect";
 import {
-  decodeJsonBodyEffect,
+  decodeJsonBody,
   encodeJsonBodyEffect,
+  makeJsonParseValidationError,
   type AnyJsonSchemaLike,
   type InferJsonSchema,
   type ValidationError,
 } from "./validation";
 import { validateDefaultHttpClientConfig } from "./configValidation";
 import { makeAdaptiveLimiterConfig, type AdaptiveLimiterConfig } from "./adaptiveLimiter";
+import { buildHttpRequest as buildReq, type HttpRequestPolicyInit } from "./requestBuilder";
+import { withHttpPolicyPresets, type HttpPolicyPresets } from "./requestPolicy";
 
 type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & {
   timeoutMs?: number;
   poolKey?: string;
   headers?: unknown;
-};
+} & HttpRequestPolicyInit;
 
 type InitWithHeaders = {
   headers?: unknown;
   timeoutMs?: number;
   poolKey?: string;
-} & Record<string, unknown>;
+} & HttpRequestPolicyInit & Record<string, unknown>;
 
 export type HttpJsonInit<Validator extends AnyJsonSchemaLike> = InitNoMethodBody & {
   readonly schema: Validator;
@@ -140,7 +142,13 @@ export type DefaultPostJson = {
   ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
 };
 
-export type DefaultHttpClientPreset = "minimal" | "proxy" | "highThroughputProxy" | "balanced" | "default" | "production";
+export type DefaultHttpClientPreset =
+  | "minimal"
+  | "proxy"
+  | "highThroughputProxy"
+  | "balanced"
+  | "default"
+  | "production";
 
 export type DefaultHttpClientFeatures = {
   readonly dedup: boolean;
@@ -158,14 +166,22 @@ export type DefaultHttpClientConfig = LifecycleClientConfig & {
   /**
    * Preset used as the baseline before caller overrides are applied.
    * - minimal: wire client + timeout only.
+   * - proxy: low-latency proxy/BFF path; wire client only, no lifecycle queue or Brass timeout by default.
+   * - highThroughputProxy: explicit alias for the hot proxy path; pair with makeNodeHttpProxyClient on Node.
    * - balanced: retry, priority, dedup, adaptive limiter, response compression.
    * - default: balanced + short safe-method response cache.
+   * - production: stable alias for the full production-ready default preset.
    */
   readonly preset?: DefaultHttpClientPreset;
   /** Response decompression. Enabled by balanced/default presets; set false to disable. */
   readonly compression?: CompressionConfig | false;
   /** Extra middleware applied outermost after the preset stack, e.g. withHttpObservability(obs). */
   readonly middleware?: readonly HttpMiddleware[];
+  /**
+   * Named per-request policy presets. Requests can use `policy: "readModel"` or
+   * `policy: { preset: "readModel", ...overrides }`.
+   */
+  readonly policyPresets?: HttpPolicyPresets;
 };
 
 export type DefaultHttpClient = {
@@ -288,6 +304,7 @@ export function makeDefaultHttpClient(
     preset = defaultHttpClientPreset,
     compression,
     middleware = [],
+    policyPresets,
     ...lifecycleOverrides
   } = config;
 
@@ -305,6 +322,10 @@ export function makeDefaultHttpClient(
 
   for (const mw of middleware) {
     wire = wire.with(mw);
+  }
+
+  if (policyPresets && Object.keys(policyPresets).length > 0) {
+    wire = wire.with(withHttpPolicyPresets(policyPresets));
   }
 
   const features = featureSnapshot(lifecycleConfig, compressionResult !== undefined, middleware.length);
@@ -411,25 +432,6 @@ function buildDefaultClient(
         }
       : {}),
   };
-}
-
-function buildReq(
-  method: HttpMethod,
-  url: string,
-  init?: InitWithHeaders,
-  body?: string,
-): HttpRequest {
-  const { headers, timeoutMs, poolKey, schema, schemaName, bodySchema, bodySchemaName, ...rest } = (init ?? {}) as InitWithHeaders;
-  const normalizedHeaders = normalizeHeadersInit(headers);
-  const req: HttpRequest = {
-    method,
-    url,
-    ...(body && body.length > 0 ? { body } : {}),
-    ...(typeof timeoutMs === "number" ? { timeoutMs } : {}),
-    ...(typeof poolKey === "string" ? { poolKey } : {}),
-    init: rest as HttpInit,
-  };
-  return normalizedHeaders ? mergeHeaders(normalizedHeaders)(req) : req;
 }
 
 function toResponse<A>(wire: HttpWireResponse, body: A): HttpResponse<A> {
@@ -566,10 +568,18 @@ function decodeResponse<A>(
   schema?: AnyJsonSchemaLike,
   schemaName?: string,
 ): Async<unknown, ValidationError, HttpResponse<A>> {
-  return asyncFlatMap(
-    decodeJsonBodyEffect<A>(wire.bodyText, schema as any, { schemaName }),
-    (body) => asyncSucceed(toResponse(wire, body)),
-  );
+  if (!schema) {
+    try {
+      return asyncSucceed(toResponse(wire, JSON.parse(wire.bodyText) as A));
+    } catch (error) {
+      return asyncFail(makeJsonParseValidationError(wire.bodyText, error, { schemaName }));
+    }
+  }
+
+  const result = decodeJsonBody<A>(wire.bodyText, schema as any, { schemaName });
+  return result.success
+    ? asyncSucceed(toResponse(wire, result.data))
+    : asyncFail(result.error);
 }
 
 function mergeLifecycleConfig(

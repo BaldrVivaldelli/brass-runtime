@@ -118,6 +118,7 @@ export function formatConfigError(error: unknown): string {
 
 const ok = <A>(data: A): SchemaResult<A> => ({ success: true, data });
 const fail = (issues: readonly SchemaIssue[]): SchemaResult<never> => ({ success: false, issues });
+const EMPTY_PATH: readonly SchemaPathPart[] = Object.freeze([]);
 
 const receivedKind = (value: unknown): string => {
   if (value === null) return "null";
@@ -139,12 +140,16 @@ export const makeSchemaIssue = (
   expected: string,
   received: unknown,
   message?: string,
-): SchemaIssue => ({
-  path,
-  expected,
-  received: receivedKind(received),
-  message: message ?? `Expected ${expected} at ${pathLabel(path)}, received ${receivedKind(received)}`,
-});
+): SchemaIssue => {
+  const issuePath = path.length === 0 ? EMPTY_PATH : [...path];
+  const receivedLabel = receivedKind(received);
+  return {
+    path: issuePath,
+    expected,
+    received: receivedLabel,
+    message: message ?? `Expected ${expected} at ${pathLabel(issuePath)}, received ${receivedLabel}`,
+  };
+};
 
 export function formatIssues(issues: readonly SchemaIssue[]): string {
   if (issues.length === 0) return "Validation failed";
@@ -167,9 +172,9 @@ function makeSchema<A, Optional extends boolean>(
     name,
     isOptional,
     _parse: parser,
-    safeParse: (input) => parser(input, []),
+    safeParse: (input) => parser(input, EMPTY_PATH),
     parse: (input) => {
-      const result = parser(input, []);
+      const result = parser(input, EMPTY_PATH);
       if (result.success) return result.data;
       throw new SchemaValidationException(result.issues);
     },
@@ -347,16 +352,24 @@ function arraySchema<S extends AnySchema>(item: S): Schema<Array<InferSchema<S>>
     if (!Array.isArray(input)) return fail([makeSchemaIssue(path, "array", input)]);
 
     const out: Array<InferSchema<S>> = [];
-    const issues: SchemaIssue[] = [];
-    input.forEach((value, index) => {
-      const result = item._parse(value, [...path, index]);
+    const childPath: SchemaPathPart[] = path.length === 0 ? [] : [...path];
+    let issues: SchemaIssue[] | undefined;
+
+    for (let index = 0; index < input.length; index += 1) {
+      if (!(index in input)) continue;
+      childPath.push(index);
+      const result = item._parse(input[index], childPath);
+      childPath.pop();
+
       if (result.success) {
         out.push(result.data);
       } else {
+        issues ??= [];
         issues.push(...result.issues);
       }
-    });
-    return issues.length > 0 ? fail(issues) : ok(out);
+    }
+
+    return issues ? fail(issues) : ok(out);
   });
 }
 
@@ -365,6 +378,12 @@ function objectSchema<Shape extends SchemaShape>(
   options: ObjectSchemaOptions = {},
 ): Schema<InferObject<Shape>> {
   const unknownKeys = options.unknownKeys ?? "strip";
+  const shapeEntries = Object.entries(shape) as Array<[string, AnySchema]>;
+  const knownKeys =
+    unknownKeys === "strict"
+      ? new Set(shapeEntries.map(([key]) => key))
+      : undefined;
+
   return makeSchema("object", false, (input, path) => {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       return fail([makeSchemaIssue(path, options.name ?? "object", input)]);
@@ -372,34 +391,43 @@ function objectSchema<Shape extends SchemaShape>(
 
     const source = input as Record<string, unknown>;
     const out: Record<string, unknown> = unknownKeys === "passthrough" ? { ...source } : {};
-    const issues: SchemaIssue[] = [];
-    const knownKeys = new Set(Object.keys(shape));
+    const childPath: SchemaPathPart[] = path.length === 0 ? [] : [...path];
+    let issues: SchemaIssue[] | undefined;
 
-    for (const [key, fieldSchema] of Object.entries(shape)) {
+    for (const [key, fieldSchema] of shapeEntries) {
+      childPath.push(key);
       if (!(key in source)) {
         if (!fieldSchema.isOptional) {
-          issues.push(makeSchemaIssue([...path, key], fieldSchema.name ?? fieldSchema.kind, undefined, "Required field is missing"));
+          issues ??= [];
+          issues.push(makeSchemaIssue(childPath, fieldSchema.name ?? fieldSchema.kind, undefined, "Required field is missing"));
         }
+        childPath.pop();
         continue;
       }
 
-      const result = fieldSchema._parse(source[key], [...path, key]);
+      const result = fieldSchema._parse(source[key], childPath);
+      childPath.pop();
+
       if (result.success) {
         out[key] = result.data;
       } else {
+        issues ??= [];
         issues.push(...result.issues);
       }
     }
 
-    if (unknownKeys === "strict") {
+    if (knownKeys) {
       for (const key of Object.keys(source)) {
         if (!knownKeys.has(key)) {
-          issues.push(makeSchemaIssue([...path, key], "known key", source[key], "Unknown key is not allowed"));
+          childPath.push(key);
+          issues ??= [];
+          issues.push(makeSchemaIssue(childPath, "known key", source[key], "Unknown key is not allowed"));
+          childPath.pop();
         }
       }
     }
 
-    return issues.length > 0 ? fail(issues) : ok(out as InferObject<Shape>);
+    return issues ? fail(issues) : ok(out as InferObject<Shape>);
   }, options.name);
 }
 
@@ -410,16 +438,23 @@ function recordSchema<S extends AnySchema>(valueSchema: S): Schema<Record<string
     }
 
     const out: Record<string, InferSchema<S>> = {};
-    const issues: SchemaIssue[] = [];
+    const childPath: SchemaPathPart[] = path.length === 0 ? [] : [...path];
+    let issues: SchemaIssue[] | undefined;
+
     for (const [key, value] of Object.entries(input as Record<string, unknown>)) {
-      const result = valueSchema._parse(value, [...path, key]);
+      childPath.push(key);
+      const result = valueSchema._parse(value, childPath);
+      childPath.pop();
+
       if (result.success) {
         out[key] = result.data;
       } else {
+        issues ??= [];
         issues.push(...result.issues);
       }
     }
-    return issues.length > 0 ? fail(issues) : ok(out);
+
+    return issues ? fail(issues) : ok(out);
   });
 }
 

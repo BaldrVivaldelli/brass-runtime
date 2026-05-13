@@ -128,6 +128,9 @@ HTTP layer profile:
 - `node-http-text`
 - `wire-raw`
 - `default-minimal-json`
+- `default-proxy-json`
+- `default-proxy-node-json`
+- `high-throughput-proxy-node-json`
 - `default-balanced-no-adaptive-json`
 - `default-balanced-json`
 - `default-json`
@@ -141,8 +144,9 @@ HTTP long-run memory lab:
 
 - defaults to `forceGc: true`, so use `node --expose-gc` for the strongest
   retained-memory signal
-- compares node transport, wire raw, minimal, balanced without adaptive,
-  balanced, default, and default+observability variants
+- compares node transport, wire raw, minimal, proxy, proxy+node transport,
+  high-throughput proxy+node transport, balanced without adaptive, balanced,
+  default, and default+observability variants
 - reports heap/rss totals, max p99, mean throughput, errors, and
   `heapDeltaPer10kRequestsMb`
 - highlights whether memory is `ok`, `watch`, `critical`, or `unknown-gc`

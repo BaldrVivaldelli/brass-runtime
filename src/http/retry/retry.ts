@@ -10,6 +10,9 @@ import { async as asyncRegister, asyncFail, asyncFlatMap, asyncFold, asyncSuccee
 import type { Async } from "../../core/types/asyncEffect";
 import { makeScheduleDriver, type Schedule, type ScheduleDriver, type ScheduleObserver } from "../../core/runtime/schedule";
 import { makeWasmRetryPlanner } from "./wasmRetryPlanner";
+import { getHttpRequestPolicy, withHttpRequestPolicy } from "../requestPolicy";
+import type { HttpRequestRetryOverride, HttpRetryScheduleInput } from "../requestPolicy";
+import { isRetryableHttpError } from "../errors";
 
 /**
  * Observable event emitted on each retry attempt via the `onRetry` callback.
@@ -31,29 +34,15 @@ export type RetryEvent = {
     timestamp: number;
 };
 
-export type RetryScheduleInput = {
-    readonly attempt: number;
-    readonly elapsedMs: number;
-    readonly request: HttpRequest;
-    readonly error?: HttpError;
-    readonly status?: number;
-    readonly retryAfterMs?: number;
-};
+export type RetryScheduleInput = HttpRetryScheduleInput;
 
 /**
- * Per-request retry override. Attached as `(req as any).retry`.
+ * Per-request retry override. Prefer `req.policy.retry`; legacy top-level `req.retry`
+ * is still supported.
  * - `false` disables retry entirely for this request.
  * - A partial policy object merges with the middleware-level policy (per-request wins).
  */
-export type PerRequestRetryOverride =
-    | false
-    | {
-        maxRetries?: number;
-        baseDelayMs?: number;
-        maxDelayMs?: number;
-        schedule?: Schedule<RetryScheduleInput, unknown>;
-        retryOnStatus?: (status: number) => boolean;
-    };
+export type PerRequestRetryOverride = HttpRequestRetryOverride;
 
 export type RetryPolicy = {
     maxRetries: number;
@@ -88,7 +77,7 @@ export const defaultRetryOnStatus = (s: number) =>
     s === 408 || s === 429 || s === 500 || s === 502 || s === 503 || s === 504;
 
 export const defaultRetryOnError = (e: HttpError) =>
-    e._tag === "FetchError" || e._tag === "Timeout" || e._tag === "PoolTimeout";
+    isRetryableHttpError(e, { retryOnStatus: defaultRetryOnStatus });
 
 const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 
@@ -126,7 +115,7 @@ export const normalizeRetryBudget = (ms: number | undefined): number | undefined
 };
 
 const resolveEffectivePolicy = (req: HttpRequest, basePolicy: RetryPolicy): RetryPolicy | null => {
-    const override = (req as any).retry as PerRequestRetryOverride | undefined;
+    const override = getHttpRequestPolicy(req).retry as PerRequestRetryOverride | undefined;
     if (override === false) return null; // null signals "skip retry"
     if (override === undefined) return basePolicy;
     return {
@@ -211,7 +200,7 @@ export const withRetry =
 
                 // Boost priority for retry attempts (attempt > 0)
                 const effectiveReq = attempt > 0
-                    ? (() => { const boostedReq = { ...req }; (boostedReq as any).priority = Math.max(0, originalPriority - 1); return boostedReq as HttpRequest; })()
+                    ? withHttpRequestPolicy(req, { priority: Math.max(0, originalPriority - 1) })
                     : req;
 
                 const remainingBudget = () =>
@@ -288,7 +277,7 @@ export const withRetry =
                 const epRetryOnStatus = effectivePolicy.retryOnStatus ?? defaultRetryOnStatus;
                 const epRetryOnError = effectivePolicy.retryOnError ?? defaultRetryOnError;
                 const epMaxElapsedMs = normalizeRetryBudget(effectivePolicy.maxElapsedMs);
-                const originalPriority = (req as any).priority ?? 5;
+                const originalPriority = getHttpRequestPolicy(req).priority ?? 5;
 
                 const startedAt = performance.now();
                 const retryId = wasmPlanner?.start({

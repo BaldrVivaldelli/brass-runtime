@@ -9,6 +9,10 @@ Built without `Promise`/`async`/`await` as the primary semantic primitive. Effec
 npm i brass-runtime
 ```
 
+Runnable framework examples live in the
+[repository examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples).
+They are kept out of the npm package so installs stay small.
+
 ---
 
 ## What it does
@@ -158,14 +162,101 @@ console.log(http.compression?.stats());
 `makeDefaultHttpClient` is the batteries-included entrypoint: timeout,
 deduplication, priority scheduling, retry, adaptive concurrency, safe-method
 response cache, decompression, stats, `cancelAll`, and JSON/text helpers. Use
-`preset: "balanced"` to skip the default cache, or `preset: "minimal"` for a
-cheap wire client with the same helper API.
+`preset: "production"` when you want that production-ready shape explicitly,
+`preset: "balanced"` to skip the default cache, `preset: "highThroughputProxy"`
+for hot BFF/proxy paths without lifecycle queues or Brass timers by default,
+`preset: "proxy"` as the shorter compatibility alias, or `preset: "minimal"`
+for a cheap wire client with the same helper API. `preset: "default"` remains
+the same full preset for compatibility.
+
+On Node BFF/proxy services, pair the proxy preset with the first-party
+`node:http` transport when the default `fetch` backend is the bottleneck.
+The Node-only factory below wires that recommended shape directly:
+
+```ts
+import { toPromise } from "brass-runtime";
+import { makeNodeHttpProxyClient } from "brass-runtime/http";
+
+const http = makeNodeHttpProxyClient({
+  baseUrl: "https://api.example.com",
+  nodeTransport: {
+    maxSockets: 512,
+    maxFreeSockets: 512,
+  },
+});
+
+await toPromise(http.shutdown(), {}); // also destroys owned Node agents
+```
 
 The HTTP stack is meant to replace the usual `fetch` wrapper plus Zod/Valibot
 glue: schemas are dependency-free, responses and request bodies are validated in
 the same effect, config validation fails at construction time, and the client
 still owns cancellation, retries, compression, observability, and adaptive
 limits as one pipeline.
+
+Custom Promise clients such as Axios can be injected without making the
+consumer manage `AbortSignal` or `Async` plumbing:
+
+```ts
+import {
+  defineHttpPolicyPresets,
+  formatHttpError,
+  isRetryableHttpError,
+  makeDefaultHttpClient,
+  promiseHttpTransport,
+} from "brass-runtime/http";
+
+const transport = promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({
+    url: url.toString(),
+    method: request.method,
+    headers: request.headers,
+    data: request.body,
+    responseType: "json",
+  }))
+  .send((config) => axiosInstance.request(config))
+  .json();
+
+const axiosHttp = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  transport,
+});
+
+try {
+  await axiosHttp.getJson("/users/1").unsafeRunPromise();
+} catch (error) {
+  if (isRetryableHttpError(error)) {
+    console.warn("transient upstream failure");
+  }
+  console.error(formatHttpError(error));
+}
+```
+
+Brass injects the runtime `AbortSignal` into object configs before `send` and
+normalizes external failures with `toHttpError`, including Axios-like
+`response.status`, aborts, and common timeout codes.
+
+Repeated execution intent can be named once with policy presets:
+
+```ts
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    priority: 2,
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
 
 The default adaptive limiter uses the `aggressive` preset: warmup sample floor,
 P5 baseline, error-rate signal, priority-aware queueing, jittered probes,
@@ -253,7 +344,7 @@ declare const token: string;
 
 const http = httpClientBuilder()
   .baseUrl("https://api.example.com")
-  .balanced()
+  .production()
   .balancedLimiter({ maxLimit: 128 })
   .header("authorization", `Bearer ${token}`)
   .cache({ ttlSeconds: 30, maxEntries: 512 })
@@ -354,6 +445,7 @@ const client = baseClient.with(middleware);
 import { Runtime, asyncSucceed } from "brass-runtime/core";
 import {
   makeObservability,
+  makeOtlpOptions,
   runObservedHttpServerEffect,
   withHttpObservability,
 } from "brass-runtime/observability";
@@ -365,11 +457,7 @@ const obs = makeObservability({
   sampling: { ratio: 0.25, respectRemoteSampled: true, forceSampleOnError: true },
   redaction: {},
   cardinality: { maxValuesPerLabel: 100 },
-  otlp: {
-    metricsUrl: "http://collector:4318/v1/metrics",
-    tracesUrl: "http://collector:4318/v1/traces",
-    logsUrl: "http://collector:4318/v1/logs",
-  },
+  otlp: makeOtlpOptions({ endpoint: "http://collector:4318" }),
   flushIntervalMs: 10_000,
 });
 
@@ -392,6 +480,18 @@ HTTP client observability automatically reads adaptive limiter diagnostics when
 the wrapped client owns a limiter, exposing gauges for current limit, queue
 depth, utilization, error rate, request/completion rate, rejection rate, and
 state count.
+It also reads `req.policy` automatically: logs and span attributes include
+`preset`, `lane`, `poolKey`, `dedupKey`, `priority`, and retry overrides when present.
+Metric labels stay conservative by default; opt into stable labels with
+`withHttpObservability({ policy: { labelKeys: ["preset", "lane", "poolKey"] } })`.
+
+For hot proxy paths, keep HTTP metrics separate from runtime hooks:
+`makeObservability({ metrics: false, logs: false, traces: false })`,
+`preset: "proxy"`, `withHttpObservability({ spans: false, logs: false,
+injectTraceHeaders: false, includeHostLabel: false })`. For sampled spans on
+the same path, avoid global runtime hooks and use
+`withHttpObservability({ spans: { events: false, sampleRate: 0.001 },
+spanSink: observability.tracer, injectTraceHeaders: false })`.
 
 ### Performance profiler
 
@@ -522,6 +622,8 @@ All layers emit lifecycle events, track stats, and support cancellation.
 The recommended `makeDefaultHttpClient` factory wires the default preset
 for you and accepts extra middleware, so observability can be attached with
 `middleware: [withHttpObservability(obs)]` without coupling HTTP to exporters.
+Per-request `policy` travels through that stack and is visible to observability
+without being forwarded to the host transport.
 
 ---
 
@@ -594,6 +696,8 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Cancellation & Interruption](./docs/cancellation.md)
 - [Observability: Hooks & Tracing](./docs/observability.md)
 - [Observability framework examples](./docs/observability-framework-examples.md)
+- [Framework integrations](./docs/framework-integrations.md)
+- [NestJS integration](./docs/frameworks/nestjs.md)
 - [Observability collector smoke](./docs/observability-collector-smoke.md)
 - [HTTP module](./docs/http.md)
 - [Production readiness](./docs/production-readiness.md)

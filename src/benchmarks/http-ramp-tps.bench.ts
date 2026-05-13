@@ -51,6 +51,7 @@ type RampClientKind =
   | "node-http-text"
   | "wire-raw"
   | "default-minimal-json"
+  | "default-proxy-json"
   | "default-balanced-json"
   | "default-json"
   | "default-json-observed";
@@ -188,6 +189,9 @@ function resolveClientKind(): RampClientKind {
     case "minimal":
     case "default-minimal-json":
       return "default-minimal-json";
+    case "proxy":
+    case "default-proxy-json":
+      return "default-proxy-json";
     case "balanced":
     case "default-balanced-json":
       return "default-balanced-json";
@@ -315,7 +319,7 @@ function makeWireClient(baseUrl: string, config: RampConfig): HttpClient {
 function makeDefaultClient(
   baseUrl: string,
   config: RampConfig,
-  preset: "minimal" | "balanced" | "default",
+  preset: "minimal" | "proxy" | "balanced" | "default",
   observability?: Observability,
 ): DefaultHttpClient {
   return makeDefaultHttpClient({
@@ -350,6 +354,8 @@ function makeScenarioRunner(
       return makeWireRawRunner(server, config);
     case "default-minimal-json":
       return makeDefaultJsonRunner(server, config, "minimal");
+    case "default-proxy-json":
+      return makeDefaultJsonRunner(server, config, "proxy");
     case "default-balanced-json":
       return makeDefaultJsonRunner(server, config, "balanced");
     case "default-json":
@@ -425,7 +431,7 @@ function makeWireRawRunner(server: DummyServer, config: RampConfig): ScenarioRun
 function makeDefaultJsonRunner(
   server: DummyServer,
   config: RampConfig,
-  preset: "minimal" | "balanced" | "default",
+  preset: "minimal" | "proxy" | "balanced" | "default",
   observability?: Observability,
 ): ScenarioRunner {
   const rt = makeBenchRuntime(config, observability);

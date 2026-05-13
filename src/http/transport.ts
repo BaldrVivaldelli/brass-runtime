@@ -10,13 +10,11 @@ import type {
   HttpWireResponseStream,
 } from "./client";
 import {
-  isHttpError,
   isExternalAbortError,
+  isHttpError,
   toHttpError,
   type ToHttpErrorOptions,
 } from "./errors";
-
-export { toHttpError, isExternalAbortError, type ToHttpErrorOptions } from "./errors";
 
 export type HttpTransportContext = {
   readonly request: HttpRequest;
@@ -27,29 +25,6 @@ export type HttpTransportContext = {
 export type HttpTransport = (
   context: HttpTransportContext,
 ) => Async<unknown, HttpError, HttpWireResponse>;
-
-/**
- * Internal marker interface for promise-based transports that support the
- * direct promise path optimization. This allows `runPoolTransport` to bypass
- * the effect interpreter and call the underlying promise function directly.
- *
- * NOT exported in public type declarations — internal-only.
- */
-interface PromiseTransportMarker {
-  readonly __promiseTransport: true;
-  readonly requestDirect: (context: HttpTransportContext) => Promise<HttpWireResponse>;
-}
-
-/**
- * Type guard that checks whether a transport function carries the
- * `__promiseTransport` marker, indicating it supports the direct promise path.
- * The check is a single property lookup — constant time, no invocation.
- */
-export function isPromiseTransportDirect(
-  transport: HttpTransport,
-): transport is HttpTransport & PromiseTransportMarker {
-  return (transport as any).__promiseTransport === true;
-}
 
 export type HttpStreamTransport = (
   context: HttpTransportContext,
@@ -65,7 +40,7 @@ export type PromiseHttpTransportResponse = Omit<HttpWireResponse, "ms"> & {
 };
 
 export type PromiseHttpTransportConfig<Response> = {
-  readonly request: (context: HttpTransportContext) => Response | Promise<Response>;
+  readonly request: (context: HttpTransportContext) => Promise<Response>;
   readonly response: (
     response: Response,
     context: HttpTransportContext,
@@ -143,7 +118,7 @@ export type PromiseHttpTransportBodyBuilder<Response> = {
 
 export type PromiseHttpTransportStartBuilder = {
   readonly request: <Response>(
-    request: (context: HttpTransportContext) => Response | Promise<Response>,
+    request: PromiseHttpTransportConfig<Response>["request"],
   ) => PromiseHttpTransportBodyBuilder<Response>;
   readonly requestConfig: <Config>(
     request: PromiseHttpTransportRequestConfigMapper<Config>,
@@ -262,10 +237,6 @@ const nowMs = (): number =>
     ? performance.now()
     : Date.now();
 
-/** Check if a value is a thenable (Promise-like). Used to detect sync vs async returns. */
-const isThenable = <T>(value: T | Promise<T>): value is Promise<T> =>
-  value !== null && typeof value === "object" && typeof (value as any).then === "function";
-
 const hasMethod = <Name extends string>(
   value: unknown,
   name: Name,
@@ -344,169 +315,59 @@ const toPromiseTransportResponse = (
 export function makePromiseHttpTransport<Response>(
   config: PromiseHttpTransportConfig<Response>,
 ): HttpTransport {
-  const transport: HttpTransport = (context) =>
+  return (context) =>
     async((_env, cb) => {
       let done = false;
-      const signal = context.signal;
-      // Fast check: if signal is already aborted, fail immediately
-      if (signal.aborted) {
-        cb({ _tag: "Failure", cause: Cause.fail(abortErrorForSignal(signal)) });
-        return;
-      }
-
-      // Determine if we need abort handling. When the signal will never abort
-      // (e.g., noopSignal), skip addEventListener/removeEventListener entirely.
-      // We detect this by checking if the signal has no abort event target setup
-      // (noopSignal is a pre-allocated never-aborted signal).
-      const needsAbortHandling = signal !== (globalThis as any).__brassNoopSignal;
-
-      let abort: (() => void) | undefined;
-      if (needsAbortHandling) {
-        abort = () => {
-          if (done) return;
-          done = true;
-          signal.removeEventListener("abort", abort!);
-          cb({ _tag: "Failure", cause: Cause.fail(abortErrorForSignal(signal)) });
-        };
-        signal.addEventListener("abort", abort, { once: true });
-      }
 
       const finish = (exit: Parameters<typeof cb>[0]) => {
         if (done) return;
         done = true;
-        if (needsAbortHandling && abort) signal.removeEventListener("abort", abort);
+        context.signal.removeEventListener("abort", abort);
         cb(exit);
       };
 
-      const handleError = (error: unknown) => {
-        if (signal.aborted) {
-          finish({ _tag: "Failure", cause: Cause.fail(abortErrorForSignal(signal)) });
-          return;
+      const fail = (error: HttpError) =>
+        finish({ _tag: "Failure", cause: Cause.fail(error) });
+
+      const abort = () => fail(abortErrorForSignal(context.signal));
+
+      if (context.signal.aborted) {
+        abort();
+        return;
+      }
+
+      context.signal.addEventListener("abort", abort, { once: true });
+
+      const run = async () => {
+        const startedAt = nowMs();
+        try {
+          const raw = await config.request(context);
+          const durationMs = Math.round(nowMs() - startedAt);
+          const mapped = await config.response(raw, context, { startedAt, durationMs });
+          finish({
+            _tag: "Success",
+            value: {
+              ...mapped,
+              ms: mapped.ms ?? durationMs,
+            },
+          });
+        } catch (error) {
+          if (context.signal.aborted) {
+            fail(abortErrorForSignal(context.signal));
+            return;
+          }
+          fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal }));
         }
-        finish({ _tag: "Failure", cause: Cause.fail(
-          config.error?.(error, context) ?? normalizeHttpError(error, { signal }),
-        ) });
       };
 
-      const startedAt = nowMs();
-
-      // Attempt synchronous resolution. When config.request returns a plain value
-      // (not a Promise), the entire transport resolves in the same call frame —
-      // no microtask boundaries, no GC pressure from Promise allocations.
-      let requestResult: Response | Promise<Response>;
-      try {
-        requestResult = config.request(context);
-      } catch (error) {
-        handleError(error);
-        return;
-      }
-
-      if (!isThenable(requestResult)) {
-        // Fully synchronous path — no microtasks at all
-        const durationMs = Math.round(nowMs() - startedAt);
-        let responseResult: PromiseHttpTransportResponse | Promise<PromiseHttpTransportResponse>;
-        try {
-          responseResult = config.response(requestResult, context, { startedAt, durationMs });
-        } catch (error) {
-          handleError(error);
-          return;
-        }
-        if (!isThenable(responseResult)) {
-          finish({ _tag: "Success", value: { ...responseResult, ms: responseResult.ms ?? durationMs } as any });
-        } else {
-          responseResult.then(
-            (mapped) => {
-              if (done) return;
-              finish({ _tag: "Success", value: { ...mapped, ms: mapped.ms ?? durationMs } as any });
-            },
-            handleError,
-          );
-        }
-        return;
-      }
-
-      // Async path — request returned a Promise
-      requestResult.then(
-        (raw) => {
-          if (done) return;
-          const durationMs = Math.round(nowMs() - startedAt);
-          let responseResult: PromiseHttpTransportResponse | Promise<PromiseHttpTransportResponse>;
-          try {
-            responseResult = config.response(raw, context, { startedAt, durationMs });
-          } catch (error) {
-            handleError(error);
-            return;
-          }
-          if (!isThenable(responseResult)) {
-            finish({ _tag: "Success", value: { ...responseResult, ms: responseResult.ms ?? durationMs } as any });
-            return;
-          }
-          responseResult.then(
-            (mapped) => {
-              if (done) return;
-              finish({ _tag: "Success", value: { ...mapped, ms: mapped.ms ?? durationMs } as any });
-            },
-            handleError,
-          );
-        },
-        handleError,
-      );
+      void run();
 
       return () => {
         if (done) return;
         done = true;
-        if (needsAbortHandling && abort) signal.removeEventListener("abort", abort);
+        context.signal.removeEventListener("abort", abort);
       };
     });
-
-  // Attach the promise transport marker and requestDirect method for the
-  // direct promise path optimization in runPoolTransport.
-  const marked = transport as HttpTransport & PromiseTransportMarker;
-  (marked as any).__promiseTransport = true;
-  (marked as any).requestDirect = (context: HttpTransportContext): Promise<HttpWireResponse> => {
-    const startedAt = nowMs();
-    let requestResult: Response | Promise<Response>;
-    try {
-      requestResult = config.request(context);
-    } catch (error) {
-      return Promise.reject(
-        config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal }),
-      );
-    }
-
-    const mapResponse = (raw: Response): HttpWireResponse | Promise<HttpWireResponse> => {
-      const durationMs = Math.round(nowMs() - startedAt);
-      let responseResult: PromiseHttpTransportResponse | Promise<PromiseHttpTransportResponse>;
-      try {
-        responseResult = config.response(raw, context, { startedAt, durationMs });
-      } catch (error) {
-        throw config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal });
-      }
-      if (!isThenable(responseResult)) {
-        return { ...responseResult, ms: responseResult.ms ?? durationMs } as HttpWireResponse;
-      }
-      return responseResult.then(
-        (mapped) => ({ ...mapped, ms: mapped.ms ?? durationMs }) as HttpWireResponse,
-      );
-    };
-
-    if (!isThenable(requestResult)) {
-      try {
-        const result = mapResponse(requestResult);
-        return isThenable(result) ? result : Promise.resolve(result);
-      } catch (error) {
-        return Promise.reject(error);
-      }
-    }
-
-    return requestResult.then(mapResponse, (error) =>
-      Promise.reject(
-        config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal }),
-      ),
-    );
-  };
-
-  return marked;
 }
 
 function makePromiseHttpTransportBodyBuilder<Response>(
@@ -520,55 +381,14 @@ function makePromiseHttpTransportBodyBuilder<Response>(
   ): HttpTransport =>
     makePromiseHttpTransport({
       ...currentConfig,
-      response: (raw, context, timing) => {
-        const bodyFn = body ?? ((value: any) => defaultPromiseBody(value, mode));
-        const bodyResult = bodyFn(raw, context, timing);
-
-        // Fast path: when body selector returns a plain value (not a Promise),
-        // avoid async/await overhead entirely.
-        if (!isThenable(bodyResult)) {
-          const inferred = inferPromiseResponseInfo(raw);
-          if (!responseMapper) {
-            return toPromiseTransportResponse(encodePromiseBody(bodyResult, mode), inferred);
-          }
-          const mappedResult = responseMapper(raw, context, timing);
-          if (!isThenable(mappedResult)) {
-            return toPromiseTransportResponse(encodePromiseBody(bodyResult, mode), {
-              ...inferred,
-              ...mappedResult,
-              headers: mappedResult.headers ?? inferred.headers,
-            });
-          }
-          return mappedResult.then((mapped) =>
-            toPromiseTransportResponse(encodePromiseBody(bodyResult, mode), {
-              ...inferred,
-              ...mapped,
-              headers: mapped.headers ?? inferred.headers,
-            }),
-          );
-        }
-
-        // Slow path: body selector is async
-        return bodyResult.then((selected) => {
-          const inferred = inferPromiseResponseInfo(raw);
-          if (!responseMapper) {
-            return toPromiseTransportResponse(encodePromiseBody(selected, mode), inferred);
-          }
-          const mappedResult = responseMapper(raw, context, timing);
-          if (!isThenable(mappedResult)) {
-            return toPromiseTransportResponse(encodePromiseBody(selected, mode), {
-              ...inferred,
-              ...mappedResult,
-              headers: mappedResult.headers ?? inferred.headers,
-            });
-          }
-          return mappedResult.then((mapped) =>
-            toPromiseTransportResponse(encodePromiseBody(selected, mode), {
-              ...inferred,
-              ...mapped,
-              headers: mapped.headers ?? inferred.headers,
-            }),
-          );
+      response: async (raw, context, timing) => {
+        const selected = await (body ?? ((value) => defaultPromiseBody(value, mode)))(raw, context, timing);
+        const inferred = inferPromiseResponseInfo(raw);
+        const mapped = responseMapper ? await responseMapper(raw, context, timing) : {};
+        return toPromiseTransportResponse(encodePromiseBody(selected, mode), {
+          ...inferred,
+          ...mapped,
+          headers: mapped.headers ?? inferred.headers,
         });
       },
     });

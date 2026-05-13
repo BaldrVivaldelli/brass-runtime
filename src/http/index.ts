@@ -1,4 +1,7 @@
 export * from "./client";
+export * from "./requestPolicy";
+export * from "./transport";
+export * from "./nodeTransport";
 export * from "./httpClient";
 export * from "./pool";
 export * from "./circuitBreaker";
@@ -14,3 +17,4 @@ export * from "./adaptiveLimiter";
 export * from "./defaultClient";
 export * from "./builder";
 export * from "./server";
+export * from "./layer";

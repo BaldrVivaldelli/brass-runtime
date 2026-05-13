@@ -49,8 +49,11 @@ Primary categories:
   `TestRuntime`, `TestScheduler`, `TestClock`, and testing helpers
 - Layer 2.0 dependency graph helpers: `Layer`, `LayerContext`,
   `ServiceTag`, `makeServiceTag`, `layerValue`, `layerEffect`,
-  `defineService`, `getService`, `formatLayerError`, `buildLayer`,
-  `makeLayerScope`, `provide`, and `provideLayerContext`
+  `defineService`, `getService`, `getServices`, `useService`,
+  `useServices`, `composeAll`, `mergeAll`, `makeConfigLayer`,
+  `makeRuntimeLayer`, `RuntimeService`, `makeTestLayer`, `makeTestLayers`,
+  `formatLayerError`, `buildLayer`, `makeLayerScope`, `provide`, and
+  `provideLayerContext`
 - worker pool, tracing, metrics, runtime observability hooks/events
 - typed errors
 - runtime engines and capabilities
@@ -81,7 +84,11 @@ Observability helpers include `RuntimeHooks`, `RuntimeEvent`,
 `Schedule.driver` / `makeScheduleDriver`, runtime-clock-aware schedule runners,
 supervisor APIs, `makeRuntime` / `runPromise` / `runExit`, and Layer 2.0
 primitives for typed service tags, immutable contexts, scoped memoized builds,
-missing-service formatting, and idempotent release.
+multi-layer `Layer.all(...)` composition for independent layers,
+`Layer.composeAll(...)` for ordered context graphs, typed `Layer.use(...)` /
+`Layer.useAll(...)` accessors, schema-backed config layers, runtime service
+layers, test-service replacement layers, missing-service formatting, and
+idempotent release.
 
 ## HTTP export: `brass-runtime/http`
 
@@ -90,8 +97,11 @@ Source: `src/http/index.ts`
 Recommended API order:
 
 - `makeDefaultHttpClient` for the one-stop default client with JSON/text
-  helpers, lifecycle defaults, compression, stats, cache controls, `cancelAll`,
-  and middleware integration.
+  helpers, lifecycle presets (`production`, `default`, `balanced`,
+  `highThroughputProxy`, `proxy`, `minimal`),
+  compression, stats, cache controls, `cancelAll`, and middleware integration.
+- `HttpClientService` and `makeDefaultHttpClientLayer` for optional Layer/DI
+  application graphs with owned default-client lifecycle.
 - `makeHttpRouter`, `route` / `httpRoute`, and `makeNodeHttpServerResource`
   for the first-party HTTP server MVP: Node adapter, simple router,
   effect-based middleware, schema validation, observability, runtime
@@ -111,16 +121,44 @@ Recommended API order:
   queues, retry, lifecycle events, stats, and bulk cancellation.
 - `makeHttp` / `makeHttpStream` for low-level wire behavior and middleware
   authors.
+- `HttpTransport`, `HttpStreamTransport`, `makeFetchTransport`, and
+  `makeFetchStreamTransport` for replacing the default fetch-backed transport
+  with an effect-based backend such as Axios, undici, or test doubles.
+- `makeNodeHttpProxyClient`, `makeNodeHttpTransport`, `NodeHttpTransport`, and
+  `NodeHttpTransportConfig` for Node-only BFF/proxy workloads that should use
+  `node:http` / `node:https` keep-alive agents instead of the default fetch
+  backend.
+- `makePromiseHttpTransport`, `promiseHttpTransport`, and
+  `normalizeHttpHeaders` for adapting Promise-based clients without writing
+  `Async.async` / `Cause.fail` plumbing in consuming projects; the fluent
+  builder supports `requestConfig(...).send(...).json()` for
+  Axios/Fetch-shaped responses with automatic `AbortSignal` injection.
+- `toHttpError`, `isAbortHttpError`, `isTimeoutHttpError`,
+  `isFetchHttpError`, `httpErrorStatus`, `isRetryableHttpStatus`, and
+  `isRetryableHttpError` for normalizing external client failures
+  (including Axios-like `response.status`, aborts, and timeout codes) and
+  deciding retryability.
+- `HttpRequestPolicy`, `HttpRequestPolicyRef`, `HttpPolicyPresets`,
+  `ResolveHttpRequestPolicyOptions`, `defineHttpPolicyPresets`, `httpPolicy`,
+  `getHttpRequestPolicy`, `withHttpRequestPolicy`, and `withHttpPolicyPresets`
+  for structured
+  per-request execution knobs (`preset`, `priority`, `dedupKey`, `retry`,
+  `poolKey`, `lane`) while preserving legacy top-level request fields.
+- `DefaultHttpClientConfig.policyPresets` for resolving `policy: "name"` and
+  `policy: { preset: "name", ...overrides }` before lifecycle middleware.
 - `httpClientWithMeta` for metadata-oriented compatibility helpers.
 
 Primary categories:
 
 - low-level HTTP client and request/response types
+- effect-based transport boundary with fetch as the default implementation
+- structured per-request policy shared by transport, retry, deduplication,
+  priority scheduling, pool/circuit-breaker keying, and DX request helpers
 - ergonomic HTTP client helpers
 - HTTP server router, Node adapter, response helpers, and server resources
 - HTTP runtime probe helpers: `makeRuntimeHealthRoute` and
   `makeRuntimeReadinessRoute`
-- production HTTP client presets (`minimal`, `balanced`, `default`)
+- production HTTP client presets (`minimal`, `proxy`, `highThroughputProxy`, `balanced`, `default`, `production`)
 - dependency-free schema validation for JSON responses
 - builder API for default HTTP client configuration
 - adaptive limiter presets, diagnostics, and public config helper
@@ -140,7 +178,8 @@ Source: `src/http/testing.ts`
 
 Dependency-free helpers for users' test suites:
 
-- `makeMockHttpClient`, `makeSequenceHttpClient`
+- `makeMockHttpClient`, `makeSequenceHttpClient`,
+  `makeMockDefaultHttpClient`, and `makeMockDefaultHttpClientLayer`
 - `makeHttpResponse`, `makeTextHttpResponse`, `makeJsonHttpResponse`
 - `runHttpEffect`
 - `installMockFetch`, `withMockFetch`
@@ -197,8 +236,17 @@ Primary categories:
 - structured log sink plus effect-level logging helpers
 - `withSpan` and `spanEvent` for trace spans across effect composition
 - `makeObservability` production preset with `flush()` and `shutdown()`
+- `ObservabilityService`, `makeObservabilityLayer`,
+  `makeObservedRuntimeLayer`, and `makeObservedHttpClientLayer` for optional
+  Layer/DI wiring across observability, runtime, and HTTP without making any
+  factory mandatory.
 - `withHttpObservability` middleware for HTTP client metrics, logs, spans, and
-  W3C `traceparent` injection
+  W3C `traceparent` injection, including request-policy context in logs/spans
+  and opt-in policy metric labels. Hot proxy paths can use
+  `spans: { events: false, sampleRate }` plus `spanSink` to emit sampled HTTP
+  spans without enabling global runtime hooks.
+- `HTTP_OBSERVABILITY_CONTRACT` for stable dashboard metric names, label names,
+  span attribute names, and structured log message names
 - adaptive limiter gauges and HTTP span attributes when the wrapped client
   exposes an owned limiter
 - W3C trace-context helpers (`parseTraceparent`, `extractTraceContext`,
@@ -207,6 +255,9 @@ Primary categories:
 - production hardening helpers for exporter pipelines, sampling, redaction,
   metric-cardinality limiting, environment presets, no-op setup, and inbound
   adapters for Fetch/Node/Express/Fastify-style request objects
+- `makeOtlpOptions` for turning a backend-neutral OTLP HTTP collector endpoint
+  into metrics/traces/logs URLs while forwarding headers, custom `fetch`,
+  timeout, retry, pipeline tuning, and optional signal selection
 - OTLP log export, server-side HTTP request metrics/spans, span retention
   pruning, single-flight flush behavior, collector smoke script, and
   observability benchmark budgets

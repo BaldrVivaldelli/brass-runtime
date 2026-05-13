@@ -3,6 +3,7 @@ import type { HttpClientFn, HttpMiddleware, HttpError, HttpRequest } from "./cli
 import type { Exit } from "../core/types/effect";
 import { registerHttpEffect } from "./effectRunner";
 import type { AdaptiveLimiter } from "./adaptiveLimiter";
+import { getHttpRequestPolicy } from "./requestPolicy";
 
 export type HttpCircuitBreakerConfig = CircuitBreakerConfig & {
   /** Key resolver for per-origin circuit breakers. Default: per-origin. */
@@ -130,7 +131,8 @@ function resolveAdaptiveLimiterKey(
 ): string | undefined {
   if (!limiter) return undefined;
   if (config.adaptiveLimiterKey) return config.adaptiveLimiterKey(req);
-  if (req.poolKey) return req.poolKey;
+  const poolKey = getHttpRequestPolicy(req).poolKey;
+  if (poolKey) return poolKey;
   if (limiter.keyResolver === "global") return "global";
   try {
     const url = new URL(req.url);

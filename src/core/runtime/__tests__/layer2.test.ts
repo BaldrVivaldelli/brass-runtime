@@ -4,6 +4,7 @@ import { asyncFail, asyncFlatMap, asyncSucceed, asyncSync } from "../../types/as
 import {
   buildLayer,
   compose,
+  composeAll,
   layer,
   Layer,
   LayerContext,
@@ -15,8 +16,11 @@ import {
   makeServiceTag,
   mapLayer,
   merge,
+  mergeAll,
   provideLayer,
   provideLayerContext,
+  useService,
+  useServices,
 } from "../layer";
 import { Runtime } from "../runtime";
 import { neverEffect } from "../testing";
@@ -149,6 +153,62 @@ describe("Layer 2.0", () => {
       Layer.succeed({ a: 1 }),
       (svc) => asyncSucceed(svc.a),
     ))).resolves.toBe(1);
+  });
+
+  it("merges many layers and consumes typed services without unsafe context reads", async () => {
+    const Config = Layer.tag<{ readonly baseUrl: string }>("Config");
+    const Http = Layer.tag<{ readonly get: (path: string) => string }>("Http");
+    const Repo = Layer.tag<{ readonly findUser: (id: string) => string }>("Repo");
+
+    const ConfigLayer = Layer.value(Config, { baseUrl: "https://api.example.com" });
+    const HttpLayer = Layer.effect(Http, (ctx) => {
+      const config = ctx.unsafeGet(Config);
+      return asyncSucceed({ get: (path: string) => `${config.baseUrl}${path}` });
+    });
+    const RepoLayer = Layer.effect(Repo, (ctx) => {
+      const http = ctx.unsafeGet(Http);
+      return asyncSucceed({ findUser: (id: string) => http.get(`/users/${id}`) });
+    });
+
+    const AppLayer = composeAll(ConfigLayer, HttpLayer, RepoLayer);
+
+    await expect(run(provideLayerContext(
+      AppLayer,
+      useServices({ config: Config, repo: Repo }, ({ config, repo }) =>
+        asyncSucceed({
+          baseUrl: config.baseUrl,
+          userUrl: repo.findUser("42"),
+        })
+      ),
+    ))).resolves.toEqual({
+      baseUrl: "https://api.example.com",
+      userUrl: "https://api.example.com/users/42",
+    });
+
+    await expect(run(provideLayerContext(
+      AppLayer,
+      Layer.useAll({ http: Http }, ({ http }) => asyncSucceed(http.get("/health"))),
+    ))).resolves.toBe("https://api.example.com/health");
+
+    await expect(run(provideLayerContext(
+      Layer.all(Layer.value(Config, { baseUrl: "left" }), Layer.value(Http, { get: (path) => `right${path}` })),
+      Layer.useAll({ config: Config, http: Http }, ({ config, http }) =>
+        asyncSucceed(`${config.baseUrl}:${http.get("/ok")}`)
+      ),
+    ))).resolves.toBe("left:right/ok");
+  });
+
+  it("surfaces missing services through useService", async () => {
+    const Existing = Layer.tag<{ readonly ok: true }>("Existing");
+    const Missing = Layer.tag<{ readonly value: string }>("Missing");
+
+    await expect(run(provideLayerContext(
+      Layer.value(Existing, { ok: true }),
+      useService(Missing, (service) => asyncSucceed(service.value)),
+    ))).rejects.toMatchObject({
+      _tag: "MissingLayerService",
+      serviceName: "Missing",
+    });
   });
 
   it("runs layer finalizers when provided use is interrupted", async () => {

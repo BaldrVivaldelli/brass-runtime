@@ -215,6 +215,9 @@ The exporters are dependency-free:
 - `withHttpObservability` adds client request spans, `traceparent` propagation,
   request metrics, structured HTTP logs, and adaptive limiter gauges/span
   attributes when the wrapped client owns a limiter.
+- HTTP request `policy` is included in logs and span attributes automatically.
+  Metric labels for policy fields are opt-in with `policy.labelKeys` so lanes
+  or dedup keys do not accidentally create high-cardinality series.
 - `parseTraceparent`, `extractTraceContext`, `formatTraceparent`, and
   `injectTraceContext` provide backend-neutral W3C trace-context helpers.
 - `baggage` is extracted, merged into the runtime trace seed, and propagated
@@ -232,6 +235,137 @@ The exporters are dependency-free:
   limiter health.
 - `makeObservability` returns `hooks`, `env`, `metrics`, `tracer`, exporters,
   plus `flush()`, `start()`, `stop()`, and `shutdown()`.
+
+### High-TPS HTTP proxy path
+
+For BFF/proxy paths where p99 matters more than full per-request tracing, keep
+HTTP client metrics separate from global runtime hooks. Runtime hooks are useful
+for fiber/span/log visibility, but on a hot proxy path they add work to every
+effect execution.
+
+```ts
+import { Runtime } from "brass-runtime/core";
+import { makeDefaultHttpClient } from "brass-runtime/http";
+import { makeObservability, withHttpObservability } from "brass-runtime/observability";
+
+const observability = makeObservability({
+  metrics: false,
+  logs: false,
+  traces: false,
+  autoStart: false,
+});
+
+// Deliberately no observability hooks on this runtime.
+const runtime = Runtime.make({});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "highThroughputProxy",
+  middleware: [
+    withHttpObservability({
+      metrics: observability.metrics,
+      logs: false,
+      spans: false,
+      adaptiveLimiter: false,
+      injectTraceHeaders: false,
+      includeHostLabel: false,
+      route: "/downstream/:id",
+    }),
+  ],
+});
+
+await runtime.toPromise(http.getJson("/downstream/123"));
+```
+
+Use stable `route` values instead of raw URLs, and enable `includeHostLabel`
+only when the client really talks to multiple downstream hosts. If you need
+traces on the same path, prefer HTTP-only sampled spans through `spanSink`
+instead of global runtime hooks. Use a separate fully observed runtime/client
+for diagnostic flows that need every fiber event.
+
+For a sampled span path with lower per-request overhead, keep runtime metrics
+off, avoid runtime hooks, avoid per-request HTTP span events, and only inject
+`traceparent` when a downstream needs propagation:
+
+```ts
+const traced = makeObservability({
+  metrics: false,
+  logs: false,
+  sampling: 0.001,
+  autoStart: false,
+});
+
+const tracedRuntime = new Runtime({
+  env: traced.env,
+});
+
+const tracedHttp = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "highThroughputProxy",
+  middleware: [
+    withHttpObservability({
+      metrics: traced.metrics,
+      logs: false,
+      spans: { events: false, sampleRate: 0.001 },
+      spanSink: traced.tracer,
+      adaptiveLimiter: false,
+      injectTraceHeaders: false,
+      includeHostLabel: false,
+      route: "/downstream/:id",
+    }),
+  ],
+});
+```
+
+`sampleRate` lets the HTTP middleware skip tracing before touching the current
+fiber/runtime on unsampled requests. This keeps p99 low on hot proxy paths while
+still retaining a sampled trace stream.
+
+### HTTP policy observability
+
+```ts
+const policies = defineHttpPolicyPresets({
+  readModel: {
+    lane: "read-model",
+    poolKey: "users-api",
+    retry: { maxRetries: 2, baseDelayMs: 50 },
+  },
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  policyPresets: policies,
+  middleware: [
+    withHttpObservability({
+      metrics: obs.metrics,
+      route: "/users/:id",
+      policy: { labelKeys: ["preset", "lane", "poolKey"] },
+    }),
+  ],
+});
+
+await http.getJson("/users/1", {
+  policy: { preset: "readModel", dedupKey: "users:1" },
+}).unsafeRunPromise();
+```
+
+The request log and HTTP span carry the policy context. Prometheus metrics only
+receive `policy`, `lane`, and `pool_key` because those labels were explicitly
+allowed.
+Fetch/transport errors with status metadata also flow into HTTP error metrics
+and span events, and include a `http.retryable` signal for retry dashboards.
+
+The stable dashboard contract is exported as `HTTP_OBSERVABILITY_CONTRACT`:
+
+| Signal | Contract |
+|--------|----------|
+| Requests | `brass_http_client_requests_total` with `method`, `host`, `route`, `outcome`, `status` |
+| Duration | `brass_http_client_duration_ms` histogram with the same labels |
+| In-flight | `brass_http_client_in_flight` with request labels only |
+| Policy labels | opt-in `policy`, `lane`, `pool_key`, `dedup_key`, `priority`, `retry` |
+| Adaptive limiter | `brass_http_adaptive_limiter_*` gauges, optional `key` label |
+| Span events | `http.client.response` / `http.client.error` |
+| Error attrs | `http.status_code`, `error.type`, `http.retryable` |
 
 ### Production hardening
 
@@ -277,6 +411,156 @@ collector does not create overlapping exports.
 
 Finished spans are pruned after successful export and can also be bounded with
 `traces.maxFinishedSpans` / `traces.maxSpanAgeMs`.
+
+### Vendor-neutral collector recipes
+
+Brass intentionally does not know about Grafana Cloud, AppDynamics, or any
+OpenTelemetry SDK implementation. The runtime only needs OTLP HTTP endpoint
+URLs, headers, and optional export tuning. Keep vendor naming in application
+code by writing small helpers that call the backend-neutral `makeOtlpOptions`.
+
+```ts
+import {
+  makeObservability,
+  makeOtlpOptions,
+  type ObservabilityOtlpOptions,
+} from "brass-runtime/observability";
+
+function productionOtlp(input: {
+  readonly endpoint: string;
+  readonly headers?: Record<string, string>;
+}): ObservabilityOtlpOptions {
+  return makeOtlpOptions({
+    endpoint: input.endpoint,
+    headers: input.headers,
+    timeoutMs: 10_000,
+    retry: { attempts: 3, initialDelayMs: 100, maxDelayMs: 2_000 },
+    pipeline: {
+      maxQueueSize: 10_000,
+      batchSize: 512,
+      dropPolicy: "drop-oldest",
+      shutdownTimeoutMs: 10_000,
+    },
+  });
+}
+```
+
+Grafana Cloud can be configured as a direct OTLP endpoint or through
+Grafana Alloy/OpenTelemetry Collector. The helper stays in your app and only
+returns Brass OTLP config:
+
+```ts
+function grafanaCloudCollector(input: {
+  readonly endpoint: string;
+  readonly authorization?: string;
+}): ObservabilityOtlpOptions {
+  return productionOtlp({
+    endpoint: input.endpoint,
+    headers: input.authorization
+      ? { Authorization: input.authorization }
+      : undefined,
+  });
+}
+
+const observability = makeObservability({
+  serviceName: "shopping-ms",
+  serviceVersion: "1.2.3",
+  resource: {
+    "service.namespace": "shopping",
+    "deployment.environment": "production",
+  },
+  otlp: grafanaCloudCollector({
+    endpoint: process.env.GRAFANA_OTLP_ENDPOINT!,
+    authorization: process.env.GRAFANA_OTLP_AUTHORIZATION,
+  }),
+});
+```
+
+For AppDynamics, prefer sending Brass telemetry to the AppDynamics/OpenTelemetry
+Collector deployed next to the service. Authentication and vendor-specific
+exporters stay in the collector config:
+
+```ts
+function appDynamicsCollector(input: {
+  readonly endpoint: string;
+}): ObservabilityOtlpOptions {
+  return productionOtlp({
+    endpoint: input.endpoint,
+  });
+}
+
+const observability = makeObservability({
+  serviceName: "car-rental-ms",
+  serviceVersion: "1.2.3",
+  resource: {
+    "service.namespace": "car-rental",
+    "deployment.environment": "production",
+  },
+  otlp: appDynamicsCollector({
+    endpoint: process.env.APPD_OTEL_COLLECTOR_ENDPOINT ?? "http://appd-otel-collector:4318",
+  }),
+});
+```
+
+Then attach the same observability instance to HTTP without changing the
+collector helpers:
+
+```ts
+import { makeDefaultHttpClient } from "brass-runtime/http";
+import { withHttpObservability } from "brass-runtime/observability";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  middleware: [withHttpObservability(observability)],
+});
+```
+
+For applications that use Brass layers, observability can own both the
+observability lifecycle and an observed HTTP client:
+
+```ts
+import { Layer } from "brass-runtime/core";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{
+  readonly serviceName: string;
+  readonly apiBaseUrl: string;
+  readonly otlpEndpoint: string;
+}>("Config");
+
+const ConfigLayer = Layer.value(Config, {
+  serviceName: "orders-api",
+  apiBaseUrl: "https://users-api.internal",
+  otlpEndpoint: "http://grafana-alloy:4318",
+});
+
+const ObservabilityLayer = makeObservabilityLayer((ctx) => {
+  const config = ctx.unsafeGet(Config);
+  return {
+    serviceName: config.serviceName,
+    otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }),
+    flushIntervalMs: 10_000,
+    autoStart: true,
+  };
+});
+
+const HttpLayer = makeObservedHttpClientLayer((ctx) => ({
+  baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+  preset: "production",
+}));
+
+const AppLayer = Layer.composeAll(ConfigLayer, ObservabilityLayer, makeObservedRuntimeLayer(), HttpLayer);
+
+const program = Layer.use(HttpClientService, (http) =>
+  http.getJson("/users/42"),
+);
+```
 
 Sampling can be configured globally, by ratio, or with rules:
 
@@ -374,6 +658,10 @@ const router = makeHttpRouter([
 
 Runnable framework examples live in
 [`docs/observability-framework-examples.md`](./observability-framework-examples.md).
+Production-style framework integration recipes live in
+[`docs/framework-integrations.md`](./framework-integrations.md).
+For a NestJS module recipe with Grafana/OTLP, DI tokens, HTTP client
+observability, and shutdown wiring, see [`docs/frameworks/nestjs.md`](./frameworks/nestjs.md).
 
 Collector smoke and performance budget helpers:
 

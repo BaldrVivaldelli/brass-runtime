@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Runtime } from "../../core/runtime/runtime";
+import type { MetricsRegistry } from "../../core/runtime/metrics";
 import { asyncFail, asyncSucceed } from "../../core/types/asyncEffect";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../../http/client";
 import type { AdaptiveLimiterStats } from "../../http/adaptiveLimiter";
@@ -130,6 +131,245 @@ describe("HTTP observability middleware", () => {
     );
   });
 
+  it("projects request policy into logs, spans, and opt-in metric labels", async () => {
+    const logs: StructuredLogRecord[] = [];
+    const obs = makeObservability({
+      logs: { write: (record) => logs.push(record) },
+    });
+    const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: { requestLevel: "debug", responseLevel: "info" },
+      route: "/users",
+      policy: { labelKeys: ["preset", "lane", "poolKey", "retry"] },
+      clock: (() => {
+        let now = 500;
+        return () => now += 5;
+      })(),
+    })(downstream);
+
+    await expect(rt.toPromise(client({
+      method: "GET",
+      url: "https://api.example.test/users?token=secret",
+      policy: {
+        preset: "readModel",
+        lane: "read-model",
+        poolKey: "crm-api",
+        dedupKey: "users:list",
+        priority: 4,
+        retry: { maxRetries: 2, baseDelayMs: 20 },
+      },
+    }))).resolves.toMatchObject({ status: 200 });
+    await flushEvents();
+
+    expect(logs[0].fields).toMatchObject({
+      method: "GET",
+      policy: {
+        preset: "readModel",
+        lane: "read-model",
+        poolKey: "crm-api",
+        dedupKey: "users:list",
+        priority: 4,
+        retry: {
+          mode: "override",
+          maxRetries: 2,
+          baseDelayMs: 20,
+        },
+      },
+    });
+
+    const metrics = formatPrometheusMetrics(obs.metrics.snapshot());
+    expect(metrics).toContain('brass_http_client_requests_total{host="api.example.test",lane="read-model",method="GET",outcome="success",policy="readModel",pool_key="crm-api",retry="override",route="/users",status="200"} 1');
+    expect(metrics).toContain('brass_http_client_in_flight{host="api.example.test",lane="read-model",method="GET",policy="readModel",pool_key="crm-api",retry="override",route="/users"} 0');
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan?.attrs).toMatchObject({
+      "http.request.policy.preset": "readModel",
+      "http.request.policy.lane": "read-model",
+      "http.request.policy.pool_key": "crm-api",
+      "http.request.policy.dedup_key": "users:list",
+      "http.request.policy.priority": 4,
+      "http.request.policy.retry": "override",
+      "http.request.policy.retry.max_retries": 2,
+      "http.request.policy.retry.base_delay_ms": 20,
+    });
+  });
+
+  it("caches metric handles for repeated HTTP label sets", async () => {
+    const counter = { increment: vi.fn(), value: vi.fn(() => 0) };
+    const gauge = {
+      set: vi.fn(),
+      increment: vi.fn(),
+      decrement: vi.fn(),
+      value: vi.fn(() => 1),
+    };
+    const histogram = {
+      observe: vi.fn(),
+      buckets: vi.fn(() => ({
+        boundaries: [],
+        counts: [0],
+        sum: 0,
+        count: 0,
+        min: Infinity,
+        max: -Infinity,
+      })),
+      percentile: vi.fn(() => 0),
+    };
+    const metrics: MetricsRegistry = {
+      counter: vi.fn(() => counter),
+      gauge: vi.fn(() => gauge),
+      histogram: vi.fn(() => histogram),
+      snapshot: vi.fn(() => ({ counters: [], gauges: [], histograms: [] })),
+      reset: vi.fn(),
+    };
+    const rt = Runtime.make({});
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics,
+      logs: false,
+      spans: false,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+      clock: (() => {
+        let now = 0;
+        return () => now += 2;
+      })(),
+    })(downstream);
+
+    await rt.toPromise(client({ method: "GET", url: "/users/1" }));
+    await rt.toPromise(client({ method: "GET", url: "/users/2" }));
+
+    expect(metrics.gauge).toHaveBeenCalledTimes(1);
+    expect(metrics.counter).toHaveBeenCalledTimes(1);
+    expect(metrics.histogram).toHaveBeenCalledTimes(1);
+    expect(gauge.increment).toHaveBeenCalledTimes(2);
+    expect(gauge.decrement).toHaveBeenCalledTimes(2);
+    expect(counter.increment).toHaveBeenCalledTimes(2);
+    expect(histogram.observe).toHaveBeenCalledTimes(2);
+
+    metrics.reset();
+    await rt.toPromise(client({ method: "GET", url: "/users/3" }));
+
+    expect(metrics.gauge).toHaveBeenCalledTimes(2);
+    expect(metrics.counter).toHaveBeenCalledTimes(2);
+    expect(metrics.histogram).toHaveBeenCalledTimes(2);
+  });
+
+  it("can record HTTP spans without per-request span events", async () => {
+    const obs = makeObservability({
+      metrics: false,
+      logs: false,
+    });
+    const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false },
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    await expect(rt.toPromise(client({ method: "GET", url: "https://api.example.test/users/1" }))).resolves.toMatchObject({
+      status: 200,
+    });
+    await flushEvents();
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan).toBeDefined();
+    expect(httpSpan?.events.some((event) => event.name === "http.client.response")).toBe(false);
+  });
+
+  it("can record sampled HTTP spans through a direct span sink without runtime hooks", async () => {
+    const obs = makeObservability({
+      metrics: false,
+      logs: false,
+    });
+    const rt = new Runtime({ env: obs.env });
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false, sampleRate: 1 },
+      spanSink: obs.tracer,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    await expect(rt.toPromise(client({ method: "GET", url: "https://api.example.test/users/1" }))).resolves.toMatchObject({
+      status: 200,
+    });
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan).toBeDefined();
+    expect(httpSpan?.events.some((event) => event.name === "http.client.response")).toBe(false);
+
+    const skipped = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false, sampleRate: 0 },
+      spanSink: obs.tracer,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    const before = obs.tracer.exportFinished().length;
+    await rt.toPromise(skipped({ method: "GET", url: "https://api.example.test/users/2" }));
+    expect(obs.tracer.exportFinished()).toHaveLength(before);
+  });
+
+  it("uses HTTP error status metadata for metrics, logs, and retryability", async () => {
+    const logs: StructuredLogRecord[] = [];
+    const obs = makeObservability({
+      logs: { write: (record) => logs.push(record) },
+    });
+    const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
+    const error: HttpError = {
+      _tag: "FetchError",
+      message: "upstream unavailable",
+      status: 503,
+      statusText: "Service Unavailable",
+    };
+    const downstream: HttpClientFn = () => asyncFail(error);
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: { errorLevel: "warn" },
+    })(downstream);
+
+    await expect(rt.toPromise(client({ method: "GET", url: "https://api.example.test/down" }))).rejects.toEqual(error);
+    await flushEvents();
+
+    expect(logs[0]).toMatchObject({
+      level: "warn",
+      message: "http.client.error",
+      fields: {
+        outcome: "fetch_error",
+        status: 503,
+        statusText: "Service Unavailable",
+        retryable: true,
+        errorTag: "FetchError",
+      },
+    });
+
+    const metrics = formatPrometheusMetrics(obs.metrics.snapshot());
+    expect(metrics).toContain('brass_http_client_requests_total{host="api.example.test",method="GET",outcome="fetch_error",status="503"} 1');
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan?.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "http.client.error",
+          attrs: expect.objectContaining({
+            "http.status_code": 503,
+            "http.retryable": true,
+            "error.type": "FetchError",
+          }),
+        }),
+      ]),
+    );
+  });
+
   it("records adaptive limiter diagnostics when the downstream client exposes them", async () => {
     const obs = makeObservability();
     const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
@@ -188,5 +428,49 @@ describe("HTTP observability middleware", () => {
         }),
       ]),
     );
+  });
+
+  it("prefers policy poolKey for adaptive limiter labels", async () => {
+    const obs = makeObservability();
+    const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
+    const limiterStats: AdaptiveLimiterStats = {
+      limit: 3,
+      inFlight: 1,
+      queueDepth: 0,
+      gradient: 1,
+      latencyGradient: 1,
+      errorRate: 0,
+      smoothedLatency: 20,
+      minLatency: 10,
+      baselineLatency: 10,
+      p5: 10,
+      p50: 20,
+      p99: 60,
+      probeCount: 0,
+      windowSize: 10,
+      utilization: 1 / 3,
+      requestsPerSecond: 30,
+      completionsPerSecond: 29,
+      rejectionRate: 0,
+      stateCount: 1,
+      keys: ["fallback"],
+    };
+    const downstream = Object.assign(
+      (() => asyncSucceed(ok())) as HttpClientFn,
+      { adaptiveLimiter: { stats: () => limiterStats } },
+    );
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      adaptiveLimiter: { includeKeyLabel: true },
+    })(downstream);
+
+    await expect(rt.toPromise(client({
+      method: "GET",
+      url: "https://api.example.test/limited",
+      policy: { poolKey: "crm-api" },
+    }))).resolves.toMatchObject({ status: 200 });
+
+    const metrics = formatPrometheusMetrics(obs.metrics.snapshot());
+    expect(metrics).toContain('brass_http_adaptive_limiter_limit{host="api.example.test",key="crm-api",method="GET"} 3');
   });
 });

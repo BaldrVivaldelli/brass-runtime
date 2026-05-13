@@ -57,6 +57,53 @@ npm run build
 npm run validate:cjs
 ```
 
+### HTTP transport and error DX
+
+HTTP is a high-level effect module, not a fetch wrapper. The wire client keeps
+timeouts, cancellation, pools/adaptive limiter, stats, retry, cache, dedup, and
+middleware ownership inside Brass while letting callers swap the final I/O
+backend.
+
+Rules for HTTP transport work:
+
+- Keep `fetch` as the default backend, but model transport as
+  `HttpTransport = (context) => Async<unknown, HttpError, HttpWireResponse>`.
+- For Node-only BFF/proxy hot paths, prefer `makeNodeHttpTransport()` when
+  local benchmark evidence shows the default `fetch` backend is the bottleneck.
+  Keep it optional and injectable; browser/edge runtimes should keep `fetch` or
+  provide their own platform transport.
+- For Promise-based clients, use the fluent path in examples:
+
+```ts
+promiseHttpTransport()
+  .requestConfig(({ request, url }) => ({
+    url: url.toString(),
+    method: request.method,
+    headers: request.headers,
+    data: request.body,
+    responseType: "json",
+  }))
+  .send((config) => axiosInstance.request(config))
+  .json();
+```
+
+- Do not make consumers write `signal` in the happy path. Brass injects the
+  runtime `AbortSignal` into object configs before `send`, so host clients still
+  receive real cancellation.
+- Normalize external failures through `toHttpError` in `src/http/errors.ts`.
+  It should preserve tagged `HttpError`s, map aborts to `Abort`, common timeout
+  codes to `Timeout`, and Axios-like `response.status` / `statusText` to
+  `FetchError` metadata.
+- Retryability should be explicit. `Timeout`, `PoolTimeout`, and transient
+  `FetchError` statuses are retryable; `Abort`, `BadUrl`, `PoolRejected`, and
+  non-transient status errors such as `404` are not.
+- Per-request execution metadata belongs in `HttpRequest.policy`
+  (`preset`, `priority`, `dedupKey`, `retry`, `poolKey`, `lane`). Keep legacy
+  top-level fields compatible, but prefer policy in new code and docs.
+- Repeated policy should be named with `defineHttpPolicyPresets` and wired via
+  `makeDefaultHttpClient({ policyPresets })`; requests may use
+  `policy: "name"` or `policy: { preset: "name", ...overrides }`.
+
 ### Mandatory performance discipline
 
 Every feature must finish with correctness validation and a performance pass.
@@ -365,8 +412,9 @@ compression, stats, cache controls, and `cancelAll`.
 
 Preset defaults:
 
+- `production`: explicit production-ready alias for the full default stack.
 - `default`: timeout, dedup, priority, retry, adaptive limiter, safe-method
-  response cache, response compression.
+  response cache, response compression. Kept as compatibility spelling.
 - `balanced`: production shape without default response cache.
 - `minimal`: wire client + helper API; opt into layers explicitly.
 
@@ -379,6 +427,9 @@ and `adaptiveMaxQueueDepth` before assuming a memory leak.
 Observability is attached through `middleware: [withHttpObservability(obs)]`.
 Do not import observability exporters from `src/http`; keep observability as an
 outer integration layer.
+`withHttpObservability` reads `req.policy` automatically: logs and spans get
+the policy context, while metric labels for `preset`, `lane`, `poolKey`,
+`dedupKey`, `priority`, or `retry` are opt-in via `policy.labelKeys`.
 
 ### 5) Lifecycle client: `makeHttpClient` / `makeLifecycleClient`
 
@@ -423,7 +474,10 @@ Public production surface lives in `brass-runtime/observability`:
   OTLP exporters.
 - `withSpan`, `spanEvent`, `logEffect`, and `withLogContext` operate through
   current fiber context.
-- `withHttpObservability` instruments outbound HTTP client calls.
+- `withHttpObservability` instruments outbound HTTP client calls, including
+  policy context in logs/spans and opt-in low-cardinality policy labels.
+- `HTTP_OBSERVABILITY_CONTRACT` documents stable metric names, labels, span
+  attributes, and log messages for dashboards.
 - `runObservedHttpServerEffect` and request adapters instrument inbound server
   work.
 - `parseTraceparent`, `extractTraceContext`, `injectTraceContext`, and

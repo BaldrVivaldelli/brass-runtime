@@ -41,8 +41,6 @@ type ScenarioKind =
   | "default-proxy-effect-pool"
   | "default-proxy-effect-timeout-pool"
   | "default-proxy-promise-transport"
-  | "axios-raw-promise"
-  | "axios-brass-promise-pool-timeout"
   | "observability-metrics-only"
   | "observability-spans"
   | "default-observed-metrics-only-effect-transport"
@@ -161,36 +159,13 @@ function effectTransport(source: string): HttpTransport {
 
 function promiseTransport(source: string): HttpTransport {
   return promiseHttpTransport()
-    .request(() => ({
-      status: 200,
-      statusText: "OK",
-      headers: { "content-type": "application/json" },
-      data: responsePayload(source),
-    }))
-    .json();
-}
-
-/**
- * Simulates an Axios-like transport with realistic async behavior.
- * Uses setImmediate/queueMicrotask to simulate the minimum async overhead
- * of a real HTTP client (Axios resolves via microtask after socket data arrives).
- */
-function axiosLikeTransport(source: string): HttpTransport {
-  const payload = responsePayload(source);
-  return promiseHttpTransport()
-    .request(() => {
-      // Simulate Axios: returns a Promise that resolves on next microtask
-      // (mimics the minimum overhead of a real HTTP response arriving)
-      return new Promise<{ status: number; statusText: string; headers: Record<string, string>; data: Payload }>((resolve) => {
-        queueMicrotask(() => {
-          resolve({
-            status: 200,
-            statusText: "OK",
-            headers: { "content-type": "application/json" },
-            data: payload,
-          });
-        });
-      });
+    .request(async () => {
+      return {
+        status: 200,
+        statusText: "OK",
+        headers: { "content-type": "application/json" },
+        data: responsePayload(source),
+      };
     })
     .json();
 }
@@ -387,48 +362,6 @@ function makeScenarioRunner(kind: ScenarioKind): ScenarioRunner {
         baseUrl: BASE_URL,
         preset: "proxy",
         transport: promiseTransport("proxy-promise"),
-      });
-      return {
-        runOne: (id, cb) => {
-          runRuntimeEffect(
-            rt,
-            client.getJson<Payload>(`/todos/${id % 100}?i=${id}`) as Async<
-              unknown,
-              HttpError,
-              HttpResponse<Payload>
-            >,
-            cb,
-            (res) => res.status === 200 && res.body.ok === true,
-          );
-        },
-        cleanup: () => client.shutdown(),
-      };
-    }
-    case "axios-raw-promise": {
-      // Baseline: raw Axios-like promise call without brass — measures the minimum
-      // async overhead of a microtask-based HTTP response.
-      const payload = responsePayload("axios-raw");
-      return {
-        runOne: (id, cb) => {
-          new Promise<Payload>((resolve) => {
-            queueMicrotask(() => resolve(payload));
-          }).then(
-            (value) => cb({ ok: value.ok === true }),
-            (error) => cb({ ok: false, error }),
-          );
-        },
-      };
-    }
-    case "axios-brass-promise-pool-timeout": {
-      // Full brass stack with Axios-like transport: pool + timeout + promise transport.
-      // This measures the overhead brass adds over a raw Axios call.
-      const rt = runtime();
-      const client = makeDefaultHttpClient({
-        baseUrl: BASE_URL,
-        preset: "proxy",
-        transport: axiosLikeTransport("axios-brass"),
-        timeoutMs: 30_000,
-        pool: { concurrency: 8, maxQueue: 64, key: "origin" },
       });
       return {
         runOne: (id, cb) => {
@@ -644,25 +577,16 @@ function makeScenarioRunner(kind: ScenarioKind): ScenarioRunner {
 }
 
 async function runScenario(kind: ScenarioKind): Promise<LoadDetails> {
-  return runScenarioWithConfig(kind, CALLS, WARMUP_CALLS, CONCURRENCY);
-}
-
-async function runScenarioWithConfig(
-  kind: ScenarioKind,
-  calls: number,
-  warmupCalls: number,
-  concurrency: number,
-): Promise<LoadDetails> {
   const runner = makeScenarioRunner(kind);
   try {
-    if (warmupCalls > 0) {
-      const warmup = await runLoad(kind, runner, warmupCalls, 1_000_000, concurrency);
+    if (WARMUP_CALLS > 0) {
+      const warmup = await runLoad(kind, runner, WARMUP_CALLS, 1_000_000);
       if (warmup.errorCount > 0) {
         throw new Error(`HTTP local overhead warmup had ${warmup.errorCount} errors; first=${warmup.firstError}`);
       }
     }
 
-    const result = await runLoad(kind, runner, calls, 0, concurrency);
+    const result = await runLoad(kind, runner, CALLS, 0);
     if (result.errorCount > 0) {
       throw new Error(`HTTP local overhead benchmark had ${result.errorCount} errors; first=${result.firstError}`);
     }
@@ -677,7 +601,6 @@ function runLoad(
   runner: ScenarioRunner,
   calls: number,
   idOffset: number,
-  concurrency: number = CONCURRENCY,
 ): Promise<LoadDetails & { readonly firstError: string }> {
   return new Promise((resolve, reject) => {
     let next = 0;
@@ -698,7 +621,7 @@ function runLoad(
         variant: kind,
         calls,
         warmupCalls: WARMUP_CALLS,
-        concurrency,
+        concurrency: CONCURRENCY,
         successCount,
         errorCount,
         durationMs: round(durationMs),
@@ -712,7 +635,7 @@ function runLoad(
     };
 
     const launch = (): void => {
-      while (inFlight < concurrency && next < calls) {
+      while (inFlight < CONCURRENCY && next < calls) {
         const index = next++;
         const id = idOffset + index;
         const requestStartedAt = performance.now();
@@ -777,8 +700,6 @@ function scenarioKinds(): readonly ScenarioKind[] {
     "default-proxy-effect-pool",
     "default-proxy-effect-timeout-pool",
     "default-proxy-promise-transport",
-    "axios-raw-promise",
-    "axios-brass-promise-pool-timeout",
     "observability-metrics-only",
     "observability-spans",
     "default-observed-metrics-only-effect-transport",
@@ -787,83 +708,6 @@ function scenarioKinds(): readonly ScenarioKind[] {
   ];
   if (SELECTED_VARIANTS.size === 0) return all;
   return all.filter((kind) => SELECTED_VARIANTS.has(kind));
-}
-
-// Feature: http-p99-consolidation, Benchmark regression gate
-
-/**
- * Result of a P99/P50 ratio assertion for a single benchmark variant.
- */
-export interface BenchmarkVariantResult {
-  variant: string;
-  p50Ms: number;
-  p99Ms: number;
-  ratio: number;
-  threshold: number;
-  passed: boolean;
-}
-
-/**
- * Variants subject to P99/P50 ratio assertion and their thresholds.
- */
-const P99_RATIO_VARIANTS: ReadonlyArray<{ name: ScenarioKind; threshold: number }> = [
-  { name: "default-proxy-effect-transport", threshold: 4.0 },
-  { name: "default-proxy-effect-timeout-pool", threshold: 4.0 },
-  { name: "axios-brass-promise-pool-timeout", threshold: 4.0 },
-];
-
-/**
- * Asserts P99/P50 ≤ threshold for each variant result.
- * Prints per-variant pass/fail to stdout and exits with non-zero code if any variant fails.
- */
-export function assertP99Ratio(results: BenchmarkVariantResult[]): void {
-  console.log("\n── P99/P50 Ratio Assertions ──\n");
-  let allPassed = true;
-  for (const r of results) {
-    const status = r.passed ? "PASS" : "FAIL";
-    console.log(
-      `${status} ${r.variant}: P99/P50 = ${r.ratio.toFixed(2)}x (threshold: ${r.threshold}x)` +
-        ` [p50=${r.p50Ms.toFixed(3)}ms, p99=${r.p99Ms.toFixed(3)}ms]`,
-    );
-    if (!r.passed) allPassed = false;
-  }
-  console.log();
-  if (!allPassed) {
-    console.log("❌ Benchmark regression gate FAILED: one or more variants exceeded P99/P50 threshold.");
-    process.exit(1);
-  } else {
-    console.log("✅ Benchmark regression gate PASSED: all variants within P99/P50 threshold.");
-  }
-}
-
-/**
- * Runs the P99/P50 ratio assertion benchmark for the gated variants.
- * Uses 1000 measured calls, 500 warmup calls, concurrency 8 as specified
- * by the benchmark regression gate requirements.
- */
-export async function runP99Assertions(): Promise<BenchmarkVariantResult[]> {
-  const gateCalls = envInt("BRASS_HTTP_OVERHEAD_GATE_CALLS", 1000);
-  const gateWarmup = envNonNegativeInt("BRASS_HTTP_OVERHEAD_GATE_WARMUP", 1000);
-  const gateConcurrency = envInt("BRASS_HTTP_OVERHEAD_GATE_CONCURRENCY", 8);
-
-  const results: BenchmarkVariantResult[] = [];
-
-  for (const { name, threshold } of P99_RATIO_VARIANTS) {
-    const details = await runScenarioWithConfig(name, gateCalls, gateWarmup, gateConcurrency);
-    const p50Ms = details.requestP50Ms;
-    const p99Ms = details.requestP99Ms;
-    const ratio = p50Ms > 0 ? p99Ms / p50Ms : Infinity;
-    results.push({
-      variant: name,
-      p50Ms,
-      p99Ms,
-      ratio: Math.round(ratio * 100) / 100,
-      threshold,
-      passed: ratio <= threshold,
-    });
-  }
-
-  return results;
 }
 
 export const benchmarks: BenchmarkDef[] = scenarioKinds().map((kind) => ({

@@ -57,6 +57,9 @@ The HTTP module (`src/http`) is composed of several sub-modules:
 
 - **Wire client** (`client.ts`, `httpClient.ts`): Low-level fetch wrapper with pool, timeout, typed errors.
 - **Default client** (`defaultClient.ts`): Recommended one-stop HTTP factory with DX helpers, lifecycle defaults, compression, stats, and middleware integration.
+- **Transport boundary** (`transport.ts`): Effect-based transport abstraction, fetch defaults, and Promise/fluent adapter DX for Axios/undici/internal clients.
+- **Node transport** (`nodeTransport.ts`): Optional Node-only `node:http` / `node:https` keep-alive transport for high-TPS BFF/proxy services.
+- **Request construction/policy** (`requestBuilder.ts`, `requestPolicy.ts`): Shared request sanitization and structured per-request execution knobs.
 - **Lifecycle** (`lifecycle/`): Middleware composition — dedup, batch, cache, priority, retry, stats.
 - **Compression** (`compression/`): Response decompression middleware (gzip, br, deflate) with environment detection.
 - **Adaptive Limiter** (`adaptiveLimiter/`): Gradient-based adaptive concurrency control per-key.
@@ -64,6 +67,8 @@ The HTTP module (`src/http`) is composed of several sub-modules:
 - **Retry** (`retry/`): Retry middleware with backoff, circuit breaker awareness, priority boost.
 - **Optics** (`optics/`): Response lenses and transformers.
 - **Schema validation** (`validation.ts`): First-party JSON response/request validation integrated with DX helpers.
+- **Layer/DI helpers** (`layer.ts`): Optional service tags and application
+  graph helpers for owning default HTTP client lifecycle.
 
 ### Lifecycle middleware stack (innermost to outermost)
 
@@ -81,6 +86,44 @@ observability as the outermost layer.
 - All middleware conforms to `HttpMiddleware = (next: HttpClientFn) => HttpClientFn`.
 - Effects are lazy `Async` values — side effects only happen when `register` is called.
 - Cancellation is ref-counted: cancel functions returned by `register` propagate through the stack.
+- The transport boundary is an effect. `makeHttp`, `httpClient`,
+  `makeLifecycleClient`, and `makeDefaultHttpClient` accept `transport`; fetch
+  is only the default backend.
+- `makeDefaultHttpClientLayer` provides `HttpClientService` for optional DI
+  graphs. Keep it additive; do not force Layer usage into the hot HTTP path.
+- Core Layer helpers include `makeConfigLayer`, `makeRuntimeLayer`,
+  `RuntimeService`, `makeTestLayer`, and `makeTestLayers`. Prefer these in
+  framework examples when wiring app graphs.
+- For Promise clients, prefer `promiseHttpTransport()
+  .requestConfig(...).send(...).json()` in docs/examples. Brass injects the
+  runtime `AbortSignal` into object configs before `send`, so cancellation is
+  real without making consumers spell out `signal`.
+- Promise transports normalize failures with `toHttpError` by default. It
+  understands tagged `HttpError`s, aborts, common timeout codes, and Axios-like
+  `response.status` / `statusText`.
+- Per-request execution knobs belong under `req.policy`: `preset`, `priority`,
+  `dedupKey`, `retry`, `poolKey`, and `lane`. Legacy top-level fields remain
+  compatible but new code should use `policy`.
+- For repeated execution intent, prefer `defineHttpPolicyPresets` /
+  `policyPresets` and request refs such as `policy: "readModel"` or
+  `policy: { preset: "readModel", ...overrides }`.
+- HTTP observability reads `req.policy` automatically. Policy fields are added
+  to logs and span attributes by default; metric labels require explicit
+  opt-in with `withHttpObservability({ policy: { labelKeys: [...] } })` to
+  avoid accidental high-cardinality series.
+- For high-TPS proxy paths that still need sampled spans, prefer
+  `withHttpObservability({ spans: { events: false, sampleRate: 0.001 },
+  spanSink: observability.tracer, injectTraceHeaders: false })` and keep
+  runtime hooks off on that hot path.
+- Dashboard-facing HTTP observability names live in
+  `HTTP_OBSERVABILITY_CONTRACT`; update it with any metric/label/span/log
+  naming changes.
+- HTTP config validation should fail at construction boundaries with
+  `ConfigValidationError` for invalid policy presets, compression encodings,
+  observability policy labels, and layer options.
+- Use `buildHttpRequest` / `splitHttpRequestInit` for DX helpers so Brass-only
+  fields (`schema`, `bodySchema`, `policy`, retry/dedup/priority knobs) do not
+  leak into host transport init/config.
 - Stats are tracked via `LifecycleStatsTracker` and exposed as frozen snapshots.
 - Events are emitted via `onEvent` callbacks threaded through config.
 - Default HTTP adaptive limiter settings are conservative: warmup samples,
@@ -101,7 +144,10 @@ observability as the outermost layer.
 - Response parse/schema failures are `ValidationError` with
   `phase: "response"`.
 - Error helpers (`isHttpError`, `isValidationError`, `matchHttpError`,
-  `formatHttpError`) live in `src/http/errors.ts`.
+  `formatHttpError`, `toHttpError`, `isRetryableHttpError`,
+  `isTimeoutHttpError`, `isAbortHttpError`) live in `src/http/errors.ts`.
+  Retryability should account for HTTP status: `FetchError` with `404` should
+  not be treated like transient `503`.
 - Keep legacy custom validator callbacks compatible with the same validation
   path; first-party schemas are preferred for new code.
 - Strip `schema`, `schemaName`, `bodySchema`, and `bodySchemaName` before
@@ -110,6 +156,11 @@ observability as the outermost layer.
   runtime options, HTTP client configs, lifecycle/default-client configs, and
   observability options should fail with `ConfigValidationError` and clear field
   paths when invalid.
+- `preset: "production"` is the explicit production-ready default HTTP stack.
+  `preset: "default"` is the same stack kept for compatibility.
+- `preset: "highThroughputProxy"` is the explicit hot proxy/BFF preset.
+  `preset: "proxy"` is the shorter compatibility alias. In Node, prefer
+  `makeNodeHttpProxyClient` when the default fetch backend is the bottleneck.
 - Keep `docs/http-recipes.md` current when adding high-level HTTP workflows.
 
 ## Editing rules

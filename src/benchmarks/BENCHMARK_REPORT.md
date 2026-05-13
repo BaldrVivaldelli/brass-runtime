@@ -27,10 +27,22 @@ npm run benchmark                         # daily mode: one 100k local HTTP scen
 npm run benchmark:http                    # compare mode: transport/wire/default/observed variants
 npm run benchmark:http:budget             # compare mode with memory/adaptive budgets
 npm run benchmark:http:soak               # opt-in soak mode
+npm run benchmark:http:overhead           # in-process mocked transport overhead
+BRASS_HTTP_OVERHEAD_CALLS=30000 BRASS_HTTP_OVERHEAD_WARMUP_CALLS=5000 npm run benchmark:http:overhead
 BRASS_HTTP_BENCH_MODE=soak npm run benchmark:http
 BRASS_HTTP_BENCH_CALLS=1000000 npm run benchmark -- http-concurrent
 BRASS_HTTP_BENCH_CALLS=100000 node --expose-gc --import tsx src/benchmarks/runner.ts http-concurrent
 ```
+
+`http-local-overhead` is the focused suite for adapter/proxy plumbing overhead:
+it includes proxy lean, timeout/pool variants, raw observability metrics-only,
+sampled span observability, HTTP metrics-only observability, runtime-hook
+observability, and full client span observability. The default concurrency is
+8 so the suite measures local per-request overhead without intentionally
+saturating the Node event loop; set `BRASS_HTTP_OVERHEAD_CONCURRENCY=32` when
+you want a saturation profile. Sampled span variants default to
+`BRASS_HTTP_OVERHEAD_SPAN_SAMPLING=0.001` to model the recommended hot-proxy
+path; raise it to `0.01` when you want to see the p99 cost of a 1% trace stream.
 
 HTTP TPS ramp is open-loop: it schedules request arrivals at the requested TPS
 instead of deriving TPS from max concurrency. A focused run defaults to
@@ -39,6 +51,8 @@ instead of deriving TPS from max concurrency. A focused run defaults to
 ```bash
 npm run benchmark:http:ramp
 BRASS_HTTP_RAMP_STEP_SECONDS=30 npm run benchmark:http:ramp
+BRASS_HTTP_RAMP_CLIENT=proxy BRASS_HTTP_RAMP_MAX_TPS=300 BRASS_HTTP_RAMP_STEP_TPS=300 BRASS_HTTP_RAMP_STEP_SECONDS=180 npm run benchmark:http:ramp
+npm run benchmark:http:proxy:300tps
 BRASS_HTTP_RAMP_CLIENT=observed npm run benchmark:http:ramp
 BRASS_HTTP_RAMP_MAX_TPS=600 BRASS_HTTP_RAMP_STEP_TPS=60 npm run benchmark:http:ramp
 ```
@@ -108,6 +122,9 @@ runtime recorder.
   percentiles (`requestP50Ms`, `requestP99Ms`), requested concurrency,
   observed server max in-flight, logical client max in-flight, and sampled
   wire/pool/lifecycle queue peaks when available.
+- HTTP concurrency includes the explicit `high-throughput-proxy-node-json`
+  variant for the recommended Node BFF/proxy shape:
+  `preset: "highThroughputProxy"` plus `makeNodeHttpTransport`.
 - HTTP concurrency also reports memory deltas (`heapDeltaMb`, `rssDeltaMb`,
   `externalDeltaMb`, `gcAvailable`) and adaptive limiter snapshots
   (`adaptiveMinLimit`, `adaptiveMaxQueueDepth`, `adaptiveMaxInFlight`) so local

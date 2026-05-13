@@ -1,0 +1,19 @@
+{
+  "name": "brass-example-express",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "brass-runtime": "file:../..",
+    "express": ">=5"
+  },
+  "devDependencies": {
+    "@types/express": ">=5",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
+

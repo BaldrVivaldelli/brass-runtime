@@ -7,12 +7,25 @@ import {
   decodeJsonBodyEffect,
   encodeJsonBodyEffect,
   formatHttpError,
+  httpErrorStatus,
   httpClientBuilder,
+  isAbortHttpError,
+  isCircuitBreakerOpen,
+  isExternalAbortError,
+  isExternalTimeoutError,
+  isFetchHttpError,
   isHttpError,
+  isKnownHttpError,
+  isRetryableHttpError,
+  isRetryableHttpStatus,
+  isTimeoutHttpError,
+  isValidationError,
   makeDefaultHttpClient,
   makeHttpRouter,
+  matchHttpError,
   route,
   s,
+  toHttpError,
   validatedJsonResponse,
   withCircuitBreaker,
 } from "../index";
@@ -56,6 +69,7 @@ describe("HTTP coverage target helpers", () => {
       .minimal()
       .balanced()
       .defaultPreset()
+      .production()
       .dedup({ key: () => "dedup" })
       .noDedup()
       .batch(false)
@@ -253,6 +267,106 @@ describe("HTTP coverage target helpers", () => {
     expect(formatHttpError({ _tag: "PoolTimeout", key: "api", timeoutMs: 1, message: "pool timeout" })).toBe("pool timeout");
     expect(formatHttpError({ _tag: "BatchSplitError", expected: 2, actual: 1, message: "split bad" })).toBe("split bad");
     expect(formatHttpError({ _tag: "Timeout", timeoutMs: 1, message: "timeout" })).toBe("timeout");
+  });
+
+  it("covers HTTP error classification, retryability, and external normalization", () => {
+    const abort = { _tag: "Abort" } as const;
+    const timeout = { _tag: "Timeout", timeoutMs: 10, phase: "request", message: "slow" } as const;
+    const poolTimeout = { _tag: "PoolTimeout", key: "api", timeoutMs: 5, message: "queued" } as const;
+    const fetchError = { _tag: "FetchError", message: "upstream", status: 503, statusText: "Unavailable" } as const;
+    const validation = { _tag: "ValidationError", phase: "response", message: "bad", body: "{}", issues: [] } as const;
+    const circuit = { _tag: "CircuitBreakerOpen", openSince: 1, failures: 2 } as const;
+
+    expect(isKnownHttpError(fetchError)).toBe(true);
+    expect(isValidationError(validation)).toBe(true);
+    expect(isCircuitBreakerOpen(circuit)).toBe(true);
+    expect(isAbortHttpError(abort)).toBe(true);
+    expect(isAbortHttpError(timeout)).toBe(false);
+    expect(isTimeoutHttpError(timeout)).toBe(true);
+    expect(isTimeoutHttpError(poolTimeout)).toBe(true);
+    expect(isFetchHttpError(fetchError)).toBe(true);
+    expect(httpErrorStatus(fetchError)).toBe(503);
+    expect(httpErrorStatus({ _tag: "FetchError", message: "bad", status: Number.NaN })).toBeUndefined();
+    expect(httpErrorStatus(timeout)).toBeUndefined();
+
+    expect(isRetryableHttpStatus(503)).toBe(true);
+    expect(isRetryableHttpStatus(418)).toBe(false);
+    expect(isRetryableHttpError(timeout)).toBe(true);
+    expect(isRetryableHttpError(poolTimeout)).toBe(true);
+    expect(isRetryableHttpError(fetchError)).toBe(true);
+    expect(isRetryableHttpError({ _tag: "FetchError", message: "conflict", status: 409 })).toBe(false);
+    expect(isRetryableHttpError({ _tag: "FetchError", message: "network" })).toBe(true);
+    expect(isRetryableHttpError(fetchError, { retryOnStatus: (status) => status === 599 })).toBe(false);
+    expect(isRetryableHttpError(abort)).toBe(false);
+    expect(isRetryableHttpError("plain")).toBe(false);
+
+    expect(isExternalAbortError({ name: "AbortError" })).toBe(true);
+    expect(isExternalAbortError({ code: "ERR_CANCELED" })).toBe(true);
+    expect(isExternalAbortError(null)).toBe(false);
+    expect(isExternalTimeoutError({ name: "TimeoutError" })).toBe(true);
+    expect(isExternalTimeoutError({ code: "UND_ERR_HEADERS_TIMEOUT" })).toBe(true);
+    expect(isExternalTimeoutError("plain")).toBe(false);
+
+    expect(toHttpError(fetchError)).toBe(fetchError);
+
+    const aborted = new AbortController();
+    aborted.abort();
+    expect(toHttpError(new Error("ignored"), { signal: aborted.signal })).toEqual({ _tag: "Abort" });
+    expect(toHttpError({ code: "ERR_CANCELED", message: "cancelled" })).toEqual({ _tag: "Abort" });
+
+    expect(toHttpError({ code: "ETIMEDOUT", message: "timeout" }, { timeoutMs: 123, phase: "retry" }))
+      .toEqual({ _tag: "Timeout", timeoutMs: 123, phase: "retry", message: "timeout" });
+    expect(toHttpError({ name: "TimeoutError" }, { message: () => "custom timeout" }))
+      .toMatchObject({ _tag: "Timeout", message: "custom timeout" });
+
+    const retryAfterDate = new Date(Date.now() + 60_000).toUTCString();
+    expect(toHttpError({
+      code: "ECONNRESET",
+      message: "reset",
+      response: {
+        status: 429,
+        statusText: "Too Many Requests",
+        headers: { "retry-after": "2" },
+      },
+    })).toMatchObject({
+      _tag: "FetchError",
+      code: "ECONNRESET",
+      status: 429,
+      statusText: "Too Many Requests",
+      retryAfterMs: 2000,
+    });
+    expect(toHttpError({
+      statusCode: 502,
+      statusMessage: "Bad Gateway",
+      headers: { "Retry-After": retryAfterDate },
+      message: "",
+    })).toMatchObject({
+      _tag: "FetchError",
+      status: 502,
+      statusText: "Bad Gateway",
+      retryAfterMs: expect.any(Number),
+    });
+    expect(toHttpError({ status: Number.NaN, code: "", message: "plain" }, { message: "override" }))
+      .toMatchObject({ _tag: "FetchError", message: "override" });
+    expect(toHttpError({ message: "record message" })).toMatchObject({ message: "record message" });
+    expect(toHttpError("string error")).toMatchObject({ message: "string error" });
+
+    expect(matchHttpError(fetchError, {
+      FetchError: (error) => `fetch:${error.status}`,
+    })).toBe("fetch:503");
+    expect(matchHttpError(validation, {
+      ValidationError: (error) => error.phase,
+    })).toBe("response");
+    expect(matchHttpError(circuit, {
+      CircuitBreakerOpen: (error) => error.failures,
+    })).toBe(2);
+    expect(matchHttpError("plain", {
+      default: (error) => String(error),
+    })).toBe("plain");
+    expect(matchHttpError("plain", {})).toBeUndefined();
+
+    expect(formatHttpError(fetchError)).toBe("HTTP 503 Unavailable: upstream");
+    expect(formatHttpError({ _tag: "FetchError", message: "upstream", status: 500 })).toBe("HTTP 500: upstream");
   });
 
   it("covers router errors, includeErrorDetails, wildcard routes, invalid JSON, and response encoding", async () => {

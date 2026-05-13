@@ -214,6 +214,31 @@ describe("AdaptiveLimiter unit tests", () => {
         windowSize: 2,
       });
     });
+
+    it("aggregates unreleased keys and falls back to Date when performance is unavailable", async () => {
+      const originalPerformance = globalThis.performance;
+      vi.stubGlobal("performance", undefined);
+      try {
+        const limiter = new AdaptiveLimiter({ initialLimit: 2, stateTtlMs: false });
+        const signal = new AbortController().signal;
+        const leaseA = await limiter.acquire("a", signal);
+        const leaseB = await limiter.acquire("b", signal);
+
+        expect(limiter.stats()).toMatchObject({
+          limit: 4,
+          inFlight: 2,
+          windowSize: 0,
+          baselineLatency: undefined,
+          p50: undefined,
+          rejectionRate: 0,
+        });
+
+        leaseA.release(10);
+        leaseB.release(20);
+      } finally {
+        vi.stubGlobal("performance", originalPerformance);
+      }
+    });
   });
 
   describe("production-safe limit adjustment", () => {
@@ -406,6 +431,29 @@ describe("AdaptiveLimiter unit tests", () => {
       expect(stats.gradient).toBe(0);
       expect(stats.limit).toBeLessThan(20);
     });
+
+    it("treats explicit error release info as an adaptive error signal", async () => {
+      const limiter = new AdaptiveLimiter({
+        initialLimit: 10,
+        minLimit: 1,
+        maxLimit: 10,
+        minSamples: 1,
+        smoothingFactor: 1,
+        errorSmoothingFactor: 1,
+        errorWeight: 1,
+        probeInterval: 100,
+        slowStartRecovery: false,
+      });
+      const signal = new AbortController().signal;
+
+      const lease = await limiter.acquire("explicit-error", signal);
+      lease.release(10, { error: { message: "failed" } });
+
+      expect(limiter.stats("explicit-error")).toMatchObject({
+        errorRate: 1,
+        gradient: 0,
+      });
+    });
   });
 
   /**
@@ -463,6 +511,47 @@ describe("AdaptiveLimiter unit tests", () => {
       const lease = await limiter.acquire("k", signal);
       lease.release(NaN);
       expect(limiter.stats("k").limit).toBe(15);
+    });
+  });
+
+  describe("acquire/release edge branches", () => {
+    it("rejects pre-aborted acquires and ignores repeated or post-destroy releases", async () => {
+      const limiter = new AdaptiveLimiter({ initialLimit: 1, stateTtlMs: false });
+      const aborted = new AbortController();
+      aborted.abort();
+
+      await expect(limiter.acquire("aborted", aborted.signal)).rejects.toEqual({ _tag: "Abort" });
+
+      const lease = await limiter.acquire("repeat", new AbortController().signal);
+      lease.release(10);
+      lease.release(20);
+      expect(limiter.stats("repeat")).toMatchObject({ inFlight: 0, windowSize: 1 });
+
+      const destroyedLease = await limiter.acquire("destroyed", new AbortController().signal);
+      limiter.destroy();
+      expect(() => destroyedLease.release(10)).not.toThrow();
+      limiter.markCircuitOpen("destroyed");
+      await expect(limiter.acquire("destroyed", new AbortController().signal)).rejects.toMatchObject({
+        _tag: "PoolClosed",
+      });
+    });
+
+    it("rejects aborted queued waiters when draining", async () => {
+      const limiter = new AdaptiveLimiter({
+        initialLimit: 1,
+        minLimit: 1,
+        maxLimit: 1,
+        maxQueue: 2,
+      });
+      const held = await limiter.acquire("drain-abort", new AbortController().signal);
+      const queuedSignal = new AbortController();
+      const queued = limiter.acquire("drain-abort", queuedSignal.signal);
+
+      queuedSignal.abort();
+      held.release(10);
+
+      await expect(queued).rejects.toEqual({ _tag: "Abort" });
+      expect(limiter.snapshot("drain-abort")).toMatchObject({ abortedWhileQueued: 1 });
     });
   });
 
@@ -682,6 +771,30 @@ describe("AdaptiveLimiter unit tests", () => {
       expect(limiter.stats("warm").warmupCompletions).toBe(2);
     });
 
+    it("exits warmup early when samples are saturated", async () => {
+      const limiter = new AdaptiveLimiter({
+        initialLimit: 8,
+        minLimit: 1,
+        maxLimit: 20,
+        minSamples: 100,
+        warmupRequests: 4,
+        percentile: "p99",
+        smoothingFactor: 1,
+        probeInterval: 100,
+        probeJitterRatio: 0,
+      });
+      const signal = new AbortController().signal;
+
+      for (const latency of [10, 1000]) {
+        const lease = await limiter.acquire("warm-saturated", signal);
+        lease.release(latency);
+      }
+
+      expect(limiter.snapshot("warm-saturated")).toMatchObject({
+        warmupDone: true,
+      });
+    });
+
     it("applies probe jitter around the configured interval", async () => {
       vi.spyOn(Math, "random").mockReturnValue(1);
       const limiter = new AdaptiveLimiter({
@@ -722,6 +835,46 @@ describe("AdaptiveLimiter unit tests", () => {
       lease.release(10);
 
       expect(limiter.stats("headroom").limit).toBe(105);
+    });
+
+    it("supports fixed, object, function, and invalid headroom strategies", async () => {
+      const signal = new AbortController().signal;
+
+      const fixed = new AdaptiveLimiter({
+        initialLimit: 10,
+        maxLimit: 20,
+        minSamples: 1,
+        probeInterval: 100,
+        probeJitterRatio: 0,
+        headroomStrategy: "fixed",
+      });
+      const fixedLease = await fixed.acquire("fixed", signal);
+      fixedLease.release(10);
+      expect(fixed.stats("fixed").limit).toBe(11);
+
+      const object = new AdaptiveLimiter({
+        initialLimit: 10,
+        maxLimit: 20,
+        minSamples: 1,
+        probeInterval: 100,
+        probeJitterRatio: 0,
+        headroomStrategy: { type: "proportional", ratio: 0.2, min: 3, max: 4 },
+      });
+      const objectLease = await object.acquire("object", signal);
+      objectLease.release(10);
+      expect(object.stats("object").limit).toBe(13);
+
+      const custom = new AdaptiveLimiter({
+        initialLimit: 10,
+        maxLimit: 20,
+        minSamples: 1,
+        probeInterval: 100,
+        probeJitterRatio: 0,
+        headroomStrategy: () => Number.NaN,
+      });
+      const customLease = await custom.acquire("custom", signal);
+      customLease.release(10);
+      expect(custom.stats("custom").limit).toBe(11);
     });
 
     it("arms slow-start recovery after circuit-open feedback and doubles recovery headroom", async () => {
@@ -865,6 +1018,29 @@ describe("AdaptiveLimiter unit tests", () => {
       expect(limiter.snapshot("shed")).toMatchObject({
         evictedWhileQueued: 1,
         rejected: 1,
+      });
+
+      first.release(10);
+      const highLease = await high;
+      highLease.release(10);
+    });
+
+    it("rejects new waiters when priority load shedding finds no lower-priority victim", async () => {
+      const limiter = new AdaptiveLimiter({
+        initialLimit: 1,
+        minLimit: 1,
+        maxLimit: 1,
+        maxQueue: 1,
+        queueStrategy: "priority",
+        queueLoadShedding: "priority-evict",
+      });
+      const signal = new AbortController().signal;
+
+      const first = await limiter.acquire("no-victim", signal);
+      const high = limiter.acquire("no-victim", signal, { priority: 1 });
+
+      await expect(limiter.acquire("no-victim", signal, { priority: 9 })).rejects.toMatchObject({
+        _tag: "PoolRejected",
       });
 
       first.release(10);

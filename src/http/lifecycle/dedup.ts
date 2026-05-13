@@ -4,6 +4,7 @@ import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
+import { getHttpRequestPolicy } from "../requestPolicy";
 import { computeDedupKey, SAFE_METHODS } from "./dedupKey";
 
 /**
@@ -91,9 +92,15 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
         return next(req);
       }
 
-      // Compute the dedup key
+      // Compute the dedup key. Per-request policy wins; an empty key bypasses dedup.
       let key: string;
-      if (customKeyFn) {
+      const policyKey = getHttpRequestPolicy(req).dedupKey;
+      if (policyKey !== undefined) {
+        key = policyKey;
+        if (!key) {
+          return next(req);
+        }
+      } else if (customKeyFn) {
         try {
           key = customKeyFn(req);
         } catch {

@@ -1,4 +1,5 @@
 import type { HttpError, HttpRequest } from "./client";
+import { getHttpRequestPolicy } from "./requestPolicy";
 import { makeWasmHttpPermitPool, type WasmHttpPermitPoolBridge, type WasmPermitEvent } from "./wasmPermitPool";
 
 export type HttpPoolKeyResolver = "global" | "origin" | "host" | ((req: HttpRequest, url: URL) => string);
@@ -116,7 +117,7 @@ export function resolveHttpPoolKey(
   req: HttpRequest,
   url: URL,
 ): string {
-  const custom = req.poolKey?.trim();
+  const custom = getHttpRequestPolicy(req).poolKey?.trim();
   if (custom) return custom.slice(0, 160);
 
   const r = resolver ?? "origin";

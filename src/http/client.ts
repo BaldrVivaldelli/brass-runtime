@@ -1,10 +1,9 @@
-// src/http/client.ts
 import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../core/types/asyncEffect";
 import type { Async } from "../core/types/asyncEffect";
-import { fromPromiseAbortable, recordAbortablePromiseStart, recordAbortablePromiseFinish, type AbortablePromiseFinish } from "../core/runtime/runtime";
-import { ZStream, streamFromReadableStream } from "../core/stream/stream";
+import { fromPromiseAbortable, type AbortablePromiseFinish } from "../core/runtime/runtime";
+import { ZStream } from "../core/stream/stream";
 import { Cause, type Exit } from "../core/types/effect";
-import { Request, mergeHeadersUnder } from "./optics/request";
+import { mergeHeadersUnder } from "./optics/request";
 import {
     backoffDelayMs,
     defaultRetryOnError,
@@ -26,7 +25,6 @@ import { validateMakeHttpConfig } from "./configValidation";
 import { registerHttpEffect, type EffectCanceler } from "./effectRunner";
 import {
     abortErrorForSignal,
-    isPromiseTransportDirect,
     linkAbortSignals,
     makeFetchStreamTransport,
     makeFetchTransport,
@@ -34,18 +32,13 @@ import {
     type HttpStreamTransport,
     type HttpTransport,
 } from "./transport";
-
-import { TimerWheel } from "./timerWheel";
-
-const exitError = (exit: Exit<any, any>): unknown => {
-    if (exit._tag === "Failure" && exit.cause._tag === "Fail") return exit.cause.error;
-    return undefined;
-};
+import { getHttpRequestPolicy } from "./requestPolicy";
+import type { HttpRequestPolicyRef, HttpRequestRetryOverride } from "./requestPolicy";
 
 export type HttpError =
     | { _tag: "Abort" }
     | { _tag: "BadUrl"; message: string }
-    | { _tag: "FetchError"; message: string }
+    | { _tag: "FetchError"; message: string; code?: string; status?: number; statusText?: string; retryAfterMs?: number; cause?: unknown }
     | { _tag: "Timeout"; timeoutMs: number; message: string; phase?: "request" | "queue" | "retry" }
     | { _tag: "PoolRejected"; key: string; limit: number; message: string; retryAfterMs?: number }
     | { _tag: "PoolTimeout"; key: string; timeoutMs: number; message: string }
@@ -70,18 +63,29 @@ export type HttpRequest = {
     headers?: Record<string, string>;
     body?: HttpBody;
     init?: HttpInit;
+    /** Structured per-request execution policy. Legacy top-level fields are still read. */
+    policy?: HttpRequestPolicyRef;
     /** Per-request override for `MakeHttpConfig.timeoutMs`. */
     timeoutMs?: number;
     /** Optional stable key for downstream isolation. When omitted, the pool uses origin/host/global config. */
     poolKey?: string;
+    /** @deprecated Use `policy.lane`. Kept for middleware interop. */
+    lane?: string;
+    /** @deprecated Use `policy.dedupKey`. Kept for middleware interop. */
+    dedupKey?: string;
+    /** @deprecated Use `policy.priority`. Kept for middleware interop. */
+    priority?: number;
+    /** @deprecated Use `policy.retry`. Kept for middleware interop. */
+    retry?: HttpRequestRetryOverride;
 };
 
-export type HttpWireResponse = {
+export type HttpWireResponse<Meta = unknown> = {
     status: number;
     statusText: string;
     headers: Record<string, string>;
     bodyText: string;
     ms: number;
+    transportMeta?: Meta;
 };
 
 export type HttpClientStats = {
@@ -103,6 +107,10 @@ export type MakeHttpConfig = {
     headers?: Record<string, string>;
     /** Request budget covering pool wait + fetch + body read. Disabled when omitted. */
     timeoutMs?: number;
+    /** Effect-based transport. Defaults to `fetch`; provide one for axios/undici/test transports. */
+    transport?: HttpTransport;
+    /** Effect-based streaming transport. Defaults to `fetch` streaming. */
+    streamTransport?: HttpStreamTransport;
     /** Downstream pool/concurrency limiter. Disabled by default to preserve existing behavior. */
     pool?: false | HttpPoolConfig;
     /** Adaptive concurrency limiter. Replaces fixed pool when enabled. */
@@ -113,12 +121,13 @@ export type MakeHttpConfig = {
     streamTransport?: HttpStreamTransport;
 };
 
-export type HttpWireResponseStream = {
+export type HttpWireResponseStream<Meta = unknown> = {
     status: number;
     statusText: string;
     headers: Record<string, string>;
     body: ZStream<unknown, HttpError, Uint8Array>;
     ms: number;
+    transportMeta?: Meta;
 };
 
 export type HttpClientStreamFn = (req: HttpRequest) => Async<unknown, HttpError, HttpWireResponseStream>;
@@ -174,15 +183,6 @@ export const withMiddleware =
 
 const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = emptyStats): HttpClientStream =>
     Object.assign(((req: HttpRequest) => run(req)) as HttpClientStreamFn, { stats });
-
-const isTaggedHttpError = (e: unknown): e is HttpError => {
-    if (typeof e !== "object" || e === null || !("_tag" in e)) return false;
-    const tag = (e as any)._tag;
-    return tag === "Abort" || tag === "BadUrl" || tag === "FetchError" || tag === "Timeout" || tag === "PoolRejected" || tag === "PoolTimeout" || tag === "PoolClosed" || tag === "BatchSplitError";
-};
-
-const isAbortError = (e: unknown): boolean =>
-    typeof e === "object" && e !== null && "name" in e && (e as any).name === "AbortError";
 
 export const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
     if (!h) return undefined;
@@ -324,12 +324,6 @@ const resolveRequestUrl = (req: HttpRequest, baseUrl: string): URL | HttpError =
     }
 };
 
-const headersOf = (res: Response): Record<string, string> => {
-    const headers: Record<string, string> = {};
-    res.headers.forEach((v, k) => (headers[k] = v));
-    return headers;
-};
-
 const fetchLabel = (req: HttpRequest, url: URL): string => `http:${req.method}:${url.origin}`;
 const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError => ({
     _tag: "Timeout",
@@ -339,15 +333,69 @@ const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError
 });
 
 const requestPriority = (req: HttpRequest): number | undefined => {
-    const fromReq = (req as any).priority;
-    if (fromReq !== undefined) return fromReq;
+    const fromPolicy = getHttpRequestPolicy(req).priority;
+    if (fromPolicy !== undefined) return fromPolicy;
     return (req.init as any)?.priority;
 };
 
-/**
- * Direct transport path — used when no pool or timeout is configured.
- * Implements fast-path bypass for bare Async effects.
- */
+const exitError = <E, A>(exit: Exit<E, A>): unknown => {
+    if (exit._tag === "Success") return undefined;
+    const failure = Cause.firstFailure(exit.cause);
+    if (failure._tag === "Some") return failure.value;
+    const defect = Cause.firstDefect(exit.cause);
+    if (defect._tag === "Some") return defect.value;
+    if (Cause.containsInterrupt(exit.cause)) return { _tag: "Abort" } satisfies HttpError;
+    return Cause.toError(exit.cause);
+};
+
+const runTransportEffect = <A>(
+    effect: Async<unknown, HttpError, A>,
+    env: unknown,
+    signal: AbortSignal,
+): Promise<A> =>
+    new Promise((resolve, reject) => {
+        let done = false;
+        let cancel: EffectCanceler | undefined;
+
+        const finish = (exit: Exit<HttpError, A>) => {
+            if (done) return;
+            done = true;
+            signal.removeEventListener("abort", abort);
+            cancel = undefined;
+            if (exit._tag === "Success") {
+                resolve(exit.value);
+                return;
+            }
+            reject(exitError(exit));
+        };
+
+        const abort = () => {
+            if (done) return;
+            done = true;
+            signal.removeEventListener("abort", abort);
+            const currentCancel = cancel;
+            cancel = undefined;
+            currentCancel?.();
+            reject(abortErrorForSignal(signal));
+        };
+
+        if (signal.aborted) {
+            abort();
+            return;
+        }
+
+        signal.addEventListener("abort", abort, { once: true });
+
+        try {
+            cancel = registerHttpEffect(effect, env, finish);
+        } catch (error) {
+            if (done) return;
+            done = true;
+            signal.removeEventListener("abort", abort);
+            reject(error);
+        }
+    });
+
 const runDirectTransport = (
     req: HttpRequest,
     url: URL,
@@ -356,19 +404,15 @@ const runDirectTransport = (
 ): Async<unknown, HttpError, HttpWireResponse> => ({
     _tag: "Async",
     register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
-        let done = false;
-        let cancelInner: EffectCanceler | undefined;
+        const controller = new AbortController();
         const previousSignal = (req.init as { signal?: AbortSignal } | undefined)?.signal;
-        // Skip AbortController allocation when no external signal needs linking.
-        const controller = previousSignal ? new AbortController() : undefined;
-        const signal = controller?.signal ?? noopSignal;
         const label = fetchLabel(req, url);
         const startedAt = performance.now();
-
-        recordAbortablePromiseStart(label);
+        let done = false;
+        let cancelInner: EffectCanceler | undefined;
 
         const cleanup = () => {
-            if (previousSignal) previousSignal.removeEventListener("abort", abortFromPrevious);
+            previousSignal?.removeEventListener("abort", abortFromPrevious);
         };
 
         const finish = (
@@ -379,7 +423,6 @@ const runDirectTransport = (
             if (done) return;
             done = true;
             cleanup();
-            recordAbortablePromiseFinish(label, outcome);
             metrics.onFinish({
                 label,
                 outcome,
@@ -394,7 +437,6 @@ const runDirectTransport = (
         };
 
         const abortCurrent = (reason?: unknown) => {
-            if (!controller) return;
             try {
                 controller.abort(reason);
             } catch {
@@ -423,47 +465,20 @@ const runDirectTransport = (
         previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
 
         try {
-            const effect = transport({ request: req, url, signal });
-
-            // FAST PATH: bare Async effect — bypass registerHttpEffect entirely.
-            if (effect._tag === "Async") {
-                try {
-                    const cancel = effect.register(env, (exit) => {
-                        if (done) return;
+            const innerCancel = registerHttpEffect(
+                transport({ request: req, url, signal: controller.signal }),
+                env,
+                (exit) => {
+                    if (exit._tag === "Success") {
+                        finish("success", exit);
                         cancelInner = undefined;
-                        if (exit._tag === "Success") {
-                            finish("success", exit);
-                            return;
-                        }
-                        finish("failure", exit, exitError(exit));
-                    });
-                    if (!done) cancelInner = typeof cancel === "function" ? cancel : undefined;
-                } catch (error) {
-                    finishFailure(normalizeHttpError(error));
-                }
-            } else if (effect._tag === "Succeed") {
-                // FAST PATH: Succeed effect — resolve immediately, no interpreter needed.
-                finish("success", { _tag: "Success", value: (effect as any).value });
-            } else if (effect._tag === "Fail") {
-                // FAST PATH: Fail effect — resolve immediately.
-                finishFailure((effect as any).error);
-            } else {
-                // SLOW PATH: wrapped effect — full interpretation
-                const innerCancel = registerHttpEffect(
-                    effect,
-                    env,
-                    (exit) => {
-                        if (exit._tag === "Success") {
-                            finish("success", exit as Exit<HttpError, HttpWireResponse>);
-                            cancelInner = undefined;
-                            return;
-                        }
-                        finish("failure", exit as Exit<HttpError, HttpWireResponse>, exitError(exit));
-                        cancelInner = undefined;
-                    },
-                );
-                if (!done) cancelInner = innerCancel;
-            }
+                        return;
+                    }
+                    finish("failure", exit, exitError(exit));
+                    cancelInner = undefined;
+                },
+            );
+            if (!done) cancelInner = innerCancel;
         } catch (error) {
             finishFailure(normalizeHttpError(error));
         }
@@ -522,6 +537,7 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
     const adaptiveLimiter = makeAdaptiveLimiter(cfg);
     const pool = adaptiveLimiter ? undefined : makePool(cfg);
     const metrics = makeHttpStats(pool, adaptiveLimiter);
+    const transport = cfg.streamTransport ?? makeFetchStreamTransport();
 
     const run: HttpClientStreamFn = (req0) => {
         const req = normalize(req0);
@@ -531,11 +547,11 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
         const timeoutMs = resolvePositiveTimeout(req.timeoutMs ?? cfg.timeoutMs);
 
         return fromPromiseAbortable<HttpError, HttpWireResponseStream>(
-            async (signal) => {
-                let lease: { release: (...args: any[]) => void } | undefined;
-                const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
-                let cleanupTransferredToBody = false;
+            async (signal, env) => {
+                let lease: HttpLease | undefined;
+                const linkedSignal = linkAbortSignals(signal, (req.init as { signal?: AbortSignal } | undefined)?.signal);
                 try {
+                    if (linkedSignal.signal.aborted) throw abortErrorForSignal(linkedSignal.signal);
                     if (adaptiveLimiter) {
                         const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
                         lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
@@ -544,49 +560,21 @@ export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
                         lease = await pool.acquire(key, linkedSignal.signal);
                     }
 
-                    const started = performance.now();
-                    const res = await fetch(url, {
-                        ...(req.init ?? {}),
-                        method: req.method,
-                        headers: Request.headers.get(req),
-                        body: req.body as any,
-                        signal: linkedSignal.signal,
-                    });
+                    const response = await runTransportEffect(
+                        transport({ request: req, url, signal: linkedSignal.signal }),
+                        env,
+                        linkedSignal.signal,
+                    );
+                    lease = releaseSuccess(lease, adaptiveLimiter, response);
 
-                    const headers = headersOf(res);
-                    const latencyMs = Math.round(performance.now() - started);
-                    const body = streamFromReadableStream(res.body, normalizeHttpError, {
-                        signal: linkedSignal.signal,
-                        onRelease: linkedSignal.cleanup,
-                    });
-                    cleanupTransferredToBody = res.body !== null;
-
-                    // For streaming responses we release at headers to avoid leaking pool slots
-                    // when the caller stores/drops the response without consuming the stream.
-                    if (adaptiveLimiter && lease) {
-                        (lease as any).release(latencyMs, { status: res.status });
-                    } else {
-                        lease?.release();
-                    }
+                    // Streaming responses release at headers. The body stream owns
+                    // its host-resource cleanup after this effect succeeds.
                     lease = undefined;
-
-                    return {
-                        status: res.status,
-                        statusText: res.statusText,
-                        headers,
-                        body,
-                        ms: latencyMs,
-                    };
+                    return response;
                 } finally {
-                    if (!cleanupTransferredToBody) {
-                        linkedSignal.cleanup();
-                    }
+                    linkedSignal.cleanup();
                     if (lease) {
-                        if (adaptiveLimiter) {
-                            (lease as any).release(0, { error: true });
-                        } else {
-                            lease.release();
-                        }
+                        releaseFailure(lease, adaptiveLimiter);
                     }
                 }
             },
@@ -935,10 +923,6 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const transport = cfg.transport ?? makeFetchTransport();
     const destroyTransport = transportDestroy(transport);
 
-    // Shared timer wheel — only created when a client-level timeout is configured.
-    const clientTimeoutMs = resolvePositiveTimeout(cfg.timeoutMs);
-    const timerWheel = clientTimeoutMs ? new TimerWheel() : undefined;
-
     const run: HttpClientFn = (req0) => {
         const req = normalize(req0);
         const url = resolveRequestUrl(req, baseUrl);
@@ -950,20 +934,53 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
             return runDirectTransport(req, url, transport, metrics);
         }
 
-        // Fast synchronous path: pool/adaptive-limiter + timeout without Promise/microtask overhead.
-        return runPoolTransport(req, url, transport, metrics, pool, adaptiveLimiter, timerWheel, timeoutMs);
+        return fromPromiseAbortable<HttpError, HttpWireResponse>(
+            async (signal, env) => {
+                let lease: HttpLease | undefined;
+                const linkedSignal = linkAbortSignals(signal, (req.init as { signal?: AbortSignal } | undefined)?.signal);
+                try {
+                    if (linkedSignal.signal.aborted) throw abortErrorForSignal(linkedSignal.signal);
+                    if (adaptiveLimiter) {
+                        const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
+                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
+                    } else if (pool) {
+                        const key = resolveHttpPoolKey(pool.keyResolver, req, url);
+                        lease = await pool.acquire(key, linkedSignal.signal);
+                    }
+
+                    const response = await runTransportEffect(
+                        transport({ request: req, url, signal: linkedSignal.signal }),
+                        env,
+                        linkedSignal.signal,
+                    );
+                    lease = releaseSuccess(lease, adaptiveLimiter, response);
+                    return response;
+                } finally {
+                    linkedSignal.cleanup();
+                    if (lease) {
+                        releaseFailure(lease, adaptiveLimiter);
+                    }
+                }
+            },
+            normalizeHttpError,
+            {
+                label: fetchLabel(req, url),
+                timeoutMs,
+                timeoutReason: timeoutMs ? () => timeoutReason(req, url, timeoutMs) : undefined,
+                onStart: metrics.onStart,
+                onFinish: metrics.onFinish,
+            }
+        );
     };
 
     const metadata: HttpClientMetadata = {};
     if (adaptiveLimiter) metadata.adaptiveLimiter = adaptiveLimiter;
-    if (adaptiveLimiter || destroyTransport || timerWheel) {
+    if (adaptiveLimiter || destroyTransport) {
         metadata.destroy = () => {
-            timerWheel?.destroy();
             adaptiveLimiter?.destroy();
             destroyTransport?.();
         };
         metadata.shutdown = () => {
-            timerWheel?.destroy();
             adaptiveLimiter?.shutdown();
             destroyTransport?.();
         };

@@ -913,7 +913,13 @@ function normalizeRouteMethod(method: HttpServerMethod): HttpServerMethod {
 function normalizeRoutePath(path: string): string {
   if (!path || path === "*") return "/";
   const withSlash = path.startsWith("/") ? path : `/${path}`;
-  return withSlash.length > 1 ? withSlash.replace(/\/+$/, "") : withSlash;
+  if (withSlash.length <= 1) return withSlash;
+
+  let end = withSlash.length;
+  while (end > 0 && withSlash.charCodeAt(end - 1) === 47) {
+    end -= 1;
+  }
+  return withSlash.slice(0, end);
 }
 
 function parseRequestUrl(target: string, host: string | undefined): URL {

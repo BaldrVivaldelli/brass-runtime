@@ -111,6 +111,136 @@ await runtime.toPromise(
 );
 ```
 
+For wider independent graphs, prefer `Layer.all(...)` / `mergeAll(...)` over
+deeply nested `merge(...)` calls:
+
+```ts
+const AppLayer = Layer.all(ConfigLayer, DbLayer, CacheLayer);
+```
+
+For ordered graphs where each context layer reads services produced by previous
+layers, use `Layer.composeAll(...)`:
+
+```ts
+const AppLayer = Layer.composeAll(ConfigLayer, DbLayer, RepoLayer);
+```
+
+## Accessing Services
+
+Use `Layer.use(...)` or `Layer.useAll(...)` when a program should consume
+services without manually calling `ctx.unsafeGet(...)`.
+
+```ts
+import { Layer, asyncSucceed } from "brass-runtime";
+
+const Config = Layer.tag<{ readonly baseUrl: string }>("Config");
+const Http = Layer.tag<{ readonly get: (path: string) => string }>("Http");
+
+const ConfigLayer = Layer.value(Config, { baseUrl: "https://api.example.com" });
+const HttpLayer = Layer.effect(Http, (ctx) => {
+  const config = ctx.unsafeGet(Config);
+  return asyncSucceed({
+    get: (path) => `${config.baseUrl}${path}`,
+  });
+});
+
+const AppLayer = Layer.composeAll(ConfigLayer, HttpLayer);
+
+await runtime.toPromise(
+  Layer.provideContext(
+    AppLayer,
+    Layer.useAll({ config: Config, http: Http }, ({ config, http }) =>
+      asyncSucceed(http.get(`/users?origin=${config.baseUrl}`)),
+    ),
+  ),
+);
+```
+
+`getService(tag)` and `getServices({ ...tags })` remain available when a program
+is directly evaluated with a `LayerContext` as its environment. `Layer.use(...)`
+and `Layer.useAll(...)` are better fits for `Layer.provideContext(...)`.
+
+## Application Graphs
+
+Application modules can model config, observability, and HTTP clients as
+services. That keeps framework code focused on wiring and lets tests swap any
+piece with a smaller layer.
+
+```ts
+import { Runtime, Layer, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { defineHttpPolicyPresets, HttpClientService } from "brass-runtime/http";
+import {
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+type AppConfig = {
+  readonly serviceName: string;
+  readonly apiBaseUrl: string;
+  readonly otlpEndpoint: string;
+};
+
+const AppConfig = Layer.tag<AppConfig>("AppConfig");
+const AppConfigSchema = s.object({
+  serviceName: s.nonEmptyString(),
+  apiBaseUrl: s.url(),
+  otlpEndpoint: s.url(),
+});
+
+const policyPresets = defineHttpPolicyPresets({
+  readModel: { lane: "read-model", priority: 3, retry: { maxRetries: 2 } },
+  command: { lane: "command", priority: 1, retry: false },
+});
+
+const ConfigLayer = makeConfigLayer(AppConfig, AppConfigSchema, {
+  serviceName: "orders-api",
+  apiBaseUrl: "https://users-api.internal",
+  otlpEndpoint: "http://grafana-alloy:4318",
+});
+
+const ObservabilityLayer = makeObservabilityLayer((ctx) => {
+  const config = ctx.unsafeGet(AppConfig);
+  return {
+    serviceName: config.serviceName,
+    otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }),
+    flushIntervalMs: 10_000,
+    autoStart: true,
+  };
+});
+
+const HttpLayer = makeObservedHttpClientLayer((ctx) => {
+  const config = ctx.unsafeGet(AppConfig);
+  return {
+    baseUrl: config.apiBaseUrl,
+    preset: "production",
+    policyPresets,
+  };
+}, {
+  httpObservability: {
+    policy: { labelKeys: ["preset", "lane"] },
+  },
+});
+
+const AppLayer = Layer.composeAll(
+  ConfigLayer,
+  ObservabilityLayer,
+  makeObservedRuntimeLayer(),
+  HttpLayer,
+);
+
+const program = Layer.use(HttpClientService, (http) =>
+  http.getJson("/users/42", { policy: "readModel" }),
+);
+
+const runtime = Runtime.make({});
+const response = await runtime.toPromise(
+  Layer.provideContext(AppLayer, program),
+);
+```
+
 ## Scoped Builds
 
 Use `buildLayer` or `Layer.build` when a caller wants manual lifecycle control.

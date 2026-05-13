@@ -5,6 +5,11 @@ import {
   makeDefaultHttpClient,
 } from "../defaultClient";
 import {
+  abortablePromiseStats,
+  resetAbortablePromiseStats,
+} from "../../core/runtime/runtime";
+import { getHttpRequestPolicy } from "../requestPolicy";
+import {
   formatPrometheusMetrics,
   makeObservability,
   withHttpObservability,
@@ -121,6 +126,81 @@ describe("makeDefaultHttpClient", () => {
     expect(client.compression).toBeUndefined();
   });
 
+  it("keeps proxy preset on the low-latency path by default", async () => {
+    resetAbortablePromiseStats();
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      preset: "proxy",
+    });
+
+    const response = await client.getJson<{ ok: boolean }>("/users/1").unsafeRunPromise();
+
+    expect(response.body).toEqual({ ok: true });
+    expect(client.preset).toBe("proxy");
+    expect(client.features).toEqual({
+      dedup: false,
+      batch: false,
+      cache: false,
+      priority: false,
+      retry: false,
+      prewarm: false,
+      adaptiveLimiter: false,
+      compression: false,
+      middleware: 0,
+    });
+    expect(client.compression).toBeUndefined();
+    expect(client.wire.adaptiveLimiter).toBeUndefined();
+    expect(client.stats()).toMatchObject({
+      queueDepth: 0,
+      requestsCompleted: 1,
+    });
+    expect(abortablePromiseStats()).toMatchObject({ started: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes highThroughputProxy as the explicit hot proxy preset", async () => {
+    resetAbortablePromiseStats();
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      preset: "highThroughputProxy",
+    });
+
+    const response = await client.getJson<{ ok: boolean }>("/users/1").unsafeRunPromise();
+
+    expect(response.body).toEqual({ ok: true });
+    expect(client.preset).toBe("highThroughputProxy");
+    expect(client.features).toEqual({
+      dedup: false,
+      batch: false,
+      cache: false,
+      priority: false,
+      retry: false,
+      prewarm: false,
+      adaptiveLimiter: false,
+      compression: false,
+      middleware: 0,
+    });
+    expect(client.compression).toBeUndefined();
+    expect(abortablePromiseStats()).toMatchObject({ started: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("lets adaptive limiter presets replace default preset internals cleanly", () => {
     vi.stubGlobal("fetch", vi.fn());
 
@@ -135,6 +215,25 @@ describe("makeDefaultHttpClient", () => {
       limit: 8,
       stateCount: 0,
     });
+  });
+
+  it("supports production as an explicit alias for the full default preset", () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    const client = makeDefaultHttpClient({
+      preset: "production",
+      compression: false,
+    });
+
+    expect(client.preset).toBe("production");
+    expect(client.features).toMatchObject({
+      dedup: true,
+      cache: true,
+      priority: true,
+      retry: true,
+      adaptiveLimiter: true,
+    });
+    expect(client.wire.adaptiveLimiter?.stats().limit).toBe(32);
   });
 
   it("applies caller middleware outermost for observability/auth style extensions", async () => {
@@ -165,6 +264,48 @@ describe("makeDefaultHttpClient", () => {
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       headers: expect.objectContaining({ "x-observed": "1" }),
     });
+  });
+
+  it("resolves named policy presets before user middleware and lifecycle layers", async () => {
+    const fetchMock = vi.fn(async () => new Response("ok", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const captured: unknown[] = [];
+
+    const capture: HttpMiddleware = (next) => (req) => {
+      captured.push(req);
+      return next(req);
+    };
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      preset: "balanced",
+      compression: false,
+      policyPresets: {
+        readModel: {
+          lane: "read-model",
+          poolKey: "users-api",
+          priority: 1,
+          retry: { maxRetries: 1 },
+        },
+      },
+      middleware: [capture],
+    });
+
+    await expect(client.getText("/users/1", {
+      policy: { preset: "readModel", dedupKey: "users:1" },
+    }).unsafeRunPromise()).resolves.toMatchObject({ body: "ok" });
+
+    expect(captured).toHaveLength(1);
+    expect(getHttpRequestPolicy(captured[0] as any)).toEqual({
+      preset: "readModel",
+      lane: "read-model",
+      poolKey: "users-api",
+      priority: 1,
+      retry: { maxRetries: 1 },
+      dedupKey: "users:1",
+    });
+    expect((captured[0] as any).poolKey).toBe("users-api");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("preserves adaptive limiter metadata for observability middleware", async () => {

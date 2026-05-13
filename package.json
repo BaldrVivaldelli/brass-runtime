@@ -1,6 +1,6 @@
 {
   "name": "brass-runtime",
-  "version": "1.14.0",
+  "version": "1.16.0",
   "description": "Effect runtime utilities for TypeScript",
   "license": "MIT",
   "author": "Augusto Vivaldelli",
@@ -116,6 +116,9 @@
     "benchmark:runtime": "tsx src/benchmarks/runner.ts runtime-performance-track",
     "benchmark:runtime:budget": "node scripts/check-runtime-benchmark-budget.mjs",
     "benchmark:http": "tsx src/benchmarks/runner.ts http-concurrent",
+    "benchmark:http:proxy": "BRASS_HTTP_BENCH_VARIANTS=node-http-text,default-minimal-json,default-proxy-json,default-proxy-node-json,default-json tsx src/benchmarks/runner.ts http-concurrent",
+    "benchmark:http:proxy:300tps": "BRASS_HTTP_RAMP_CLIENT=proxy BRASS_HTTP_RAMP_MAX_TPS=300 BRASS_HTTP_RAMP_STEP_TPS=300 BRASS_HTTP_RAMP_STEP_SECONDS=180 BRASS_HTTP_RAMP_CONCURRENCY=600 tsx src/benchmarks/runner.ts http-ramp-tps",
+    "benchmark:http:overhead": "tsx src/benchmarks/runner.ts http-local-overhead",
     "benchmark:http:soak": "BRASS_HTTP_BENCH_MODE=soak tsx src/benchmarks/runner.ts http-concurrent",
     "benchmark:http:budget": "node scripts/check-http-benchmark-budget.mjs",
     "benchmark:http:ramp": "tsx src/benchmarks/runner.ts http-ramp-tps",

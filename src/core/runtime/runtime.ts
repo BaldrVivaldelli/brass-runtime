@@ -266,7 +266,7 @@ export class Runtime<R> {
         if (this.hooks !== NoopHooks) return false;
         if (getCurrentFiber() !== null) return false;
         if (this.scheduler !== globalScheduler) return false;
-        if (this.lane !== undefined || this.inferLane) return false;
+        if (this.inferLane) return false;
         if (this.engineMode !== "ts") return false;
         new NativeTopLevelRunner(this, effect, cb).start();
         return true;
@@ -469,7 +469,7 @@ class NativeTopLevelRunner<R, E, A> {
                 syncExit = exit;
                 return;
             }
-            queueMicrotask(() => this.resumeAsync(exit));
+            this.resumeAsync(exit);
         };
 
         try {

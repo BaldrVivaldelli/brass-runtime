@@ -4,14 +4,14 @@ import {
     HttpWireResponse,
     MakeHttpConfig,
     makeHttp,
-    HttpInit, HttpMethod, normalizeHeadersInit, makeHttpStream, withRetryStream, HttpClientStream, HttpMiddleware,
+    makeHttpStream, withRetryStream, HttpClientStream, HttpMiddleware,
     HttpError,
 } from "./client";
 
 import { toPromise as runToPromise } from "../core/runtime/runtime";
 import { Async, AsyncWithPromise, asyncFlatMap, asyncSucceed, mapTryAsync, withAsyncPromise } from "../core/types/asyncEffect";
 
-import { mergeHeaders, setHeaderIfMissing } from "./optics/request";
+import { setHeaderIfMissing } from "./optics/request";
 import {RetryPolicy, withRetry} from "./retry/retry";
 import {
     decodeJsonBodyEffect,
@@ -20,8 +20,9 @@ import {
     type InferJsonSchema,
     type ValidationError,
 } from "./validation";
+import { buildHttpRequest, type HttpRequestPolicyInit } from "./requestBuilder";
 
-type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & { timeoutMs?: number; poolKey?: string; headers?: any };
+type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & HttpRequestPolicyInit & { timeoutMs?: number; poolKey?: string; headers?: any };
 type JsonInitNoSchema = InitNoMethodBody & { schema?: undefined; schemaName?: string };
 type JsonInitWithSchema<Validator extends AnyJsonSchemaLike> = InitNoMethodBody & { schema: Validator; schemaName?: string };
 type PostJsonInitNoSchema = AnyInitWithHeaders & { schema?: undefined; schemaName?: string; bodySchema?: undefined; bodySchemaName?: string };
@@ -68,7 +69,7 @@ const resolveFinalUrl = (baseUrl: string | undefined, url: string): string => {
     }
 };
 
-type AnyInitWithHeaders = { headers?: any; timeoutMs?: number; poolKey?: string } & Record<string, any>;
+type AnyInitWithHeaders = HttpRequestPolicyInit & { headers?: any; timeoutMs?: number; poolKey?: string } & Record<string, any>;
 
 const createHttpCore = (cfg: MakeHttpConfig = {}) => {
     const wire: HttpClient = makeHttp(cfg);
@@ -77,34 +78,6 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
         withAsyncPromise<R, E, A>((e, env) => runToPromise(e, env))(eff);
 
     const requestRaw = (req: HttpRequest) => wire(req);
-
-    const splitInit = (init?: AnyInitWithHeaders) => {
-        const { headers, timeoutMs, poolKey, schema, schemaName, bodySchema, bodySchemaName, ...rest } = (init ?? {}) as any;
-        return {
-            headers: normalizeHeadersInit(headers),
-            timeoutMs: typeof timeoutMs === "number" ? timeoutMs : undefined,
-            poolKey: typeof poolKey === "string" ? poolKey : undefined,
-            init: rest as HttpInit,
-        };
-    };
-
-    const applyInitHeaders =
-        (headers?: Record<string, string>) =>
-            (req: HttpRequest): HttpRequest =>
-                headers ? mergeHeaders(headers)(req) : req;
-
-    const buildReq = (method: HttpMethod, url: string, init?: AnyInitWithHeaders, body?: string) => {
-        const s = splitInit(init);
-        const req: HttpRequest = {
-            method,
-            url,
-            ...(body && body.length > 0 ? { body } : {}),
-            ...(s.timeoutMs !== undefined ? { timeoutMs: s.timeoutMs } : {}),
-            ...(s.poolKey !== undefined ? { poolKey: s.poolKey } : {}),
-            init: s.init,
-        };
-        return applyInitHeaders(s.headers)(req);
-    };
 
     const toResponse = <A>(w: HttpWireResponse, body: A) => ({
         status: w.status,
@@ -128,9 +101,7 @@ const createHttpCore = (cfg: MakeHttpConfig = {}) => {
         wire,
         withPromise,
         requestRaw,
-        splitInit,
-        applyInitHeaders,
-        buildReq,
+        buildReq: buildHttpRequest,
         toResponse,
         decodeResponse,
     };

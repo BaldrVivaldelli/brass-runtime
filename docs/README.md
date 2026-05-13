@@ -5,8 +5,13 @@ Start here:
 - **[Getting started](./getting-started.md)** — installation, first effects, and running examples
 - **[Architecture](./ARCHITECTURE.md)** — how the runtime is structured
 - **[Cancellation & interruption](./cancellation.md)** — interruption semantics, scopes, and cancellable `Async`
-- **[Observability](./observability.md)** — hooks, events, sinks, and tracing
+- **[Observability](./observability.md)** — hooks, events, sinks, tracing, and HTTP policy context
+- **[Framework integrations](./framework-integrations.md)** — Vanilla, React, Next.js, Angular, Express, Fastify, and Nest patterns
+- **[Runnable examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples)** — Vanilla, Express, NestJS, Next.js, React, Angular, and shared helper apps
+- **[NestJS integration](./frameworks/nestjs.md)** — Brass module, Grafana/OTLP observability, HTTP client DI, and inbound spans
+- **[Article: HTTP and observability in Brass](./articles/brass-runtime-http-observability.md)** — narrative summary of the HTTP, policy, transport, and observability work
 - **[HTTP client](./http.md)** — ZIO-style HTTP built on brass-runtime
+- **[HTTP recipes](./http-recipes.md)** — typed clients, custom transports, production adoption, observability, and config validation
 - **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths
 - **[API polish notes](./api-polish.md)** — first-release DX audit and compatibility posture
 - **[First release checklist](./release.md)** — local release gate and perf evidence workflow

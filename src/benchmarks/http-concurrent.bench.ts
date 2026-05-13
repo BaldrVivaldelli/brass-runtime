@@ -26,6 +26,8 @@ import {
 import { makeDefaultHttpClient, type DefaultHttpClient } from "../http/defaultClient";
 import type { HttpResponse } from "../http/httpClient";
 import type { LifecycleStats } from "../http/lifecycle";
+import { makeNodeHttpTransport, type NodeHttpTransport } from "../http/nodeTransport";
+import type { HttpTransport } from "../http/transport";
 import {
   makeObservability,
   withHttpObservability,
@@ -55,8 +57,12 @@ type HttpScenarioKind =
   | "node-http-text"
   | "wire-raw"
   | "default-minimal-json"
+  | "default-proxy-json"
+  | "default-proxy-node-json"
+  | "high-throughput-proxy-node-json"
   | "default-balanced-no-adaptive-json"
   | "default-balanced-json"
+  | "default-node-json"
   | "default-json"
   | "default-json-observed";
 
@@ -124,6 +130,7 @@ const DELAY_MS = envNonNegativeInt("BRASS_HTTP_BENCH_DELAY_MS", 2);
 const TIMEOUT_MS = envInt("BRASS_HTTP_BENCH_TIMEOUT_MS", 30_000);
 const STATS_SAMPLE_MS = envInt("BRASS_HTTP_BENCH_STATS_SAMPLE_MS", 10);
 const WARMUP_CALLS = envNonNegativeInt("BRASS_HTTP_BENCH_WARMUP_CALLS", defaultWarmupCalls(MODE, TOTAL_CALLS));
+const SELECTED_VARIANTS = envStringSet("BRASS_HTTP_BENCH_VARIANTS");
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -137,6 +144,17 @@ function envNonNegativeInt(name: string, fallback: number): number {
   if (raw === undefined || raw.trim() === "") return fallback;
   const parsed = Number(raw);
   return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : fallback;
+}
+
+function envStringSet(name: string): ReadonlySet<string> {
+  const raw = process.env[name];
+  if (!raw) return new Set();
+  return new Set(
+    raw
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean),
+  );
 }
 
 function resolveMode(): HttpBenchMode {
@@ -261,14 +279,16 @@ function makeMinimalClient(baseUrl: string, scenario: HttpScenario): DefaultHttp
 function makeDefaultClient(
   baseUrl: string,
   scenario: HttpScenario,
-  preset: "balanced" | "default",
+  preset: "proxy" | "highThroughputProxy" | "balanced" | "default",
   disableAdaptiveLimiter: boolean,
   observability?: Observability,
+  transport?: HttpTransport,
 ): DefaultHttpClient {
   return makeDefaultHttpClient({
     preset,
     compression: false,
     ...baseHttpConfig(baseUrl, scenario),
+    ...(transport ? { transport } : {}),
     ...(disableAdaptiveLimiter ? { adaptiveLimiter: false as const } : {}),
     ...(observability
       ? {
@@ -521,14 +541,15 @@ function makeWireRawRunner(server: DummyServer, scenario: HttpScenario): Scenari
 function makeDefaultJsonRunner(
   server: DummyServer,
   scenario: HttpScenario,
-  preset: "minimal" | "balanced" | "default",
+  preset: "minimal" | "proxy" | "highThroughputProxy" | "balanced" | "default",
   disableAdaptiveLimiter = false,
   observability?: Observability,
+  transport?: NodeHttpTransport,
 ): ScenarioRunner {
   const rt = makeBenchRuntime(observability);
   const client = preset === "minimal"
     ? makeMinimalClient(server.baseUrl, scenario)
-    : makeDefaultClient(server.baseUrl, scenario, preset, disableAdaptiveLimiter, observability);
+    : makeDefaultClient(server.baseUrl, scenario, preset, disableAdaptiveLimiter, observability, transport);
 
   return {
     runOne: (id, cb) => {
@@ -542,6 +563,7 @@ function makeDefaultJsonRunner(
     },
     readClientStats: () => snapshotLifecycleStats(client.stats()),
     reset: () => client.cache.clear(),
+    cleanup: () => transport?.destroy(),
   };
 }
 
@@ -611,10 +633,51 @@ function makeScenarioRunner(
       return makeWireRawRunner(server, scenario);
     case "default-minimal-json":
       return makeDefaultJsonRunner(server, scenario, "minimal");
+    case "default-proxy-json":
+      return makeDefaultJsonRunner(server, scenario, "proxy");
+    case "default-proxy-node-json":
+      return makeDefaultJsonRunner(
+        server,
+        scenario,
+        "proxy",
+        false,
+        undefined,
+        makeNodeHttpTransport({
+          maxSockets: scenario.concurrency,
+          maxFreeSockets: scenario.concurrency,
+          socketTimeoutMs: scenario.timeoutMs,
+        }),
+      );
+    case "high-throughput-proxy-node-json":
+      return makeDefaultJsonRunner(
+        server,
+        scenario,
+        "highThroughputProxy",
+        false,
+        undefined,
+        makeNodeHttpTransport({
+          maxSockets: scenario.concurrency,
+          maxFreeSockets: scenario.concurrency,
+          socketTimeoutMs: scenario.timeoutMs,
+        }),
+      );
     case "default-balanced-no-adaptive-json":
       return makeDefaultJsonRunner(server, scenario, "balanced", true);
     case "default-balanced-json":
       return makeDefaultJsonRunner(server, scenario, "balanced");
+    case "default-node-json":
+      return makeDefaultJsonRunner(
+        server,
+        scenario,
+        "default",
+        false,
+        undefined,
+        makeNodeHttpTransport({
+          maxSockets: scenario.concurrency,
+          maxFreeSockets: scenario.concurrency,
+          socketTimeoutMs: scenario.timeoutMs,
+        }),
+      );
     case "default-json":
       return makeDefaultJsonRunner(server, scenario, "default");
     case "default-json-observed":
@@ -731,26 +794,35 @@ function scenario(
 
 function scenariosForMode(mode: HttpBenchMode): readonly HttpScenario[] {
   if (mode === "daily") {
-    return [
+    return filterScenarios([
       scenario("default-json", "http local dummy default JSON", DELAY_MS, mode),
-    ];
+    ]);
   }
 
   if (mode === "soak") {
-    return [
+    return filterScenarios([
       scenario("default-json-observed", "http local dummy soak default JSON + observability", DELAY_MS, mode),
-    ];
+    ]);
   }
 
-  return [
+  return filterScenarios([
     scenario("node-http-text", "http local dummy node:http transport text", DELAY_MS, mode),
     scenario("wire-raw", "http local dummy wire raw", DELAY_MS, mode),
     scenario("default-minimal-json", "http local dummy makeDefault minimal JSON", DELAY_MS, mode),
+    scenario("default-proxy-json", "http local dummy makeDefault proxy JSON", DELAY_MS, mode),
+    scenario("default-proxy-node-json", "http local dummy makeDefault proxy JSON + node transport", DELAY_MS, mode),
+    scenario("high-throughput-proxy-node-json", "http local dummy makeDefault highThroughputProxy JSON + node transport", DELAY_MS, mode),
     scenario("default-balanced-no-adaptive-json", "http local dummy makeDefault balanced JSON without adaptive", DELAY_MS, mode),
     scenario("default-balanced-json", "http local dummy makeDefault balanced JSON", DELAY_MS, mode),
+    scenario("default-node-json", "http local dummy makeDefault default JSON + node transport", DELAY_MS, mode),
     scenario("default-json", "http local dummy makeDefault default JSON", DELAY_MS, mode),
     scenario("default-json-observed", "http local dummy makeDefault default JSON + observability", DELAY_MS, mode),
-  ];
+  ]);
+}
+
+function filterScenarios(scenarios: readonly HttpScenario[]): readonly HttpScenario[] {
+  if (SELECTED_VARIANTS.size === 0) return scenarios;
+  return scenarios.filter((item) => SELECTED_VARIANTS.has(item.kind));
 }
 
 export const benchmarks: BenchmarkDef[] = scenariosForMode(MODE).map((item) => ({

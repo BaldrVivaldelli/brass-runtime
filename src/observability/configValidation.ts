@@ -1,4 +1,5 @@
 import { Schema, parseConfig } from "../schema";
+import type { HttpObservabilityOptions } from "./http";
 import type { ObservabilityOptions } from "./setup";
 
 const fn = Schema.custom<Function>((value): value is Function => typeof value === "function", "function");
@@ -8,6 +9,7 @@ const object = Schema.custom<Record<string, unknown>>(
 );
 const falseOrObject = Schema.union([Schema.literal(false), object]);
 const ratio = Schema.number({ min: 0, max: 1 });
+const logLevel = Schema.enum(["debug", "info", "warn", "error"] as const);
 
 const retryOptions = Schema.object({
   attempts: Schema.number({ min: 0, int: true }).optional(),
@@ -75,6 +77,50 @@ const observabilityOptions = Schema.object({
   onFlushError: fn.optional(),
 }, { unknownKeys: "passthrough" });
 
+const httpObservabilityOptions = Schema.object({
+  metrics: falseOrObject.optional(),
+  logs: Schema.union([
+    Schema.literal(false),
+    Schema.object({
+      requestLevel: Schema.union([logLevel, Schema.literal(false)]).optional(),
+      responseLevel: Schema.union([logLevel, Schema.literal(false)]).optional(),
+      errorLevel: Schema.union([logLevel, Schema.literal(false)]).optional(),
+    }, { unknownKeys: "passthrough" }),
+  ]).optional(),
+  spans: Schema.union([
+    Schema.literal(false),
+    Schema.object({
+      name: Schema.union([Schema.string({ minLength: 1 }), fn]).optional(),
+      attributes: Schema.union([object, fn]).optional(),
+      events: Schema.boolean().optional(),
+      sampleRate: ratio.optional(),
+    }, { unknownKeys: "passthrough" }),
+  ]).optional(),
+  adaptiveLimiter: Schema.union([
+    Schema.boolean(),
+    Schema.object({
+      enabled: Schema.boolean().optional(),
+      includeKeyLabel: Schema.boolean().optional(),
+    }, { unknownKeys: "passthrough" }),
+  ]).optional(),
+  policy: Schema.union([
+    Schema.boolean(),
+    Schema.object({
+      enabled: Schema.boolean().optional(),
+      labelKeys: Schema.array(Schema.enum(["preset", "lane", "poolKey", "dedupKey", "priority", "retry"] as const)).optional(),
+    }, { unknownKeys: "passthrough" }),
+  ]).optional(),
+  injectTraceHeaders: Schema.boolean().optional(),
+  includeHostLabel: Schema.boolean().optional(),
+  route: Schema.union([Schema.string({ minLength: 1 }), fn]).optional(),
+  clock: fn.optional(),
+  durationBuckets: Schema.array(Schema.number({ min: 0 }).refine((n) => n > 0, "duration bucket must be > 0")).optional(),
+}, { unknownKeys: "passthrough" });
+
 export function validateObservabilityOptions(options: ObservabilityOptions): void {
   parseConfig("ObservabilityOptions", observabilityOptions, options);
+}
+
+export function validateHttpObservabilityOptions(options: HttpObservabilityOptions): void {
+  parseConfig("HttpObservabilityOptions", httpObservabilityOptions, options);
 }
