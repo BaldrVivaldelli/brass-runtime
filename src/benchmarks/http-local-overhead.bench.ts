@@ -22,6 +22,7 @@ import {
 import { makeDefaultHttpClient } from "../http/defaultClient";
 import type { HttpResponse } from "../http/httpClient";
 import { promiseHttpTransport } from "../http/transport";
+import { s } from "../schema";
 import type { BenchmarkDef } from "./runner";
 
 type Payload = {
@@ -35,6 +36,7 @@ type ScenarioKind =
   | "runtime-async-succeed"
   | "wire-effect-transport"
   | "default-proxy-effect-transport"
+  | "default-proxy-effect-schema"
   | "default-proxy-effect-timeout"
   | "default-proxy-effect-pool"
   | "default-proxy-effect-timeout-pool"
@@ -79,6 +81,11 @@ const SELECTED_VARIANTS = envStringSet("BRASS_HTTP_OVERHEAD_VARIANTS");
 const BASE_URL = "http://brass.local";
 const RESPONSE_BODY_BY_SOURCE = new Map<string, string>();
 const RESPONSE_PAYLOAD_BY_SOURCE = new Map<string, Payload>();
+const PAYLOAD_SCHEMA = s.object({
+  ok: s.literal(true),
+  id: s.int(),
+  source: s.string(),
+});
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -245,6 +252,29 @@ function makeScenarioRunner(kind: ScenarioKind): ScenarioRunner {
         cleanup: () => client.shutdown(),
       };
     }
+    case "default-proxy-effect-schema": {
+      const rt = runtime();
+      const client = makeDefaultHttpClient({
+        baseUrl: BASE_URL,
+        preset: "proxy",
+        transport: effectTransport("proxy-schema"),
+      });
+      return {
+        runOne: (id, cb) => {
+          runRuntimeEffect(
+            rt,
+            client.getJson(`/todos/${id % 100}?i=${id}`, { schema: PAYLOAD_SCHEMA }) as Async<
+              unknown,
+              HttpError,
+              HttpResponse<Payload>
+            >,
+            cb,
+            (res) => res.status === 200 && res.body.ok === true,
+          );
+        },
+        cleanup: () => client.shutdown(),
+      };
+    }
     case "default-proxy-effect-timeout": {
       const rt = runtime();
       const client = makeDefaultHttpClient({
@@ -392,7 +422,7 @@ function makeScenarioRunner(kind: ScenarioKind): ScenarioRunner {
       const client = withHttpObservability({
         metrics: obs.metrics,
         logs: false,
-        spans: { events: false },
+        spans: { events: false, sampleRate: SPAN_SAMPLING },
         spanSink: obs.tracer,
         adaptiveLimiter: false,
         injectTraceHeaders: false,
@@ -515,7 +545,7 @@ function makeScenarioRunner(kind: ScenarioKind): ScenarioRunner {
           withHttpObservability({
             metrics: obs.metrics,
             logs: false,
-            spans: { events: false },
+            spans: { events: false, sampleRate: SPAN_SAMPLING },
             spanSink: obs.tracer,
             adaptiveLimiter: false,
             injectTraceHeaders: false,
@@ -665,6 +695,7 @@ function scenarioKinds(): readonly ScenarioKind[] {
     "runtime-async-succeed",
     "wire-effect-transport",
     "default-proxy-effect-transport",
+    "default-proxy-effect-schema",
     "default-proxy-effect-timeout",
     "default-proxy-effect-pool",
     "default-proxy-effect-timeout-pool",

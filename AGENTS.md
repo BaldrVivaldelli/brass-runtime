@@ -111,6 +111,10 @@ observability as the outermost layer.
   to logs and span attributes by default; metric labels require explicit
   opt-in with `withHttpObservability({ policy: { labelKeys: [...] } })` to
   avoid accidental high-cardinality series.
+- For high-TPS proxy paths that still need sampled spans, prefer
+  `withHttpObservability({ spans: { events: false, sampleRate: 0.001 },
+  spanSink: observability.tracer, injectTraceHeaders: false })` and keep
+  runtime hooks off on that hot path.
 - Dashboard-facing HTTP observability names live in
   `HTTP_OBSERVABILITY_CONTRACT`; update it with any metric/label/span/log
   naming changes.

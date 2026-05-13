@@ -279,24 +279,24 @@ await runtime.toPromise(http.getJson("/downstream/123"));
 
 Use stable `route` values instead of raw URLs, and enable `includeHostLabel`
 only when the client really talks to multiple downstream hosts. If you need
-traces on the same path, prefer a low sampling ratio or a separate observed
-client for diagnostic flows; otherwise keep the hot path metrics-only.
+traces on the same path, prefer HTTP-only sampled spans through `spanSink`
+instead of global runtime hooks. Use a separate fully observed runtime/client
+for diagnostic flows that need every fiber event.
 
 For a sampled span path with lower per-request overhead, keep runtime metrics
-off, avoid per-request HTTP span events, and only inject `traceparent` when a
-downstream needs propagation:
+off, avoid runtime hooks, avoid per-request HTTP span events, and only inject
+`traceparent` when a downstream needs propagation:
 
 ```ts
 const traced = makeObservability({
   metrics: false,
   logs: false,
-  sampling: 0.01,
+  sampling: 0.001,
   autoStart: false,
 });
 
 const tracedRuntime = new Runtime({
   env: traced.env,
-  hooks: traced.tracer,
 });
 
 const tracedHttp = makeDefaultHttpClient({
@@ -306,7 +306,8 @@ const tracedHttp = makeDefaultHttpClient({
     withHttpObservability({
       metrics: traced.metrics,
       logs: false,
-      spans: { events: false },
+      spans: { events: false, sampleRate: 0.001 },
+      spanSink: traced.tracer,
       adaptiveLimiter: false,
       injectTraceHeaders: false,
       includeHostLabel: false,
@@ -315,6 +316,10 @@ const tracedHttp = makeDefaultHttpClient({
   ],
 });
 ```
+
+`sampleRate` lets the HTTP middleware skip tracing before touching the current
+fiber/runtime on unsampled requests. This keeps p99 low on hot proxy paths while
+still retaining a sampled trace stream.
 
 ### HTTP policy observability
 

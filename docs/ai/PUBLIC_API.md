@@ -241,7 +241,9 @@ Primary categories:
   factory mandatory.
 - `withHttpObservability` middleware for HTTP client metrics, logs, spans, and
   W3C `traceparent` injection, including request-policy context in logs/spans
-  and opt-in policy metric labels
+  and opt-in policy metric labels. Hot proxy paths can use
+  `spans: { events: false, sampleRate }` plus `spanSink` to emit sampled HTTP
+  spans without enabling global runtime hooks.
 - `HTTP_OBSERVABILITY_CONTRACT` for stable dashboard metric names, label names,
   span attribute names, and structured log message names
 - adaptive limiter gauges and HTTP span attributes when the wrapped client

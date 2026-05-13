@@ -488,7 +488,9 @@ For hot proxy paths, keep HTTP metrics separate from runtime hooks:
 `makeObservability({ metrics: false, logs: false, traces: false })`,
 `preset: "proxy"`, `withHttpObservability({ spans: false, logs: false,
 injectTraceHeaders: false, includeHostLabel: false })`. For sampled spans on
-the same path, use low sampling plus `spans: { events: false }`.
+the same path, avoid global runtime hooks and use
+`withHttpObservability({ spans: { events: false, sampleRate: 0.001 },
+spanSink: observability.tracer, injectTraceHeaders: false })`.
 
 ### Performance profiler
 

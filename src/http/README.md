@@ -514,6 +514,21 @@ const http = makeDefaultHttpClient({
 await toPromise(http.shutdown(), {}); // cierra los agentes Node creados por el transporte
 ```
 
+Si necesitás spans en ese mismo hot path, evitá hooks globales del runtime y
+sampleá desde el middleware HTTP:
+
+```ts
+withHttpObservability({
+  metrics: observability.metrics,
+  logs: false,
+  spans: { events: false, sampleRate: 0.001 },
+  spanSink: observability.tracer,
+  injectTraceHeaders: false,
+  includeHostLabel: false,
+  route: "/downstream/:id",
+});
+```
+
 Si el cliente tiene adaptive limiter, `withHttpObservability` emite gauges de
 limit, in-flight, queue depth, utilization, error rate, throughput y rejection
 rate, y agrega el mismo snapshot a los eventos del span HTTP.

@@ -31,6 +31,7 @@ import {
 import {
   decodeJsonBody,
   encodeJsonBodyEffect,
+  makeJsonParseValidationError,
   type AnyJsonSchemaLike,
   type InferJsonSchema,
   type ValidationError,
@@ -421,6 +422,14 @@ function decodeResponse<A>(
   schema?: AnyJsonSchemaLike,
   schemaName?: string,
 ): Async<unknown, ValidationError, HttpResponse<A>> {
+  if (!schema) {
+    try {
+      return asyncSucceed(toResponse(wire, JSON.parse(wire.bodyText) as A));
+    } catch (error) {
+      return asyncFail(makeJsonParseValidationError(wire.bodyText, error, { schemaName }));
+    }
+  }
+
   const result = decodeJsonBody<A>(wire.bodyText, schema as any, { schemaName });
   return result.success
     ? asyncSucceed(toResponse(wire, result.data))

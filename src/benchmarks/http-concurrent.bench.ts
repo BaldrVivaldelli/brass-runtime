@@ -61,6 +61,7 @@ type HttpScenarioKind =
   | "default-proxy-node-json"
   | "default-balanced-no-adaptive-json"
   | "default-balanced-json"
+  | "default-node-json"
   | "default-json"
   | "default-json-observed";
 
@@ -650,6 +651,19 @@ function makeScenarioRunner(
       return makeDefaultJsonRunner(server, scenario, "balanced", true);
     case "default-balanced-json":
       return makeDefaultJsonRunner(server, scenario, "balanced");
+    case "default-node-json":
+      return makeDefaultJsonRunner(
+        server,
+        scenario,
+        "default",
+        false,
+        undefined,
+        makeNodeHttpTransport({
+          maxSockets: scenario.concurrency,
+          maxFreeSockets: scenario.concurrency,
+          socketTimeoutMs: scenario.timeoutMs,
+        }),
+      );
     case "default-json":
       return makeDefaultJsonRunner(server, scenario, "default");
     case "default-json-observed":
@@ -785,6 +799,7 @@ function scenariosForMode(mode: HttpBenchMode): readonly HttpScenario[] {
     scenario("default-proxy-node-json", "http local dummy makeDefault proxy JSON + node transport", DELAY_MS, mode),
     scenario("default-balanced-no-adaptive-json", "http local dummy makeDefault balanced JSON without adaptive", DELAY_MS, mode),
     scenario("default-balanced-json", "http local dummy makeDefault balanced JSON", DELAY_MS, mode),
+    scenario("default-node-json", "http local dummy makeDefault default JSON + node transport", DELAY_MS, mode),
     scenario("default-json", "http local dummy makeDefault default JSON", DELAY_MS, mode),
     scenario("default-json-observed", "http local dummy makeDefault default JSON + observability", DELAY_MS, mode),
   ]);
