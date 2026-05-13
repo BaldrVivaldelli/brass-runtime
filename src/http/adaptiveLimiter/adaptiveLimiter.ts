@@ -191,6 +191,26 @@ export class AdaptiveLimiter {
   }
 
   /**
+   * Try to acquire a concurrency slot synchronously.
+   * Returns a lease directly if under the limit, or undefined if contended/aborted/destroyed.
+   * This avoids Promise.resolve() allocation and microtask scheduling on the uncontended path.
+   */
+  tryAcquireSync(key: string, signal: AbortSignal): AdaptiveLease | undefined {
+    if (this.destroyed) return undefined;
+    if (signal.aborted) return undefined;
+    const state = this.getOrCreateState(key);
+    this.touch(state);
+
+    if (state.inFlight < state.limit) {
+      state.inFlight++;
+      state.acquired++;
+      state.rejectionStreak = 0;
+      return this.makeLease(state);
+    }
+    return undefined;
+  }
+
+  /**
    * Get stats for a specific key, or aggregate stats if no key is provided.
    */
   stats(key?: string): AdaptiveLimiterStats {

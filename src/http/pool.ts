@@ -158,6 +158,20 @@ export class HttpConcurrencyPool {
     return this.wasm ? this.acquireWasm(key, signal) : this.acquireJs(key, signal);
   }
 
+  /** Try synchronous acquire. Returns lease directly or undefined if contended. */
+  tryAcquireSync(key: string, signal: AbortSignal): HttpPoolLease | undefined {
+    // For WASM engine, always return undefined to preserve existing WASM path
+    if (this.wasm) return undefined;
+    if (signal.aborted) return undefined;
+    const state = this.getState(key);
+    if (state.running < this.concurrency) {
+      state.running++;
+      state.acquired++;
+      return this.makeLease(state);
+    }
+    return undefined;
+  }
+
   stats(): HttpPoolStats {
     const keys = Array.from(this.states.values()).map((state): HttpPoolKeyStats => ({
       key: state.key,

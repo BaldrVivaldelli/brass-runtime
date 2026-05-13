@@ -205,32 +205,60 @@ export class Runtime<R> {
         fiber.join(cb);
     }
 
-    toPromise<E, A>(effect: Async<R, E, A>): Promise<A> {
-        return new Promise((resolve, reject) => {
-            const complete = (exit: Exit<E, A>) => {
-                if (exit._tag === "Success") {
-                    resolve(exit.value);
-                    return;
-                }
-                const failure = Cause.firstFailure(exit.cause);
-                if (failure._tag === "Some") reject(failure.value);
-                else {
-                    const defect = Cause.firstDefect(exit.cause);
-                    if (defect._tag === "Some") {
-                        reject(defect.value instanceof Error ? defect.value : new Error(String(defect.value)));
-                    } else if (Cause.containsInterrupt(exit.cause)) {
-                        reject(new Error("Interrupted"));
-                    } else {
-                        reject(Cause.toError(exit.cause));
-                    }
-                }
-            };
-            if (this.tryRunNativeTopLevel(effect, complete)) return;
+    private static exitToError<E, A>(exit: Exit<E, A>): unknown {
+        if (exit._tag === "Success") return undefined;
+        const failure = Cause.firstFailure(exit.cause);
+        if (failure._tag === "Some") return failure.value;
+        const defect = Cause.firstDefect(exit.cause);
+        if (defect._tag === "Some") {
+            return defect.value instanceof Error ? defect.value : new Error(String(defect.value));
+        }
+        if (Cause.containsInterrupt(exit.cause)) return new Error("Interrupted");
+        return Cause.toError(exit.cause);
+    }
 
-            const fiber = this.fork(effect);
-            fiber.join((exit) => {
-                complete(exit);
+    toPromise<E, A>(effect: Async<R, E, A>): Promise<A> {
+        // Sync-detection pattern: use a mutable callback that initially captures
+        // sync results. If the effect resolves before tryRunNativeTopLevel returns,
+        // we can return Promise.resolve/reject directly (fewer allocations).
+        let syncExit: Exit<E, A> | undefined;
+        let promiseResolve: ((value: A) => void) | undefined;
+        let promiseReject: ((error: unknown) => void) | undefined;
+
+        // Single closure: doubles as both the NativeTopLevelRunner callback
+        // and the fiber join callback, reducing allocation from 2 closures to 1.
+        const complete = (exit: Exit<E, A>) => {
+            if (promiseResolve) {
+                // Async path — route to promise
+                if (exit._tag === "Success") promiseResolve(exit.value);
+                else promiseReject!(Runtime.exitToError(exit));
+            } else {
+                // Sync path — capture for later
+                syncExit = exit;
+            }
+        };
+
+        if (this.tryRunNativeTopLevel(effect, complete)) {
+            if (syncExit) {
+                // Effect resolved synchronously — avoid new Promise allocation
+                return syncExit._tag === "Success"
+                    ? Promise.resolve(syncExit.value)
+                    : Promise.reject(Runtime.exitToError(syncExit));
+            }
+            // Effect went async — create Promise and wire up
+            return new Promise<A>((resolve, reject) => {
+                promiseResolve = resolve;
+                promiseReject = reject;
             });
+        }
+
+        // Fallback: fork as fiber (hooks/wasm/nested fiber cases)
+        // Reuse `complete` directly as the join callback — no wrapper closure needed.
+        return new Promise<A>((resolve, reject) => {
+            promiseResolve = resolve;
+            promiseReject = reject;
+            const fiber = this.fork(effect);
+            fiber.join(complete);
         });
     }
 
@@ -614,6 +642,15 @@ export type AbortablePromiseFinish = {
     readonly error?: unknown;
 };
 
+/**
+ * Duck-typed timer wheel interface for use in AbortablePromiseOptions.
+ * Avoids importing from `src/http/timerWheel.ts` to prevent circular dependencies.
+ * Any object with a compatible `schedule` method can be used.
+ */
+export interface AbortablePromiseTimerWheel {
+    schedule(timeoutMs: number, cb: () => void): { cancel(): void };
+}
+
 export type AbortablePromiseOptions = {
     /** Logical label used by diagnostics. Keep it low-cardinality: e.g. `http:GET:https://api.foo.com`. */
     readonly label?: string;
@@ -623,6 +660,8 @@ export type AbortablePromiseOptions = {
     readonly timeoutReason?: () => unknown;
     readonly onStart?: (label: string) => void;
     readonly onFinish?: (finish: AbortablePromiseFinish) => void;
+    /** Optional timer wheel for efficient timeout scheduling. When provided, uses wheel.schedule() instead of setTimeout. */
+    readonly timerWheel?: AbortablePromiseTimerWheel;
 };
 
 export type AbortablePromiseLabelStats = {
@@ -669,6 +708,20 @@ const abortablePromiseTotals: Omit<MutableAbortablePromiseLabelStats, "label"> =
 };
 const abortablePromiseLabels = new Map<string, MutableAbortablePromiseLabelStats>();
 
+// Module-level toggle — defaults to disabled (hot path is allocation-free)
+let perLabelTrackingEnabled = false;
+
+/**
+ * Enable or disable per-label tracking for abortable promise diagnostics.
+ * When disabled (default), only global integer counters are incremented on the hot path,
+ * avoiding Map allocations entirely. Returns the previous enabled state.
+ */
+export function setAbortablePromisePerLabelTracking(enabled: boolean): boolean {
+    const previous = perLabelTrackingEnabled;
+    perLabelTrackingEnabled = enabled;
+    return previous;
+}
+
 const getAbortablePromiseLabelStats = (label: string): MutableAbortablePromiseLabelStats => {
     const existing = abortablePromiseLabels.get(label);
     if (existing) return existing;
@@ -686,50 +739,68 @@ const getAbortablePromiseLabelStats = (label: string): MutableAbortablePromiseLa
     return created;
 };
 
-const recordAbortablePromiseStart = (label: string): void => {
-    const byLabel = getAbortablePromiseLabelStats(label);
+export const recordAbortablePromiseStart = (label: string): void => {
     abortablePromiseTotals.active++;
     abortablePromiseTotals.started++;
-    byLabel.active++;
-    byLabel.started++;
+    if (perLabelTrackingEnabled) {
+        const byLabel = getAbortablePromiseLabelStats(label);
+        byLabel.active++;
+        byLabel.started++;
+    }
 };
 
-const recordAbortablePromiseFinish = (label: string, outcome: AbortablePromiseOutcome): void => {
-    const byLabel = getAbortablePromiseLabelStats(label);
+export const recordAbortablePromiseFinish = (label: string, outcome: AbortablePromiseOutcome): void => {
     if (abortablePromiseTotals.active > 0) abortablePromiseTotals.active--;
-    if (byLabel.active > 0) byLabel.active--;
     switch (outcome) {
         case "success":
             abortablePromiseTotals.succeeded++;
-            byLabel.succeeded++;
-            return;
+            break;
         case "failure":
             abortablePromiseTotals.failed++;
-            byLabel.failed++;
-            return;
+            break;
         case "interrupt":
             abortablePromiseTotals.interrupted++;
-            byLabel.interrupted++;
-            return;
+            break;
         case "timeout":
             abortablePromiseTotals.timedOut++;
-            byLabel.timedOut++;
-            return;
+            break;
+    }
+    if (perLabelTrackingEnabled) {
+        const byLabel = getAbortablePromiseLabelStats(label);
+        if (byLabel.active > 0) byLabel.active--;
+        switch (outcome) {
+            case "success":
+                byLabel.succeeded++;
+                return;
+            case "failure":
+                byLabel.failed++;
+                return;
+            case "interrupt":
+                byLabel.interrupted++;
+                return;
+            case "timeout":
+                byLabel.timedOut++;
+                return;
+        }
     }
 };
 
 const recordAbortablePromiseLateSettlement = (label: string): void => {
-    const byLabel = getAbortablePromiseLabelStats(label);
     abortablePromiseTotals.lateSettlements++;
-    byLabel.lateSettlements++;
+    if (perLabelTrackingEnabled) {
+        const byLabel = getAbortablePromiseLabelStats(label);
+        byLabel.lateSettlements++;
+    }
 };
 
 export function abortablePromiseStats(): AbortablePromiseStats {
     return {
         ...abortablePromiseTotals,
-        byLabel: Array.from(abortablePromiseLabels.values())
-            .map((x) => ({ ...x }))
-            .sort((a, b) => b.active - a.active || b.started - a.started || a.label.localeCompare(b.label)),
+        byLabel: perLabelTrackingEnabled
+            ? Array.from(abortablePromiseLabels.values())
+                  .map((x) => ({ ...x }))
+                  .sort((a, b) => b.active - a.active || b.started - a.started || a.label.localeCompare(b.label))
+            : [],
     };
 }
 
@@ -756,6 +827,190 @@ const makeTimeoutReason = (timeoutMs: number, label: string): unknown => ({
 });
 
 /**
+ * Internal: register path when timeoutMs is defined and > 0.
+ * Allocates a timeout handle, cleanup closure, and setTimeout (or timerWheel.schedule).
+ */
+function registerWithTimeout<E, A, R>(
+    make: (signal: AbortSignal, env: R) => Promise<A>,
+    onReject: (u: unknown) => E,
+    options: AbortablePromiseOptions,
+    env: R,
+    cb: (exit: Exit<E, A>) => void,
+    timeoutMs: number,
+): (() => void) {
+    const controller = new AbortController();
+    const label = normalizeAbortablePromiseLabel(options.label);
+    const startedAt = performance.now();
+    let done = false;
+
+    let cleanup: () => void;
+
+    const hasHooks = options.onStart !== undefined || options.onFinish !== undefined;
+
+    // When hooks are present, allocate the full finish wrapper that invokes them.
+    // When hooks are absent, use a simpler completion path that avoids the hook closure.
+    const finish = hasHooks
+        ? (outcome: AbortablePromiseOutcome, exit: Exit<E, A>, error?: unknown) => {
+            if (done) return;
+            done = true;
+            cleanup();
+            recordAbortablePromiseFinish(label, outcome);
+            options.onFinish?.({
+                label,
+                outcome,
+                durationMs: Math.round(performance.now() - startedAt),
+                error,
+            });
+            cb(exit);
+        }
+        : (outcome: AbortablePromiseOutcome, exit: Exit<E, A>, _error?: unknown) => {
+            if (done) return;
+            done = true;
+            cleanup();
+            recordAbortablePromiseFinish(label, outcome);
+            cb(exit);
+        };
+
+    recordAbortablePromiseStart(label);
+    if (hasHooks) options.onStart?.(label);
+
+    const onTimeout = () => {
+        const reason = options.timeoutReason?.() ?? makeTimeoutReason(timeoutMs, label);
+        try {
+            controller.abort(reason);
+        } catch {
+            controller.abort();
+        }
+        finish("timeout", Exit.failCause(Cause.fail(onReject(reason))), reason);
+    };
+
+    if (options.timerWheel) {
+        const handle = options.timerWheel.schedule(timeoutMs, onTimeout);
+        cleanup = () => { handle.cancel(); };
+    } else {
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined = setTimeout(onTimeout, timeoutMs);
+        cleanup = () => {
+            if (timeoutHandle !== undefined) {
+                clearTimeout(timeoutHandle);
+                timeoutHandle = undefined;
+            }
+        };
+    }
+
+    let promise: Promise<A>;
+    try {
+        promise = make(controller.signal, env);
+    } catch (err) {
+        finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
+        return () => undefined;
+    }
+
+    promise
+        .then((value) => {
+            if (done) {
+                recordAbortablePromiseLateSettlement(label);
+                return;
+            }
+            finish("success", Exit.succeed(value));
+        })
+        .catch((err) => {
+            if (done) {
+                recordAbortablePromiseLateSettlement(label);
+                return;
+            }
+            finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
+        });
+
+    return () => {
+        if (done) return;
+        try {
+            controller.abort();
+        } catch {
+            // ignore
+        }
+        finish("interrupt", Exit.failCause(Cause.interrupt()));
+    };
+}
+
+/**
+ * Internal: register path when no timeout is configured.
+ * Skips timeoutHandle allocation, cleanup closure, and setTimeout setup.
+ */
+function registerWithoutTimeout<E, A, R>(
+    make: (signal: AbortSignal, env: R) => Promise<A>,
+    onReject: (u: unknown) => E,
+    options: AbortablePromiseOptions,
+    env: R,
+    cb: (exit: Exit<E, A>) => void,
+): (() => void) {
+    const controller = new AbortController();
+    const label = normalizeAbortablePromiseLabel(options.label);
+    const startedAt = performance.now();
+    let done = false;
+
+    const hasHooks = options.onStart !== undefined || options.onFinish !== undefined;
+
+    // When hooks are present, allocate the full finish wrapper that invokes them.
+    // When hooks are absent, use a simpler completion path that avoids the hook closure.
+    const finish = hasHooks
+        ? (outcome: AbortablePromiseOutcome, exit: Exit<E, A>, error?: unknown) => {
+            if (done) return;
+            done = true;
+            recordAbortablePromiseFinish(label, outcome);
+            options.onFinish?.({
+                label,
+                outcome,
+                durationMs: Math.round(performance.now() - startedAt),
+                error,
+            });
+            cb(exit);
+        }
+        : (outcome: AbortablePromiseOutcome, exit: Exit<E, A>, _error?: unknown) => {
+            if (done) return;
+            done = true;
+            recordAbortablePromiseFinish(label, outcome);
+            cb(exit);
+        };
+
+    recordAbortablePromiseStart(label);
+    if (hasHooks) options.onStart?.(label);
+
+    let promise: Promise<A>;
+    try {
+        promise = make(controller.signal, env);
+    } catch (err) {
+        finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
+        return () => undefined;
+    }
+
+    promise
+        .then((value) => {
+            if (done) {
+                recordAbortablePromiseLateSettlement(label);
+                return;
+            }
+            finish("success", Exit.succeed(value));
+        })
+        .catch((err) => {
+            if (done) {
+                recordAbortablePromiseLateSettlement(label);
+                return;
+            }
+            finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
+        });
+
+    return () => {
+        if (done) return;
+        try {
+            controller.abort();
+        } catch {
+            // ignore
+        }
+        finish("interrupt", Exit.failCause(Cause.interrupt()));
+    };
+}
+
+/**
  * Create an Async from an abortable Promise.
  *
  * Improvements over the original helper:
@@ -774,84 +1029,14 @@ export function fromPromiseAbortable<E, A, R = unknown>(
     return {
         _tag: "Async",
         register: (env: R, cb: (exit: Exit<E, A>) => void) => {
-            const controller = new AbortController();
-            const label = normalizeAbortablePromiseLabel(options.label);
             const timeoutMs = options.timeoutMs !== undefined && Number.isFinite(options.timeoutMs)
                 ? Math.max(0, Math.floor(options.timeoutMs))
                 : undefined;
-            const startedAt = performance.now();
-            let done = false;
-            let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-
-            const cleanup = () => {
-                if (timeoutHandle !== undefined) {
-                    clearTimeout(timeoutHandle);
-                    timeoutHandle = undefined;
-                }
-            };
-
-            const finish = (outcome: AbortablePromiseOutcome, exit: Exit<E, A>, error?: unknown) => {
-                if (done) return;
-                done = true;
-                cleanup();
-                recordAbortablePromiseFinish(label, outcome);
-                options.onFinish?.({
-                    label,
-                    outcome,
-                    durationMs: Math.round(performance.now() - startedAt),
-                    error,
-                });
-                cb(exit);
-            };
-
-            recordAbortablePromiseStart(label);
-            options.onStart?.(label);
 
             if (timeoutMs !== undefined && timeoutMs > 0) {
-                timeoutHandle = setTimeout(() => {
-                    const reason = options.timeoutReason?.() ?? makeTimeoutReason(timeoutMs, label);
-                    try {
-                        controller.abort(reason);
-                    } catch {
-                        controller.abort();
-                    }
-                    finish("timeout", Exit.failCause(Cause.fail(onReject(reason))), reason);
-                }, timeoutMs);
+                return registerWithTimeout(make, onReject, options, env, cb, timeoutMs);
             }
-
-            let promise: Promise<A>;
-            try {
-                promise = make(controller.signal, env);
-            } catch (err) {
-                finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
-                return () => undefined;
-            }
-
-            promise
-                .then((value) => {
-                    if (done) {
-                        recordAbortablePromiseLateSettlement(label);
-                        return;
-                    }
-                    finish("success", Exit.succeed(value));
-                })
-                .catch((err) => {
-                    if (done) {
-                        recordAbortablePromiseLateSettlement(label);
-                        return;
-                    }
-                    finish("failure", Exit.failCause(Cause.fail(onReject(err))), err);
-                });
-
-            return () => {
-                if (done) return;
-                try {
-                    controller.abort();
-                } catch {
-                    // ignore
-                }
-                finish("interrupt", Exit.failCause(Cause.interrupt()));
-            };
+            return registerWithoutTimeout(make, onReject, options, env, cb);
         },
     };
 }
