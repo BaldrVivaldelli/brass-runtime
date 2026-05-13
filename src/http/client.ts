@@ -1,6 +1,6 @@
 import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../core/types/asyncEffect";
 import type { Async } from "../core/types/asyncEffect";
-import { fromPromiseAbortable, type AbortablePromiseFinish } from "../core/runtime/runtime";
+import { fromPromiseAbortable, recordAbortablePromiseStart, recordAbortablePromiseFinish, type AbortablePromiseFinish } from "../core/runtime/runtime";
 import { ZStream } from "../core/stream/stream";
 import { Cause, type Exit } from "../core/types/effect";
 import { mergeHeadersUnder } from "./optics/request";
@@ -32,6 +32,7 @@ import {
     type HttpStreamTransport,
     type HttpTransport,
 } from "./transport";
+import { TimerWheel } from "./timerWheel";
 import { getHttpRequestPolicy } from "./requestPolicy";
 import type { HttpRequestPolicyRef, HttpRequestRetryOverride } from "./requestPolicy";
 
@@ -115,10 +116,6 @@ export type MakeHttpConfig = {
     pool?: false | HttpPoolConfig;
     /** Adaptive concurrency limiter. Replaces fixed pool when enabled. */
     adaptiveLimiter?: false | AdaptiveLimiterConfig;
-    /** Custom transport. Defaults to makeFetchTransport(). */
-    transport?: HttpTransport;
-    /** Custom stream transport. Defaults to makeFetchStreamTransport(). */
-    streamTransport?: HttpStreamTransport;
 };
 
 export type HttpWireResponseStream<Meta = unknown> = {
@@ -709,8 +706,14 @@ class PoolRequestState {
         // Closure #2: transport completion callback
         try {
             const effect = transport({ request: req, url, signal });
-            // FAST PATH: bare Async effect — bypass registerHttpEffect entirely.
-            if (effect._tag === "Async") {
+            // FAST PATH: Succeed/Fail effects — resolve immediately, no interpreter needed.
+            if (effect._tag === "Succeed") {
+                if (this.lease) releaseSuccess(this.lease, this.adaptiveLimiter, (effect as any).value);
+                this.finish("success", { _tag: "Success", value: (effect as any).value });
+            } else if (effect._tag === "Fail") {
+                if (this.lease) releaseFailure(this.lease, this.adaptiveLimiter);
+                this.finishFailure((effect as any).error);
+            } else if (effect._tag === "Async") {
                 try {
                     const cancel = effect.register(env, (exit) => {
                         if (this.done) return;
@@ -729,7 +732,6 @@ class PoolRequestState {
                     this.finishFailure(normalizeHttpError(error));
                 }
             } else {
-                // SLOW PATH: wrapped effect (FlatMap, Fold, Sync, etc.) — full interpretation
                 const innerCancel = registerHttpEffect(
                     effect,
                     env,
@@ -738,10 +740,10 @@ class PoolRequestState {
                         this.cancelInner = undefined;
                         if (exit._tag === "Success") {
                             if (this.lease) releaseSuccess(this.lease, this.adaptiveLimiter, exit.value);
-                            this.finish("success", exit);
+                            this.finish("success", exit as Exit<HttpError, HttpWireResponse>);
                         } else {
                             if (this.lease) releaseFailure(this.lease, this.adaptiveLimiter);
-                            this.finish("failure", exit, exitError(exit));
+                            this.finish("failure", exit as Exit<HttpError, HttpWireResponse>, exitError(exit));
                         }
                     },
                 );
