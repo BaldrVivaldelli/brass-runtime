@@ -163,25 +163,26 @@ console.log(http.compression?.stats());
 deduplication, priority scheduling, retry, adaptive concurrency, safe-method
 response cache, decompression, stats, `cancelAll`, and JSON/text helpers. Use
 `preset: "production"` when you want that production-ready shape explicitly,
-`preset: "balanced"` to skip the default cache, `preset: "proxy"` for
-high-throughput BFF/proxy paths without lifecycle queues or Brass timers by
-default, or `preset: "minimal"` for a cheap wire client with the same helper API.
-`preset: "default"` remains the same full preset for compatibility.
+`preset: "balanced"` to skip the default cache, `preset: "highThroughputProxy"`
+for hot BFF/proxy paths without lifecycle queues or Brass timers by default,
+`preset: "proxy"` as the shorter compatibility alias, or `preset: "minimal"`
+for a cheap wire client with the same helper API. `preset: "default"` remains
+the same full preset for compatibility.
 
 On Node BFF/proxy services, pair the proxy preset with the first-party
-`node:http` transport when the default `fetch` backend is the bottleneck:
+`node:http` transport when the default `fetch` backend is the bottleneck.
+The Node-only factory below wires that recommended shape directly:
 
 ```ts
 import { toPromise } from "brass-runtime";
-import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+import { makeNodeHttpProxyClient } from "brass-runtime/http";
 
-const http = makeDefaultHttpClient({
+const http = makeNodeHttpProxyClient({
   baseUrl: "https://api.example.com",
-  preset: "proxy",
-  transport: makeNodeHttpTransport({
+  nodeTransport: {
     maxSockets: 512,
     maxFreeSockets: 512,
-  }),
+  },
 });
 
 await toPromise(http.shutdown(), {}); // also destroys owned Node agents

@@ -158,6 +158,9 @@ observability as the outermost layer.
   paths when invalid.
 - `preset: "production"` is the explicit production-ready default HTTP stack.
   `preset: "default"` is the same stack kept for compatibility.
+- `preset: "highThroughputProxy"` is the explicit hot proxy/BFF preset.
+  `preset: "proxy"` is the shorter compatibility alias. In Node, prefer
+  `makeNodeHttpProxyClient` when the default fetch backend is the bottleneck.
 - Keep `docs/http-recipes.md` current when adding high-level HTTP workflows.
 
 ## Editing rules

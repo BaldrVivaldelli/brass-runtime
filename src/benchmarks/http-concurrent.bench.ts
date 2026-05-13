@@ -59,6 +59,7 @@ type HttpScenarioKind =
   | "default-minimal-json"
   | "default-proxy-json"
   | "default-proxy-node-json"
+  | "high-throughput-proxy-node-json"
   | "default-balanced-no-adaptive-json"
   | "default-balanced-json"
   | "default-node-json"
@@ -278,7 +279,7 @@ function makeMinimalClient(baseUrl: string, scenario: HttpScenario): DefaultHttp
 function makeDefaultClient(
   baseUrl: string,
   scenario: HttpScenario,
-  preset: "proxy" | "balanced" | "default",
+  preset: "proxy" | "highThroughputProxy" | "balanced" | "default",
   disableAdaptiveLimiter: boolean,
   observability?: Observability,
   transport?: HttpTransport,
@@ -540,7 +541,7 @@ function makeWireRawRunner(server: DummyServer, scenario: HttpScenario): Scenari
 function makeDefaultJsonRunner(
   server: DummyServer,
   scenario: HttpScenario,
-  preset: "minimal" | "proxy" | "balanced" | "default",
+  preset: "minimal" | "proxy" | "highThroughputProxy" | "balanced" | "default",
   disableAdaptiveLimiter = false,
   observability?: Observability,
   transport?: NodeHttpTransport,
@@ -639,6 +640,19 @@ function makeScenarioRunner(
         server,
         scenario,
         "proxy",
+        false,
+        undefined,
+        makeNodeHttpTransport({
+          maxSockets: scenario.concurrency,
+          maxFreeSockets: scenario.concurrency,
+          socketTimeoutMs: scenario.timeoutMs,
+        }),
+      );
+    case "high-throughput-proxy-node-json":
+      return makeDefaultJsonRunner(
+        server,
+        scenario,
+        "highThroughputProxy",
         false,
         undefined,
         makeNodeHttpTransport({
@@ -797,6 +811,7 @@ function scenariosForMode(mode: HttpBenchMode): readonly HttpScenario[] {
     scenario("default-minimal-json", "http local dummy makeDefault minimal JSON", DELAY_MS, mode),
     scenario("default-proxy-json", "http local dummy makeDefault proxy JSON", DELAY_MS, mode),
     scenario("default-proxy-node-json", "http local dummy makeDefault proxy JSON + node transport", DELAY_MS, mode),
+    scenario("high-throughput-proxy-node-json", "http local dummy makeDefault highThroughputProxy JSON + node transport", DELAY_MS, mode),
     scenario("default-balanced-no-adaptive-json", "http local dummy makeDefault balanced JSON without adaptive", DELAY_MS, mode),
     scenario("default-balanced-json", "http local dummy makeDefault balanced JSON", DELAY_MS, mode),
     scenario("default-node-json", "http local dummy makeDefault default JSON + node transport", DELAY_MS, mode),

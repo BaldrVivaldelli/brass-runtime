@@ -166,6 +166,41 @@ describe("makeDefaultHttpClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("exposes highThroughputProxy as the explicit hot proxy preset", async () => {
+    resetAbortablePromiseStats();
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeDefaultHttpClient({
+      baseUrl: "https://api.example.test",
+      preset: "highThroughputProxy",
+    });
+
+    const response = await client.getJson<{ ok: boolean }>("/users/1").unsafeRunPromise();
+
+    expect(response.body).toEqual({ ok: true });
+    expect(client.preset).toBe("highThroughputProxy");
+    expect(client.features).toEqual({
+      dedup: false,
+      batch: false,
+      cache: false,
+      priority: false,
+      retry: false,
+      prewarm: false,
+      adaptiveLimiter: false,
+      compression: false,
+      middleware: 0,
+    });
+    expect(client.compression).toBeUndefined();
+    expect(abortablePromiseStats()).toMatchObject({ started: 0 });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("lets adaptive limiter presets replace default preset internals cleanly", () => {
     vi.stubGlobal("fetch", vi.fn());
 

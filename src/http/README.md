@@ -243,8 +243,10 @@ priority, retry, adaptive limiter `aggressive`, cache para métodos seguros y
 response compression. `default` es el mismo preset por compatibilidad. Si
 querés evitar cache por default, usá `preset: "balanced"`; si querés solo
 wire y DX, usá `preset: "minimal"`. Para BFF/proxy de alto throughput, usá
-`preset: "proxy"`: mantiene transporte, cancelación y helpers JSON, pero no
-activa timeout Brass, priority/adaptive/cache/retry/compression por defecto.
+`preset: "highThroughputProxy"` o su alias corto `preset: "proxy"`: mantiene
+transporte, cancelación y helpers JSON, pero no activa timeout Brass,
+priority/adaptive/cache/retry/compression por defecto. En Node, preferí
+`makeNodeHttpProxyClient(...)` para combinar ese preset con keep-alive agents.
 
 El adaptive limiter mantiene estado por key con TTL (`stateTtlMs`), probe con
 jitter (`probeJitterRatio`), warmup explícito (`warmupRequests`), slow-start

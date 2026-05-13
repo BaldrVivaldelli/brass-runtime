@@ -140,7 +140,13 @@ export type DefaultPostJson = {
   ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
 };
 
-export type DefaultHttpClientPreset = "minimal" | "proxy" | "balanced" | "default" | "production";
+export type DefaultHttpClientPreset =
+  | "minimal"
+  | "proxy"
+  | "highThroughputProxy"
+  | "balanced"
+  | "default"
+  | "production";
 
 export type DefaultHttpClientFeatures = {
   readonly dedup: boolean;
@@ -159,6 +165,7 @@ export type DefaultHttpClientConfig = LifecycleClientConfig & {
    * Preset used as the baseline before caller overrides are applied.
    * - minimal: wire client + timeout only.
    * - proxy: low-latency proxy/BFF path; wire client only, no lifecycle queue or Brass timeout by default.
+   * - highThroughputProxy: explicit alias for the hot proxy path; pair with makeNodeHttpProxyClient on Node.
    * - balanced: retry, priority, dedup, adaptive limiter, response compression.
    * - default: balanced + short safe-method response cache.
    * - production: stable alias for the full production-ready default preset.
@@ -252,6 +259,7 @@ const DEFAULT_PRESET_CONFIG: LifecycleClientConfig = {
 const PRESET_CONFIGS: Record<DefaultHttpClientPreset, LifecycleClientConfig> = {
   minimal: MINIMAL_PRESET_CONFIG,
   proxy: PROXY_PRESET_CONFIG,
+  highThroughputProxy: PROXY_PRESET_CONFIG,
   balanced: BALANCED_PRESET_CONFIG,
   default: DEFAULT_PRESET_CONFIG,
   production: DEFAULT_PRESET_CONFIG,
@@ -302,7 +310,7 @@ export function makeDefaultHttpClient(
   let wire = makeLifecycleClient(lifecycleConfig);
 
   const compressionResult =
-    compression === false || (compression === undefined && (preset === "minimal" || preset === "proxy"))
+    compression === false || (compression === undefined && isLeanPreset(preset))
       ? undefined
       : makeCompressionMiddleware(compression === undefined ? undefined : compression);
 
@@ -505,4 +513,8 @@ function featureSnapshot(
 
 function isEnabled(value: unknown): boolean {
   return value !== undefined && value !== false;
+}
+
+function isLeanPreset(preset: DefaultHttpClientPreset): boolean {
+  return preset === "minimal" || preset === "proxy" || preset === "highThroughputProxy";
 }

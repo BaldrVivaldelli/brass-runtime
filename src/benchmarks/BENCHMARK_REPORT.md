@@ -122,6 +122,9 @@ runtime recorder.
   percentiles (`requestP50Ms`, `requestP99Ms`), requested concurrency,
   observed server max in-flight, logical client max in-flight, and sampled
   wire/pool/lifecycle queue peaks when available.
+- HTTP concurrency includes the explicit `high-throughput-proxy-node-json`
+  variant for the recommended Node BFF/proxy shape:
+  `preset: "highThroughputProxy"` plus `makeNodeHttpTransport`.
 - HTTP concurrency also reports memory deltas (`heapDeltaMb`, `rssDeltaMb`,
   `externalDeltaMb`, `gcAvailable`) and adaptive limiter snapshots
   (`adaptiveMinLimit`, `adaptiveMaxQueueDepth`, `adaptiveMaxInFlight`) so local

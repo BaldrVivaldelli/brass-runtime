@@ -260,7 +260,7 @@ const runtime = Runtime.make({});
 
 const http = makeDefaultHttpClient({
   baseUrl: "https://api.example.com",
-  preset: "proxy",
+  preset: "highThroughputProxy",
   middleware: [
     withHttpObservability({
       metrics: observability.metrics,
@@ -301,7 +301,7 @@ const tracedRuntime = new Runtime({
 
 const tracedHttp = makeDefaultHttpClient({
   baseUrl: "https://api.example.com",
-  preset: "proxy",
+  preset: "highThroughputProxy",
   middleware: [
     withHttpObservability({
       metrics: traced.metrics,

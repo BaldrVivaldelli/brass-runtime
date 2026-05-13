@@ -10,6 +10,11 @@ import {
 import { async, type Async } from "../core/types/asyncEffect";
 import { Cause } from "../core/types/effect";
 import type { HttpError, HttpWireResponse } from "./client";
+import {
+  makeDefaultHttpClient,
+  type DefaultHttpClient,
+  type DefaultHttpClientConfig,
+} from "./defaultClient";
 import { Request as HttpRequestOptic } from "./optics/request";
 import {
   abortErrorForSignal,
@@ -30,6 +35,18 @@ export type NodeHttpTransportConfig = {
 
 export type NodeHttpTransport = HttpTransport & {
   readonly destroy: () => void;
+};
+
+export type NodeHttpProxyClientConfig = Omit<DefaultHttpClientConfig, "preset" | "transport"> & {
+  /**
+   * Defaults to the explicit hot proxy preset. Use `proxy` only when you need
+   * the shorter compatibility name in stats/config snapshots.
+   */
+  readonly preset?: "highThroughputProxy" | "proxy";
+  /** Existing Node transport to use. When omitted, Brass creates owned keep-alive agents. */
+  readonly transport?: NodeHttpTransport;
+  /** Options for the owned Node transport when `transport` is omitted. */
+  readonly nodeTransport?: NodeHttpTransportConfig;
 };
 
 const nowMs = (): number =>
@@ -168,5 +185,20 @@ export function makeNodeHttpTransport(config: NodeHttpTransportConfig = {}): Nod
       if (ownsHttpAgent) httpAgent.destroy();
       if (ownsHttpsAgent) httpsAgent.destroy();
     },
+  });
+}
+
+export function makeNodeHttpProxyClient(config: NodeHttpProxyClientConfig = {}): DefaultHttpClient {
+  const {
+    preset = "highThroughputProxy",
+    transport,
+    nodeTransport,
+    ...clientConfig
+  } = config;
+
+  return makeDefaultHttpClient({
+    ...clientConfig,
+    preset,
+    transport: transport ?? makeNodeHttpTransport(nodeTransport),
   });
 }
