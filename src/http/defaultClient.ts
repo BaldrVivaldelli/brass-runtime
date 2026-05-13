@@ -5,6 +5,8 @@ import {
   type HttpRequest,
   type HttpWireResponse,
 } from "./client";
+import { Cause, type Exit } from "../core/types/effect";
+import { isPromiseTransportDirect } from "./transport";
 import {
   type LifecycleClient,
   type LifecycleClientConfig,
@@ -327,10 +329,17 @@ export function makeDefaultHttpClient(
   }
 
   const features = featureSnapshot(lifecycleConfig, compressionResult !== undefined, middleware.length);
+  const policyPresets = (lifecycleConfig as any).policyPresets;
+  const hasMiddleware = compressionResult !== undefined ||
+    middleware.length > 0 ||
+    (policyPresets !== undefined && Object.keys(policyPresets).length > 0);
+  const transport = lifecycleConfig.transport;
+  const useInlineDecode = !hasMiddleware && transport !== undefined;
   return buildDefaultClient(wire, {
     preset,
     features,
     compressionStats: compressionResult?.stats,
+    useInlineDecode,
   });
 }
 
@@ -340,6 +349,7 @@ function buildDefaultClient(
     readonly preset: DefaultHttpClientPreset;
     readonly features: DefaultHttpClientFeatures;
     readonly compressionStats?: () => CompressionStats;
+    readonly useInlineDecode?: boolean;
   },
 ): DefaultHttpClient {
   const withPromise = <E, A>(eff: Async<unknown, E, A>): AsyncWithPromise<unknown, E, A> =>
@@ -363,6 +373,13 @@ function buildDefaultClient(
     const req = setHeaderIfMissing("accept", "application/json")(
       buildReq("GET", url, init as InitWithHeaders),
     );
+    if (meta.useInlineDecode) {
+      // Fused path: inline JSON decode directly in the wire callback,
+      // avoiding the FlatMap continuation and NativeTopLevelRunner overhead.
+      return withPromise(
+        fusedWireAndDecode(requestRaw(req), init?.schema, init?.schemaName),
+      );
+    }
     return withPromise(
       asyncFlatMap(requestRaw(req), (w) => decodeResponse(w, init?.schema, init?.schemaName)),
     );
@@ -394,6 +411,7 @@ function buildDefaultClient(
     with: (mw) =>
       buildDefaultClient(wire.with(mw), {
         ...meta,
+        useInlineDecode: false,
         features: {
           ...meta.features,
           middleware: meta.features.middleware + 1,
@@ -423,6 +441,126 @@ function toResponse<A>(wire: HttpWireResponse, body: A): HttpResponse<A> {
     headers: wire.headers,
     body,
   };
+}
+
+/**
+ * Fused wire + JSON decode path for `getJson`.
+ *
+ * Creates a single `Async` effect that registers the wire effect and decodes
+ * JSON directly in the success callback, avoiding the `asyncFlatMap` FlatMap
+ * continuation and the NativeTopLevelRunner overhead of processing it.
+ *
+ * This is only used when the transport is a promise transport and no middleware
+ * is configured on the default client.
+ */
+function fusedWireAndDecode<A>(
+  wireEffect: Async<unknown, HttpError, HttpWireResponse>,
+  schema?: AnyJsonSchemaLike,
+  schemaName?: string,
+): Async<unknown, HttpError | ValidationError, HttpResponse<A>> {
+  return {
+    _tag: "Async",
+    register: (env: unknown, cb: (exit: Exit<HttpError | ValidationError, HttpResponse<A>>) => void) => {
+      const innerEffect = wireEffect as { _tag: string; register?: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => void | (() => void) };
+
+      if (innerEffect._tag === "Async" && innerEffect.register) {
+        // Direct registration — fuse wire + decode into a single callback
+        return innerEffect.register(env, (exit) => {
+          if (exit._tag !== "Success") {
+            cb(exit as Exit<HttpError | ValidationError, HttpResponse<A>>);
+            return;
+          }
+          const wire = exit.value;
+          inlineDecodeJson(wire, schema, schemaName, cb);
+        });
+      }
+
+      // Fallback: if the wire effect is not a simple Async (e.g. it's a FlatMap
+      // from lifecycle layers), fall back to the standard decode path.
+      // This shouldn't happen when useInlineDecode is true, but is a safety net.
+      const decoded = asyncFlatMap(wireEffect, (w: HttpWireResponse) => decodeResponse<A>(w, schema, schemaName));
+      if (decoded._tag === "Async" && decoded.register) {
+        return decoded.register(env, cb);
+      }
+      // Should not reach here
+      cb({ _tag: "Failure", cause: Cause.fail({ _tag: "ValidationError", message: "Internal: unexpected effect shape", body: "", issues: [], phase: "response" } as ValidationError) });
+    },
+  };
+}
+
+/**
+ * Creates a ValidationError for JSON parse failures.
+ */
+function makeJsonParseValidationError(bodyText: string, error: unknown, opts?: { schemaName?: string }): ValidationError {
+  return {
+    _tag: "ValidationError",
+    phase: "response",
+    body: bodyText,
+    message: `JSON parse error${opts?.schemaName ? ` for ${opts.schemaName}` : ""}: ${error instanceof Error ? error.message : String(error)}`,
+    issues: [{ path: [], message: error instanceof Error ? error.message : String(error), expected: "valid JSON", received: bodyText.slice(0, 100) }],
+  };
+}
+
+/**
+ * Decodes JSON body text and validates against a schema.
+ */
+function decodeJsonBody<A>(bodyText: string, schema: any, opts?: { schemaName?: string }): { success: true; data: A } | { success: false; error: ValidationError } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch (error) {
+    return { success: false, error: makeJsonParseValidationError(bodyText, error, opts) };
+  }
+  if (schema && typeof schema.safeParse === "function") {
+    const result = schema.safeParse(parsed);
+    if (result.success === false) {
+      return { success: false, error: { _tag: "ValidationError", phase: "response", body: bodyText, message: `Schema validation failed${opts?.schemaName ? ` for ${opts.schemaName}` : ""}`, issues: result.issues ?? [], ...(opts?.schemaName ? { schema: opts.schemaName } : {}) } as ValidationError };
+    }
+    return { success: true, data: result.data ?? parsed as A };
+  }
+  if (schema && typeof schema.parse === "function") {
+    try {
+      const data = schema.parse(parsed);
+      return { success: true, data: data as A };
+    } catch (error: any) {
+      const issues = error?.issues ?? [{ path: [], message: error?.message ?? String(error) }];
+      return { success: false, error: { _tag: "ValidationError", phase: "response", body: bodyText, message: `Schema validation failed${opts?.schemaName ? ` for ${opts.schemaName}` : ""}`, issues, ...(opts?.schemaName ? { schema: opts.schemaName } : {}) } as ValidationError };
+    }
+  }
+  return { success: true, data: parsed as A };
+}
+
+/**
+ * Inline JSON decode helper used by the fused path.
+ * Parses bodyText as JSON, validates against schema if provided,
+ * and invokes the callback with the appropriate exit.
+ */
+function inlineDecodeJson<A>(
+  wire: HttpWireResponse,
+  schema: AnyJsonSchemaLike | undefined,
+  schemaName: string | undefined,
+  cb: (exit: Exit<HttpError | ValidationError, HttpResponse<A>>) => void,
+): void {
+  if (!schema) {
+    // No schema — just parse JSON
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(wire.bodyText);
+    } catch (error) {
+      cb({ _tag: "Failure", cause: Cause.fail(makeJsonParseValidationError(wire.bodyText, error, { schemaName })) });
+      return;
+    }
+    cb({ _tag: "Success", value: toResponse(wire, parsed as A) });
+    return;
+  }
+
+  // Schema provided — parse and validate
+  const result = decodeJsonBody<A>(wire.bodyText, schema as any, { schemaName });
+  if (result.success) {
+    cb({ _tag: "Success", value: toResponse(wire, result.data) });
+  } else {
+    cb({ _tag: "Failure", cause: Cause.fail(result.error) });
+  }
 }
 
 function decodeResponse<A>(

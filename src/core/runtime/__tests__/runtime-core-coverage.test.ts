@@ -16,6 +16,7 @@ import {
   fromPromiseAbortable,
   resetAbortablePromiseStats,
   runtimeForCaller,
+  setAbortablePromisePerLabelTracking,
   toPromise,
   toPromiseByCaller,
   unsafeRunAsync,
@@ -260,6 +261,7 @@ describe("runtime helpers and observability coverage", () => {
 
   it("fromPromiseAbortable records make errors, timeout, labels, and late settlements", async () => {
     resetAbortablePromiseStats();
+    setAbortablePromisePerLabelTracking(true);
     const finishes: unknown[] = [];
     const rt = Runtime.make({});
 
@@ -294,6 +296,7 @@ describe("runtime helpers and observability coverage", () => {
         expect.objectContaining({ label: "slow-timeout", timedOut: 1, lateSettlements: 1 }),
       ]),
     });
+    setAbortablePromisePerLabelTracking(false);
   });
 
   it("fromPromiseAbortable tolerates legacy AbortController behavior", async () => {
