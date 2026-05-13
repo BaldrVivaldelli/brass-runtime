@@ -195,6 +195,9 @@ export const linkAbortSignals = (
     const controller = new AbortController();
     return { signal: controller.signal, cleanup: () => undefined };
   }
+  if (activeSignals.length === 1) {
+    return { signal: activeSignals[0], cleanup: () => undefined };
+  }
 
   const controller = new AbortController();
   const listeners: Array<{ signal: AbortSignal; abort: () => void }> = [];

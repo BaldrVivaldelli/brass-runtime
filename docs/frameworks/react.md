@@ -137,3 +137,47 @@ export function Profile() {
 Point `/api/otel` to a server route that owns the collector credentials. The
 Next.js recipe includes one proxy example; the same idea works in any BFF.
 
+## Layer Variant
+
+The provider can build a layer graph instead of manually constructing each
+service. In browser apps, use a same-origin OTLP proxy and close the layer from
+the React cleanup:
+
+```tsx
+import { Layer, Runtime, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+const AppLayer = Layer.composeAll(
+  makeConfigLayer(Config, s.object({
+    serviceName: s.nonEmptyString(),
+    apiBaseUrl: s.string(),
+    otlpEndpoint: s.string(),
+  }), { serviceName: "shop-react", apiBaseUrl: "/api", otlpEndpoint: "/api/otel" }),
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({ baseUrl: ctx.unsafeGet(Config).apiBaseUrl, preset: "balanced" })),
+);
+
+const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+const brass = {
+  runtime: built.service.unsafeGet(RuntimeService),
+  http: built.service.unsafeGet(HttpClientService),
+  shutdown: () => Runtime.make({}).toPromise(built.close()),
+};
+```
+
+## Runnable Example
+
+A minimal runnable app lives at
+[examples/react](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples/react).

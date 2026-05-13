@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import * as root from "../index";
 import * as core from "../core";
 import * as http from "../http";
+import * as observability from "../observability";
 import * as perf from "../perf";
 import * as schema from "../schema";
 
@@ -20,6 +21,13 @@ const REQUIRED_EXPORTS = Object.freeze({
     "LayerContext",
     "defineService",
     "getService",
+    "getServices",
+    "useServices",
+    "composeAll",
+    "makeConfigLayer",
+    "makeRuntimeLayer",
+    "RuntimeService",
+    "makeTestLayer",
     "provide",
     "provideLayer",
     "Schedule",
@@ -36,12 +44,21 @@ const REQUIRED_EXPORTS = Object.freeze({
     "Layer",
     "defineService",
     "getService",
+    "getServices",
+    "useServices",
+    "composeAll",
+    "makeConfigLayer",
+    "makeRuntimeLayer",
+    "RuntimeService",
+    "makeTestLayer",
     "formatLayerError",
     "Schedule",
     "makeTestRuntime",
   ],
   http: [
     "makeDefaultHttpClient",
+    "makeDefaultHttpClientLayer",
+    "HttpClientService",
     "httpClientBuilder",
     "makeHttpRouter",
     "route",
@@ -49,6 +66,13 @@ const REQUIRED_EXPORTS = Object.freeze({
     "makeNodeHttpServer",
     "formatHttpError",
     "s",
+  ],
+  observability: [
+    "makeObservability",
+    "makeObservabilityLayer",
+    "makeObservedHttpClientLayer",
+    "ObservabilityService",
+    "withHttpObservability",
   ],
   schema: [
     "Schema",
@@ -75,12 +99,13 @@ describe("public API release snapshot", () => {
     expectMissing("root", root, REQUIRED_EXPORTS.root);
     expectMissing("core", core, REQUIRED_EXPORTS.core);
     expectMissing("http", http, REQUIRED_EXPORTS.http);
+    expectMissing("observability", observability, REQUIRED_EXPORTS.observability);
     expectMissing("schema", schema, REQUIRED_EXPORTS.schema);
     expectMissing("perf", perf, REQUIRED_EXPORTS.perf);
   });
 
   it("does not leak obvious generated or test-only symbols from public barrels", () => {
-    for (const [name, module] of Object.entries({ root, core, http, schema, perf })) {
+    for (const [name, module] of Object.entries({ root, core, http, observability, schema, perf })) {
       const leaked = Object.keys(module).filter((key) =>
         key.includes("__")
         || key.endsWith("TypeTest")

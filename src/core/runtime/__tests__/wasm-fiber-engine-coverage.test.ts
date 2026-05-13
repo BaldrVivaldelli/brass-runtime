@@ -540,4 +540,84 @@ describe("WasmFiberEngine", () => {
       cause: { _tag: "Die", defect: expect.objectContaining({ message: expect.stringContaining("scheduler dropped") }) },
     });
   });
+
+  it("covers guard-only branches for wakeups, ready drains, timers, lanes, and completed states", async () => {
+    const bridge = new FakeBridge();
+    const { runtime } = makeRuntime();
+    const engine = new WasmFiberEngine(runtime, { bridge });
+
+    const scoped = engine.fork(asyncSucceed("scoped"), 321);
+    expect((scoped as any).scopeId).toBe(321);
+
+    expect((engine as any).scheduleWakeup(999)).toBeUndefined();
+    expect((engine as any).enqueueFiberById(999, "missing")).toBe("dropped");
+    expect((engine as any).driveById(999)).toBeUndefined();
+    expect((engine as any).schedulerDropped(999, "missing")).toBeUndefined();
+    expect((engine as any).interruptById(999, "missing")).toBeUndefined();
+    expect((engine as any).onTimerExpired([{ kind: 999, subjectId: 1, timerId: 1, deadlineMs: 1 }])).toBeUndefined();
+    expect((engine as any).onTimerExpired([{ kind: 1, subjectId: 999, timerId: 1, deadlineMs: 1 }])).toBeUndefined();
+
+    const originalRegistry = (engine as any).fiberRegistry;
+    (engine as any).fiberRegistry = undefined;
+    expect((engine as any).drainWakeups()).toBeUndefined();
+    (engine as any).fiberRegistry = originalRegistry;
+
+    (engine as any).readyDraining = true;
+    expect((engine as any).drainReadyQueue()).toBeUndefined();
+    (engine as any).readyDraining = false;
+
+    const originalQueue = (engine as any).readyQueue;
+    (engine as any).readyQueue = {
+      beginFlush: () => 1,
+      shift: () => undefined,
+      endFlush: () => "none",
+      enqueue: () => "micro",
+      len: () => 0,
+      clear: () => undefined,
+      stats: () => ({ fake: "empty-ready" }),
+    };
+    expect((engine as any).drainReadyQueue()).toBeUndefined();
+    (engine as any).readyQueue = originalQueue;
+
+    runtime.lane = undefined;
+    const pending = engine.fork(async((_env, _cb) => undefined));
+    const pendingState = (engine as any).states.get((pending as any).id);
+    expect((engine as any).schedulerTag(pendingState, "plain-label")).toBe("plain-label");
+    expect((engine as any).markRunning(pendingState, "already-running")).toBeUndefined();
+    (engine as any).markSuspended(pendingState, "one");
+    (engine as any).markSuspended(pendingState, "two");
+    expect((engine as any).drive(pendingState)).toBeUndefined();
+
+    pendingState.completed = true;
+    expect((engine as any).drive(pendingState)).toBeUndefined();
+    expect((engine as any).resumeWithExit(pendingState, Exit.succeed("ignored"))).toBeUndefined();
+    expect((engine as any).completeSuccess(pendingState, "ignored")).toBeUndefined();
+    expect((engine as any).completeFailure(pendingState, "ignored")).toBeUndefined();
+    expect((engine as any).completeDie(pendingState, "ignored")).toBeUndefined();
+    expect((engine as any).completeInterrupted(pendingState)).toBeUndefined();
+    expect((engine as any).completeCause(pendingState, Cause.interrupt())).toBeUndefined();
+
+    const interrupted = engine.fork(async((_env, _cb) => undefined));
+    const interruptedState = (engine as any).states.get((interrupted as any).id);
+    (engine as any).completeCause(interruptedState, Cause.interrupt());
+    await expect(joinExit(interrupted)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+
+    const doubleInterrupt = engine.fork(async((_env, _cb) => undefined));
+    const doubleState = (engine as any).states.get((doubleInterrupt as any).id);
+    (engine as any).interruptState(doubleState, "first");
+    (engine as any).interruptState(doubleState, "second");
+    await expect(joinExit(doubleInterrupt)).resolves.toMatchObject({ _tag: "Failure", cause: { _tag: "Interrupt" } });
+
+    runtime.hostExecutor.execute.mockImplementationOnce((_action: any, ctx: any) => {
+      ctx.signal.dispatchEvent?.(new Event("noop"));
+      return new Promise(() => undefined);
+    });
+    const timed = engine.fork({ _tag: "HostAction", action: { kind: "custom", target: "slow", timeoutMs: 10 } } as any);
+    timed.schedule?.("timer-aborted");
+    const [{ subjectId, kind, deadlineMs }] = mockTimerWheelState.scheduled.slice(-1);
+    const timedState = (engine as any).states.get(subjectId);
+    timedState.controller.abort(new Error("already aborted"));
+    (engine as any).onTimerExpired([{ kind, timerId: timedState.deadlineTimerId, subjectId, deadlineMs }]);
+    await expect(joinExit(timed)).resolves.toMatchObject({ _tag: "Failure" });
+  });
 });

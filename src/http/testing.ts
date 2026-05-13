@@ -1,4 +1,10 @@
 import { toPromise } from "../core/runtime/runtime";
+import {
+  layerValue,
+  type Layer,
+  type LayerContext,
+  type ServiceTag,
+} from "../core/runtime/layer";
 import { asyncFail, asyncSucceed } from "../core/types/asyncEffect";
 import type { Async } from "../core/types/asyncEffect";
 import {
@@ -10,6 +16,8 @@ import {
   type HttpRequest,
   type HttpWireResponse,
 } from "./client";
+import { makeDefaultHttpClient, type DefaultHttpClient } from "./defaultClient";
+import { HttpClientService } from "./layer";
 
 export type HttpTestResponseInit = {
   readonly status?: number;
@@ -28,6 +36,17 @@ export type MockHttpClient = HttpClient & {
   readonly calledTimes: () => number;
   readonly lastRequest: () => HttpRequest | undefined;
   readonly reset: () => void;
+};
+
+export type MockDefaultHttpClient = DefaultHttpClient & {
+  readonly calls: () => readonly HttpRequest[];
+  readonly calledTimes: () => number;
+  readonly lastRequest: () => HttpRequest | undefined;
+  readonly reset: () => void;
+};
+
+export type MockDefaultHttpClientLayerOptions = {
+  readonly tag?: ServiceTag<DefaultHttpClient>;
 };
 
 export type MockFetchCall = {
@@ -147,6 +166,31 @@ export function makeSequenceHttpClient(
   fallback: HttpWireResponse = makeHttpResponse(),
 ): MockHttpClient {
   return makeMockHttpClient((_req, index) => responses[index] ?? fallback);
+}
+
+export function makeMockDefaultHttpClient(
+  handler: MockHttpHandler = () => makeHttpResponse(),
+): MockDefaultHttpClient {
+  const wire = makeMockHttpClient(handler);
+  const client = makeDefaultHttpClient({
+    baseUrl: "http://brass.test",
+    preset: "minimal",
+    transport: ({ request }) => wire(request),
+  });
+
+  return Object.assign(client, {
+    calls: wire.calls,
+    calledTimes: wire.calledTimes,
+    lastRequest: wire.lastRequest,
+    reset: wire.reset,
+  });
+}
+
+export function makeMockDefaultHttpClientLayer(
+  handler: MockHttpHandler = () => makeHttpResponse(),
+  options: MockDefaultHttpClientLayerOptions = {},
+): Layer<LayerContext, never, LayerContext> {
+  return layerValue(options.tag ?? HttpClientService, makeMockDefaultHttpClient(handler));
 }
 
 export function runHttpEffect<E, A>(effect: Async<unknown, E, A>, env: unknown = {}): Promise<A> {

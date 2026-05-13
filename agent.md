@@ -68,6 +68,10 @@ Rules for HTTP transport work:
 
 - Keep `fetch` as the default backend, but model transport as
   `HttpTransport = (context) => Async<unknown, HttpError, HttpWireResponse>`.
+- For Node-only BFF/proxy hot paths, prefer `makeNodeHttpTransport()` when
+  local benchmark evidence shows the default `fetch` backend is the bottleneck.
+  Keep it optional and injectable; browser/edge runtimes should keep `fetch` or
+  provide their own platform transport.
 - For Promise-based clients, use the fluent path in examples:
 
 ```ts

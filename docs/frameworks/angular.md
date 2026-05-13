@@ -151,3 +151,54 @@ export function installBrassBrowserShutdown() {
 }
 ```
 
+## Layer Variant
+
+Angular `InjectionToken`s can receive services from one Brass layer graph:
+
+```ts
+import { InjectionToken, type Provider } from "@angular/core";
+import { Layer, Runtime, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+const AppLayer = Layer.composeAll(
+  makeConfigLayer(Config, s.object({
+    serviceName: s.nonEmptyString(),
+    apiBaseUrl: s.string(),
+    otlpEndpoint: s.string(),
+  }), { serviceName: "shop-angular", apiBaseUrl: "/api", otlpEndpoint: "/api/otel" }),
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({ baseUrl: ctx.unsafeGet(Config).apiBaseUrl, preset: "balanced" })),
+);
+
+export const BRASS_LAYER = new InjectionToken<Promise<Awaited<ReturnType<typeof buildBrassLayer>>>>("BRASS_LAYER");
+
+async function buildBrassLayer() {
+  const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+  return {
+    runtime: built.service.unsafeGet(RuntimeService),
+    http: built.service.unsafeGet(HttpClientService),
+    shutdown: () => Runtime.make({}).toPromise(built.close()),
+  };
+}
+
+export function provideBrassLayer(): Provider[] {
+  return [{ provide: BRASS_LAYER, useFactory: () => buildBrassLayer() }];
+}
+```
+
+## Runnable Example
+
+A minimal runnable app lives at
+[examples/angular](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples/angular).

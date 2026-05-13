@@ -1,0 +1,22 @@
+{
+  "name": "brass-example-nestjs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@nestjs/common": ">=10",
+    "@nestjs/core": ">=10",
+    "@nestjs/platform-express": ">=10",
+    "brass-runtime": "file:../..",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": ">=7"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}
+

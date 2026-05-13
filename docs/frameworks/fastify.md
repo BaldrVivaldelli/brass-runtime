@@ -122,3 +122,52 @@ process.once("SIGTERM", async () => {
 
 Runnable repo example: `src/examples/observabilityFastify.ts`.
 
+## Layer Variant
+
+Fastify can use the same app graph shape as Express. Build it once during
+startup, read services from the produced `LayerContext`, and close the layer in
+`onClose`/shutdown:
+
+```ts
+import { Layer, Runtime, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  ObservabilityService,
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+
+const AppLayer = Layer.composeAll(
+  makeConfigLayer(Config, s.object({
+    serviceName: s.nonEmptyString(),
+    apiBaseUrl: s.url(),
+    otlpEndpoint: s.url(),
+  }), {
+    serviceName: process.env.OTEL_SERVICE_NAME ?? "shop-fastify",
+    apiBaseUrl: process.env.USERS_API_BASE_URL ?? "https://users-api.internal",
+    otlpEndpoint: process.env.GRAFANA_OTLP_ENDPOINT ?? "http://grafana-alloy:4318",
+  }),
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({
+    baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+    preset: "production",
+  })),
+);
+
+const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+app.decorate("brass", {
+  observability: built.service.unsafeGet(ObservabilityService),
+  runtime: built.service.unsafeGet(RuntimeService),
+  http: built.service.unsafeGet(HttpClientService),
+});
+app.addHook("onClose", () => Runtime.make({}).toPromise(built.close()));
+```

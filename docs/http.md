@@ -205,6 +205,28 @@ That keeps timeout, pool/adaptive limiter, stats, retry, cache, deduplication
 and cancellation in Brass while letting the final I/O backend be `fetch`,
 Axios, undici, a test double, or an internal client.
 
+For Node BFF/proxy workloads where `fetch`/Undici is the limiting cost, Brass
+also ships a first-party `node:http` / `node:https` transport:
+
+```ts
+import { toPromise } from "brass-runtime";
+import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  transport: makeNodeHttpTransport({
+    maxSockets: 512,
+    maxFreeSockets: 512,
+  }),
+});
+
+await toPromise(http.shutdown(), {}); // closes owned Node agents
+```
+
+Use this path only in Node services. Browser and edge runtimes should keep the
+default `fetch` transport or inject their platform client.
+
 ```ts
 import {
   makeDefaultHttpClient,
@@ -358,7 +380,9 @@ Named presets are available as `conservative`, `balanced`, and `aggressive`.
 The default HTTP client uses `balanced` for `preset: "balanced"` and
 `aggressive` for `preset: "default"` / `preset: "production"`.
 `production` is the explicit name for the full production-ready default stack;
-`default` remains as the compatibility name. Use `adaptiveLimiterPresets` or
+`default` remains as the compatibility name. Use `preset: "proxy"` for
+high-throughput BFF/proxy paths where Brass should not add priority/adaptive
+queues or timeout timers by default. Use `adaptiveLimiterPresets` or
 `makeAdaptiveLimiterConfig(preset, overrides)` when you want a documented
 adaptive limiter baseline with a few local overrides.
 
@@ -370,6 +394,25 @@ The middleware also reads structured per-request `policy`. Logs and span
 attributes receive `preset`, `lane`, `poolKey`, `dedupKey`, `priority`, and retry
 overrides automatically, while metric labels stay opt-in through
 `policy.labelKeys` to avoid accidental high-cardinality metrics.
+
+For application graphs, the HTTP subpath also exposes a DI layer helper. The
+layer owns the default client lifecycle and calls `shutdown()` when released:
+
+```ts
+import { Layer } from "brass-runtime/core";
+import { HttpClientService, makeDefaultHttpClientLayer } from "brass-runtime/http";
+
+const Config = Layer.tag<{ readonly apiBaseUrl: string }>("Config");
+
+const HttpLayer = makeDefaultHttpClientLayer((ctx) => ({
+  baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+  preset: "production",
+}));
+
+const program = Layer.use(HttpClientService, (http) =>
+  http.getJson("/users/42"),
+);
+```
 
 See [`http-recipes.md`](http-recipes.md) for typed API client, testing,
 observability, retry, adaptive limiter, and config validation recipes.
@@ -490,6 +533,7 @@ adopters' tests:
 ```ts
 import {
   makeJsonHttpResponse,
+  makeMockDefaultHttpClientLayer,
   makeMockHttpClient,
   runHttpEffect,
   withMockFetch,
@@ -497,6 +541,10 @@ import {
 
 const mock = makeMockHttpClient((req) => makeJsonHttpResponse({ url: req.url }));
 const wire = await runHttpEffect(mock({ method: "GET", url: "/users/1" }));
+
+const MockHttpLayer = makeMockDefaultHttpClientLayer((req) =>
+  makeJsonHttpResponse({ url: req.url }),
+);
 ```
 
 ---

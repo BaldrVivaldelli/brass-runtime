@@ -222,3 +222,59 @@ process.once("SIGTERM", async () => {
 server.listen(process.env.PORT ?? 3000);
 ```
 
+## Layer Variant
+
+For scripts, CLIs, workers, or small Node servers, a layer graph keeps startup
+and teardown explicit without a framework:
+
+```ts
+import { Layer, Runtime, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  ObservabilityService,
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+const AppLayer = Layer.composeAll(
+  makeConfigLayer(Config, s.object({
+    serviceName: s.nonEmptyString(),
+    apiBaseUrl: s.url(),
+    otlpEndpoint: s.url(),
+  }), {
+    serviceName: "worker",
+    apiBaseUrl: "https://users-api.internal",
+    otlpEndpoint: "http://grafana-alloy:4318",
+  }),
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({
+    baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+    preset: "production",
+  })),
+);
+
+const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+const runtime = built.service.unsafeGet(RuntimeService);
+const http = built.service.unsafeGet(HttpClientService);
+const observability = built.service.unsafeGet(ObservabilityService);
+
+try {
+  await runtime.toPromise(http.getJson("/users/42"));
+  console.log(observability.prometheus.export());
+} finally {
+  await Runtime.make({}).toPromise(built.close());
+}
+```
+
+## Runnable Example
+
+A minimal runnable app lives at
+[examples/vanilla](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples/vanilla).

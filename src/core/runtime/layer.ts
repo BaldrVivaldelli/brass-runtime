@@ -127,6 +127,23 @@ export type BuiltLayer<ROut> = {
   readonly use: <E, A>(body: (service: ROut) => Async<unknown, E, A>) => Async<unknown, E, A>;
 };
 
+type AnyLayer = Layer<any, any, any>;
+
+export type LayerInputOf<L> = L extends Layer<infer RIn, any, any> ? RIn : never;
+export type LayerErrorOf<L> = L extends Layer<any, infer E, any> ? E : never;
+export type LayerOutputOf<L> = L extends Layer<any, any, infer ROut> ? ROut : never;
+
+type UnionToIntersection<U> =
+  (U extends unknown ? (value: U) => void : never) extends (value: infer I) => void ? I : never;
+
+type LastOf<T extends readonly unknown[]> = T extends readonly [...unknown[], infer Last] ? Last : never;
+
+export type ServiceTagMap = Record<string, ServiceTag<any>>;
+
+export type ServicesOf<Tags extends ServiceTagMap> = {
+  readonly [K in keyof Tags]: Tags[K] extends ServiceTag<infer A> ? A : never;
+};
+
 export function makeLayerScope(): LayerScope {
   const cache = new WeakMap<object, unknown>();
   const finalizers: Array<() => Async<unknown, never, void>> = [];
@@ -222,6 +239,25 @@ export function layerValue<A>(tag: ServiceTag<A>, value: A): Layer<LayerContext,
   return layerEffect(tag, () => asyncSucceed(value));
 }
 
+export const makeTestLayer = layerValue;
+
+export type TestLayerProvider<A = unknown> = readonly [ServiceTag<A>, A];
+
+export function makeTestLayers(
+  ...providers: readonly TestLayerProvider[]
+): Layer<LayerContext, never, LayerContext> {
+  return {
+    _tag: "Layer",
+    build: (deps: LayerContext = LayerContext.empty()) => asyncSucceed({
+      service: providers.reduce(
+        (context, [tag, service]) => context.add(tag, service),
+        deps,
+      ),
+      release: () => unit() as Async<unknown, never, void>,
+    }),
+  };
+}
+
 export function layerEffect<E, A>(
   tag: ServiceTag<A>,
   acquire: (deps: LayerContext) => Async<unknown, E, A>,
@@ -241,6 +277,57 @@ export const defineLayer = layerEffect;
 
 export function getService<A>(tag: ServiceTag<A>): Async<LayerContext, MissingLayerServiceError, A> {
   return asyncSync((context: LayerContext) => context.unsafeGet(tag)) as Async<LayerContext, MissingLayerServiceError, A>;
+}
+
+export function getServices<Tags extends ServiceTagMap>(
+  tags: Tags,
+): Async<LayerContext, MissingLayerServiceError, ServicesOf<Tags>> {
+  return asyncSync((context: LayerContext) => readServices(context, tags)) as Async<LayerContext, MissingLayerServiceError, ServicesOf<Tags>>;
+}
+
+export function useService<A, E, B>(
+  tag: ServiceTag<A>,
+  use: (service: A) => Async<unknown, E, B>,
+): (context: LayerContext) => Async<unknown, MissingLayerServiceError | E, B> {
+  return (context) => {
+    let service: A;
+    try {
+      service = context.unsafeGet(tag);
+    } catch (error) {
+      return asyncFail(error as MissingLayerServiceError) as Async<unknown, MissingLayerServiceError | E, B>;
+    }
+
+    return use(service) as Async<unknown, MissingLayerServiceError | E, B>;
+  };
+}
+
+export function useServices<Tags extends ServiceTagMap, E, A>(
+  tags: Tags,
+  use: (services: ServicesOf<Tags>) => Async<unknown, E, A>,
+): (context: LayerContext) => Async<unknown, MissingLayerServiceError | E, A> {
+  return (context) => {
+    let services: ServicesOf<Tags>;
+    try {
+      services = readServices(context, tags);
+    } catch (error) {
+      return asyncFail(error as MissingLayerServiceError) as Async<unknown, MissingLayerServiceError | E, A>;
+    }
+
+    return use(services) as Async<unknown, MissingLayerServiceError | E, A>;
+  };
+}
+
+function readServices<Tags extends ServiceTagMap>(
+  context: LayerContext,
+  tags: Tags,
+): ServicesOf<Tags> {
+  const services: Record<string, unknown> = {};
+
+  for (const key of Object.keys(tags) as Array<keyof Tags & string>) {
+    services[key] = context.unsafeGet(tags[key]);
+  }
+
+  return services as ServicesOf<Tags>;
 }
 
 /**
@@ -327,6 +414,23 @@ export function compose<R1, E1, Mid, E2, ROut>(
   };
 }
 
+export function composeAll<Layers extends readonly [AnyLayer, ...AnyLayer[]]>(
+  ...layers: Layers
+): Layer<
+  LayerInputOf<Layers[0]>,
+  LayerErrorOf<Layers[number]>,
+  LayerOutputOf<LastOf<Layers>>
+> {
+  return layers.slice(1).reduce<AnyLayer>(
+    (acc, next) => compose(acc, next),
+    layers[0],
+  ) as Layer<
+    LayerInputOf<Layers[0]>,
+    LayerErrorOf<Layers[number]>,
+    LayerOutputOf<LastOf<Layers>>
+  >;
+}
+
 /**
  * Merge two independent layers into one that produces both services.
  *
@@ -361,6 +465,23 @@ export function merge<R1, E1, A, R2, E2, B>(
         )
     ),
   };
+}
+
+export function mergeAll<Layers extends readonly [AnyLayer, ...AnyLayer[]]>(
+  ...layers: Layers
+): Layer<
+  UnionToIntersection<LayerInputOf<Layers[number]>>,
+  LayerErrorOf<Layers[number]>,
+  UnionToIntersection<LayerOutputOf<Layers[number]>>
+> {
+  return layers.slice(1).reduce<AnyLayer>(
+    (acc, next) => merge(acc, next),
+    layers[0],
+  ) as Layer<
+    UnionToIntersection<LayerInputOf<Layers[number]>>,
+    LayerErrorOf<Layers[number]>,
+    UnionToIntersection<LayerOutputOf<Layers[number]>>
+  >;
 }
 
 /**
@@ -444,11 +565,16 @@ export const Layer = Object.freeze({
   succeed: layerSucceed,
   fail: layerFail,
   value: layerValue,
+  test: makeTestLayer,
+  tests: makeTestLayers,
   effect: layerEffect,
   define: defineLayer,
   fromContext: layerFromContext,
   compose,
+  composeAll,
   merge,
+  all: mergeAll,
+  mergeAll,
   map: mapLayer,
   provide: provideLayer,
   provideContext: provideLayerContext,
@@ -457,4 +583,7 @@ export const Layer = Object.freeze({
   context: LayerContext.empty,
   tag: makeServiceTag,
   service: getService,
+  services: getServices,
+  use: useService,
+  useAll: useServices,
 });

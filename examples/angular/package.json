@@ -1,0 +1,25 @@
+{
+  "name": "brass-example-angular",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "ng serve",
+    "build": "ng build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@angular/common": ">=17",
+    "@angular/core": ">=17",
+    "@angular/platform-browser": ">=17",
+    "brass-runtime": "file:../..",
+    "rxjs": ">=7",
+    "zone.js": ">=0.14"
+  },
+  "devDependencies": {
+    "@angular-devkit/build-angular": ">=17",
+    "@angular/cli": ">=17",
+    "@angular/compiler-cli": ">=17",
+    "typescript": "^5.9.3"
+  }
+}
+

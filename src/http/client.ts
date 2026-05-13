@@ -304,6 +304,8 @@ const makeHttpStats = (
     return { onStart, onFinish, snapshot };
 };
 
+type HttpMetrics = ReturnType<typeof makeHttpStats>;
+
 const makePool = (cfg: MakeHttpConfig): HttpConcurrencyPool | undefined =>
     cfg.pool === undefined || cfg.pool === false ? undefined : new HttpConcurrencyPool(cfg.pool);
 
@@ -389,6 +391,109 @@ const runTransportEffect = <A>(
             reject(error);
         }
     });
+
+const runDirectTransport = (
+    req: HttpRequest,
+    url: URL,
+    transport: HttpTransport,
+    metrics: HttpMetrics,
+): Async<unknown, HttpError, HttpWireResponse> => ({
+    _tag: "Async",
+    register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
+        const controller = new AbortController();
+        const previousSignal = (req.init as { signal?: AbortSignal } | undefined)?.signal;
+        const label = fetchLabel(req, url);
+        const startedAt = performance.now();
+        let done = false;
+        let cancelInner: EffectCanceler | undefined;
+
+        const cleanup = () => {
+            previousSignal?.removeEventListener("abort", abortFromPrevious);
+        };
+
+        const finish = (
+            outcome: AbortablePromiseFinish["outcome"],
+            exit: Exit<HttpError, HttpWireResponse>,
+            error?: unknown,
+        ) => {
+            if (done) return;
+            done = true;
+            cleanup();
+            metrics.onFinish({
+                label,
+                outcome,
+                durationMs: Math.round(performance.now() - startedAt),
+                error,
+            });
+            cb(exit);
+        };
+
+        const finishFailure = (error: HttpError, outcome: AbortablePromiseFinish["outcome"] = "failure") => {
+            finish(outcome, { _tag: "Failure", cause: Cause.fail(error) }, error);
+        };
+
+        const abortCurrent = (reason?: unknown) => {
+            try {
+                controller.abort(reason);
+            } catch {
+                controller.abort();
+            }
+        };
+
+        function abortFromPrevious() {
+            const error = previousSignal ? abortErrorForSignal(previousSignal) : ({ _tag: "Abort" } satisfies HttpError);
+            abortCurrent(previousSignal?.reason);
+            const cancel = cancelInner;
+            cancelInner = undefined;
+            queueMicrotask(() => {
+                finishFailure(error);
+                cancel?.();
+            });
+        }
+
+        metrics.onStart();
+
+        if (previousSignal?.aborted) {
+            abortFromPrevious();
+            return () => undefined;
+        }
+
+        previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
+
+        try {
+            const innerCancel = registerHttpEffect(
+                transport({ request: req, url, signal: controller.signal }),
+                env,
+                (exit) => {
+                    if (exit._tag === "Success") {
+                        finish("success", exit);
+                        cancelInner = undefined;
+                        return;
+                    }
+                    finish("failure", exit, exitError(exit));
+                    cancelInner = undefined;
+                },
+            );
+            if (!done) cancelInner = innerCancel;
+        } catch (error) {
+            finishFailure(normalizeHttpError(error));
+        }
+
+        return () => {
+            if (done) return;
+            const cancel = cancelInner;
+            cancelInner = undefined;
+            abortCurrent();
+            finish("interrupt", { _tag: "Failure", cause: Cause.interrupt() });
+            cancel?.();
+        };
+    },
+});
+
+const transportDestroy = (transport: HttpTransport | HttpStreamTransport): (() => void) | undefined => {
+    const destroy = (transport as { destroy?: unknown }).destroy;
+    return typeof destroy === "function" ? () => destroy.call(transport) : undefined;
+};
 
 type HttpLease = { release: (...args: any[]) => void };
 
@@ -493,6 +598,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const pool = adaptiveLimiter ? undefined : makePool(cfg);
     const metrics = makeHttpStats(pool, adaptiveLimiter);
     const transport = cfg.transport ?? makeFetchTransport();
+    const destroyTransport = transportDestroy(transport);
 
     const run: HttpClientFn = (req0) => {
         const req = normalize(req0);
@@ -500,6 +606,10 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
         if (!(url instanceof URL)) return asyncFail(url) as Async<unknown, HttpError, HttpWireResponse>;
 
         const timeoutMs = resolvePositiveTimeout(req.timeoutMs ?? cfg.timeoutMs);
+
+        if (!adaptiveLimiter && !pool && timeoutMs === undefined) {
+            return runDirectTransport(req, url, transport, metrics);
+        }
 
         return fromPromiseAbortable<HttpError, HttpWireResponse>(
             async (signal, env) => {
@@ -540,11 +650,20 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
         );
     };
 
-    return decorate(run, metrics.snapshot, adaptiveLimiter ? {
-        adaptiveLimiter,
-        destroy: () => adaptiveLimiter.destroy(),
-        shutdown: () => adaptiveLimiter.shutdown(),
-    } : {});
+    const metadata: HttpClientMetadata = {};
+    if (adaptiveLimiter) metadata.adaptiveLimiter = adaptiveLimiter;
+    if (adaptiveLimiter || destroyTransport) {
+        metadata.destroy = () => {
+            adaptiveLimiter?.destroy();
+            destroyTransport?.();
+        };
+        metadata.shutdown = () => {
+            adaptiveLimiter?.shutdown();
+            destroyTransport?.();
+        };
+    }
+
+    return decorate(run, metrics.snapshot, metadata);
 }
 
 export const withRetryStream =

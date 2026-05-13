@@ -9,6 +9,10 @@ Built without `Promise`/`async`/`await` as the primary semantic primitive. Effec
 npm i brass-runtime
 ```
 
+Runnable framework examples live in the
+[repository examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples).
+They are kept out of the npm package so installs stay small.
+
 ---
 
 ## What it does
@@ -159,9 +163,29 @@ console.log(http.compression?.stats());
 deduplication, priority scheduling, retry, adaptive concurrency, safe-method
 response cache, decompression, stats, `cancelAll`, and JSON/text helpers. Use
 `preset: "production"` when you want that production-ready shape explicitly,
-`preset: "balanced"` to skip the default cache, or `preset: "minimal"` for a
-cheap wire client with the same helper API. `preset: "default"` remains the
-same full preset for compatibility.
+`preset: "balanced"` to skip the default cache, `preset: "proxy"` for
+high-throughput BFF/proxy paths without lifecycle queues or Brass timers by
+default, or `preset: "minimal"` for a cheap wire client with the same helper API.
+`preset: "default"` remains the same full preset for compatibility.
+
+On Node BFF/proxy services, pair the proxy preset with the first-party
+`node:http` transport when the default `fetch` backend is the bottleneck:
+
+```ts
+import { toPromise } from "brass-runtime";
+import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  transport: makeNodeHttpTransport({
+    maxSockets: 512,
+    maxFreeSockets: 512,
+  }),
+});
+
+await toPromise(http.shutdown(), {}); // also destroys owned Node agents
+```
 
 The HTTP stack is meant to replace the usual `fetch` wrapper plus Zod/Valibot
 glue: schemas are dependency-free, responses and request bodies are validated in
@@ -459,6 +483,12 @@ It also reads `req.policy` automatically: logs and span attributes include
 `preset`, `lane`, `poolKey`, `dedupKey`, `priority`, and retry overrides when present.
 Metric labels stay conservative by default; opt into stable labels with
 `withHttpObservability({ policy: { labelKeys: ["preset", "lane", "poolKey"] } })`.
+
+For hot proxy paths, keep HTTP metrics separate from runtime hooks:
+`makeObservability({ metrics: false, logs: false, traces: false })`,
+`preset: "proxy"`, `withHttpObservability({ spans: false, logs: false,
+injectTraceHeaders: false, includeHostLabel: false })`. For sampled spans on
+the same path, use low sampling plus `spans: { events: false }`.
 
 ### Performance profiler
 

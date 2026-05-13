@@ -72,6 +72,35 @@ configs automatically. `.json()` infers Axios/Fetch-shaped responses. Use
 `.json((res) => res.payload, (res) => ({ status: res.code }))` when the
 external client uses a different response shape.
 
+## Node Proxy Transport
+
+```ts
+import { toPromise } from "brass-runtime";
+import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  transport: makeNodeHttpTransport({
+    maxSockets: 512,
+    maxFreeSockets: 512,
+  }),
+  pool: {
+    key: "origin",
+    concurrency: 512,
+    maxQueue: 512,
+  },
+});
+
+await http.getJson("/users/1").unsafeRunPromise();
+await toPromise(http.shutdown(), {});
+```
+
+Use this in Node BFF/proxy services when benchmark evidence shows the default
+`fetch` backend is the bottleneck. The transport keeps Brass cancellation,
+pooling, stats, policy, and observability, but performs the final I/O through
+`node:http` / `node:https` keep-alive agents.
+
 ## Named Policy Presets
 
 ```ts

@@ -123,3 +123,61 @@ process.once("SIGTERM", async () => {
 ```
 
 Runnable repo example: `src/examples/observabilityExpress.ts`.
+
+## Layer Variant
+
+For larger Express apps, use the Layer/DI helpers to keep startup wiring and
+shutdown ownership together:
+
+```ts
+import { Layer, Runtime, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { defineHttpPolicyPresets, HttpClientService } from "brass-runtime/http";
+import {
+  ObservabilityService,
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+const ConfigSchema = s.object({
+  serviceName: s.nonEmptyString(),
+  apiBaseUrl: s.url(),
+  otlpEndpoint: s.url(),
+});
+
+const ConfigLayer = makeConfigLayer(Config, ConfigSchema, {
+  serviceName: process.env.OTEL_SERVICE_NAME ?? "shop-express",
+  apiBaseUrl: process.env.USERS_API_BASE_URL ?? "https://users-api.internal",
+  otlpEndpoint: process.env.GRAFANA_OTLP_ENDPOINT ?? "http://grafana-alloy:4318",
+});
+
+const AppLayer = Layer.composeAll(
+  ConfigLayer,
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({
+    baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+    preset: "production",
+    policyPresets,
+  })),
+);
+
+const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+export const brass = {
+  observability: built.service.unsafeGet(ObservabilityService),
+  runtime: built.service.unsafeGet(RuntimeService),
+  http: built.service.unsafeGet(HttpClientService),
+  shutdown: () => Runtime.make({}).toPromise(built.close()),
+};
+```
+
+## Runnable Example
+
+A minimal runnable app lives at
+[examples/express](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples/express).
