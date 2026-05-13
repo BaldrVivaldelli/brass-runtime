@@ -111,6 +111,10 @@ observability as the outermost layer.
   to logs and span attributes by default; metric labels require explicit
   opt-in with `withHttpObservability({ policy: { labelKeys: [...] } })` to
   avoid accidental high-cardinality series.
+- For high-TPS proxy paths that still need sampled spans, prefer
+  `withHttpObservability({ spans: { events: false, sampleRate: 0.001 },
+  spanSink: observability.tracer, injectTraceHeaders: false })` and keep
+  runtime hooks off on that hot path.
 - Dashboard-facing HTTP observability names live in
   `HTTP_OBSERVABILITY_CONTRACT`; update it with any metric/label/span/log
   naming changes.
@@ -154,6 +158,9 @@ observability as the outermost layer.
   paths when invalid.
 - `preset: "production"` is the explicit production-ready default HTTP stack.
   `preset: "default"` is the same stack kept for compatibility.
+- `preset: "highThroughputProxy"` is the explicit hot proxy/BFF preset.
+  `preset: "proxy"` is the shorter compatibility alias. In Node, prefer
+  `makeNodeHttpProxyClient` when the default fetch backend is the bottleneck.
 - Keep `docs/http-recipes.md` current when adding high-level HTTP workflows.
 
 ## Editing rules

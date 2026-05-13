@@ -26,6 +26,21 @@ export type JsonDecodeResult<A> =
   | { readonly success: true; readonly data: A }
   | { readonly success: false; readonly error: ValidationError };
 
+export function makeJsonParseValidationError(
+  bodyText: string,
+  error: unknown,
+  options: { readonly schemaName?: string } = {},
+): ValidationError {
+  return {
+    _tag: "ValidationError",
+    message: `JSON parse error: ${error instanceof Error ? error.message : String(error)}`,
+    body: bodyText,
+    phase: "response",
+    schema: options.schemaName,
+    issues: [makeSchemaIssue([], "valid JSON", bodyText, "Response body is not valid JSON")],
+  };
+}
+
 export function decodeJsonBody<A = unknown>(
   bodyText: string,
   validator?: JsonSchemaLike<A>,
@@ -37,14 +52,7 @@ export function decodeJsonBody<A = unknown>(
   } catch (error) {
     return {
       success: false,
-      error: {
-        _tag: "ValidationError",
-        message: `JSON parse error: ${error instanceof Error ? error.message : String(error)}`,
-        body: bodyText,
-        phase: "response",
-        schema: options.schemaName,
-        issues: [makeSchemaIssue([], "valid JSON", bodyText, "Response body is not valid JSON")],
-      },
+      error: makeJsonParseValidationError(bodyText, error, options),
     };
   }
 

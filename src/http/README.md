@@ -243,8 +243,10 @@ priority, retry, adaptive limiter `aggressive`, cache para métodos seguros y
 response compression. `default` es el mismo preset por compatibilidad. Si
 querés evitar cache por default, usá `preset: "balanced"`; si querés solo
 wire y DX, usá `preset: "minimal"`. Para BFF/proxy de alto throughput, usá
-`preset: "proxy"`: mantiene transporte, cancelación y helpers JSON, pero no
-activa timeout Brass, priority/adaptive/cache/retry/compression por defecto.
+`preset: "highThroughputProxy"` o su alias corto `preset: "proxy"`: mantiene
+transporte, cancelación y helpers JSON, pero no activa timeout Brass,
+priority/adaptive/cache/retry/compression por defecto. En Node, preferí
+`makeNodeHttpProxyClient(...)` para combinar ese preset con keep-alive agents.
 
 El adaptive limiter mantiene estado por key con TTL (`stateTtlMs`), probe con
 jitter (`probeJitterRatio`), warmup explícito (`warmupRequests`), slow-start
@@ -512,6 +514,21 @@ const http = makeDefaultHttpClient({
 });
 
 await toPromise(http.shutdown(), {}); // cierra los agentes Node creados por el transporte
+```
+
+Si necesitás spans en ese mismo hot path, evitá hooks globales del runtime y
+sampleá desde el middleware HTTP:
+
+```ts
+withHttpObservability({
+  metrics: observability.metrics,
+  logs: false,
+  spans: { events: false, sampleRate: 0.001 },
+  spanSink: observability.tracer,
+  injectTraceHeaders: false,
+  includeHostLabel: false,
+  route: "/downstream/:id",
+});
 ```
 
 Si el cliente tiene adaptive limiter, `withHttpObservability` emite gauges de

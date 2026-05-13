@@ -40,7 +40,9 @@ sampled span observability, HTTP metrics-only observability, runtime-hook
 observability, and full client span observability. The default concurrency is
 8 so the suite measures local per-request overhead without intentionally
 saturating the Node event loop; set `BRASS_HTTP_OVERHEAD_CONCURRENCY=32` when
-you want a saturation profile.
+you want a saturation profile. Sampled span variants default to
+`BRASS_HTTP_OVERHEAD_SPAN_SAMPLING=0.001` to model the recommended hot-proxy
+path; raise it to `0.01` when you want to see the p99 cost of a 1% trace stream.
 
 HTTP TPS ramp is open-loop: it schedules request arrivals at the requested TPS
 instead of deriving TPS from max concurrency. A focused run defaults to
@@ -120,6 +122,9 @@ runtime recorder.
   percentiles (`requestP50Ms`, `requestP99Ms`), requested concurrency,
   observed server max in-flight, logical client max in-flight, and sampled
   wire/pool/lifecycle queue peaks when available.
+- HTTP concurrency includes the explicit `high-throughput-proxy-node-json`
+  variant for the recommended Node BFF/proxy shape:
+  `preset: "highThroughputProxy"` plus `makeNodeHttpTransport`.
 - HTTP concurrency also reports memory deltas (`heapDeltaMb`, `rssDeltaMb`,
   `externalDeltaMb`, `gcAvailable`) and adaptive limiter snapshots
   (`adaptiveMinLimit`, `adaptiveMaxQueueDepth`, `adaptiveMaxInFlight`) so local

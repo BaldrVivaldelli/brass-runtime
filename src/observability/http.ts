@@ -39,6 +39,7 @@ export type HttpObservabilitySpanOptions = {
   readonly name?: string | ((req: HttpRequest) => string);
   readonly attributes?: SpanAttributes | ((req: HttpRequest) => SpanAttributes);
   readonly events?: boolean;
+  readonly sampleRate?: number;
 };
 
 export type HttpAdaptiveLimiterObservabilityOptions = {
@@ -525,6 +526,12 @@ function startLeanHttpSpan(
   req: HttpRequest,
   options: ResolvedHttpObservabilityOptions,
 ): LeanHttpSpan | undefined {
+  const configuredSampleRate = options.spans === false ? undefined : options.spans.sampleRate;
+  if (configuredSampleRate !== undefined) {
+    if (configuredSampleRate <= 0) return undefined;
+    if (configuredSampleRate < 1 && Math.random() >= configuredSampleRate) return undefined;
+  }
+
   const fiber = getCurrentFiber() as any;
   const runtime = fiber?.runtime;
   const sink = options.spanSink ?? runtime?.hooks;
@@ -540,13 +547,16 @@ function startLeanHttpSpan(
   let sampled = previousTrace?.sampled;
   let attributes: SpanAttributes | undefined;
 
-  if (!previousTrace) {
+  if (!previousTrace && configuredSampleRate === undefined) {
     const ratio = traceSamplerRatio(brass?.sampler);
     if (ratio !== undefined) {
       if (ratio <= 0) return undefined;
       if (ratio < 1 && Math.random() >= ratio) return undefined;
       sampled = true;
     }
+    traceId = tracer.newTraceId();
+  } else if (!previousTrace) {
+    sampled = true;
     traceId = tracer.newTraceId();
   }
 

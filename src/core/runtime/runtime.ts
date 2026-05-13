@@ -441,7 +441,7 @@ class NativeTopLevelRunner<R, E, A> {
                 syncExit = exit;
                 return;
             }
-            queueMicrotask(() => this.resumeAsync(exit));
+            this.resumeAsync(exit);
         };
 
         try {

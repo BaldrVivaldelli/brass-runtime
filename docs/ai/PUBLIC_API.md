@@ -97,7 +97,8 @@ Source: `src/http/index.ts`
 Recommended API order:
 
 - `makeDefaultHttpClient` for the one-stop default client with JSON/text
-  helpers, lifecycle presets (`production`, `default`, `balanced`, `proxy`, `minimal`),
+  helpers, lifecycle presets (`production`, `default`, `balanced`,
+  `highThroughputProxy`, `proxy`, `minimal`),
   compression, stats, cache controls, `cancelAll`, and middleware integration.
 - `HttpClientService` and `makeDefaultHttpClientLayer` for optional Layer/DI
   application graphs with owned default-client lifecycle.
@@ -123,7 +124,7 @@ Recommended API order:
 - `HttpTransport`, `HttpStreamTransport`, `makeFetchTransport`, and
   `makeFetchStreamTransport` for replacing the default fetch-backed transport
   with an effect-based backend such as Axios, undici, or test doubles.
-- `makeNodeHttpTransport`, `NodeHttpTransport`, and
+- `makeNodeHttpProxyClient`, `makeNodeHttpTransport`, `NodeHttpTransport`, and
   `NodeHttpTransportConfig` for Node-only BFF/proxy workloads that should use
   `node:http` / `node:https` keep-alive agents instead of the default fetch
   backend.
@@ -157,7 +158,7 @@ Primary categories:
 - HTTP server router, Node adapter, response helpers, and server resources
 - HTTP runtime probe helpers: `makeRuntimeHealthRoute` and
   `makeRuntimeReadinessRoute`
-- production HTTP client presets (`minimal`, `proxy`, `balanced`, `default`, `production`)
+- production HTTP client presets (`minimal`, `proxy`, `highThroughputProxy`, `balanced`, `default`, `production`)
 - dependency-free schema validation for JSON responses
 - builder API for default HTTP client configuration
 - adaptive limiter presets, diagnostics, and public config helper
@@ -241,7 +242,9 @@ Primary categories:
   factory mandatory.
 - `withHttpObservability` middleware for HTTP client metrics, logs, spans, and
   W3C `traceparent` injection, including request-policy context in logs/spans
-  and opt-in policy metric labels
+  and opt-in policy metric labels. Hot proxy paths can use
+  `spans: { events: false, sampleRate }` plus `spanSink` to emit sampled HTTP
+  spans without enabling global runtime hooks.
 - `HTTP_OBSERVABILITY_CONTRACT` for stable dashboard metric names, label names,
   span attribute names, and structured log message names
 - adaptive limiter gauges and HTTP span attributes when the wrapped client

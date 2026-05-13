@@ -281,6 +281,44 @@ describe("HTTP observability middleware", () => {
     expect(httpSpan?.events.some((event) => event.name === "http.client.response")).toBe(false);
   });
 
+  it("can record sampled HTTP spans through a direct span sink without runtime hooks", async () => {
+    const obs = makeObservability({
+      metrics: false,
+      logs: false,
+    });
+    const rt = new Runtime({ env: obs.env });
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false, sampleRate: 1 },
+      spanSink: obs.tracer,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    await expect(rt.toPromise(client({ method: "GET", url: "https://api.example.test/users/1" }))).resolves.toMatchObject({
+      status: 200,
+    });
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan).toBeDefined();
+    expect(httpSpan?.events.some((event) => event.name === "http.client.response")).toBe(false);
+
+    const skipped = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false, sampleRate: 0 },
+      spanSink: obs.tracer,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    const before = obs.tracer.exportFinished().length;
+    await rt.toPromise(skipped({ method: "GET", url: "https://api.example.test/users/2" }));
+    expect(obs.tracer.exportFinished()).toHaveLength(before);
+  });
+
   it("uses HTTP error status metadata for metrics, logs, and retryability", async () => {
     const logs: StructuredLogRecord[] = [];
     const obs = makeObservability({

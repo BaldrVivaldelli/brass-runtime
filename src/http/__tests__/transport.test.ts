@@ -17,7 +17,7 @@ import {
   promiseHttpTransport,
   type HttpTransport,
 } from "../transport";
-import { makeNodeHttpTransport } from "../nodeTransport";
+import { makeNodeHttpProxyClient, makeNodeHttpTransport } from "../nodeTransport";
 
 const rt = Runtime.make({});
 const run = <A>(eff: any) => rt.toPromise(eff) as Promise<A>;
@@ -768,5 +768,51 @@ describe("HTTP effect transports", () => {
     await run(client.shutdown());
 
     expect(destroy).toHaveBeenCalledOnce();
+  });
+
+  it("creates a Node proxy client with the high-throughput preset", async () => {
+    const server = createServer((req, res) => {
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ ok: true, url: req.url }));
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address() as AddressInfo;
+    const client = makeNodeHttpProxyClient({
+      baseUrl: `http://127.0.0.1:${address.port}`,
+      nodeTransport: {
+        maxSockets: 16,
+        maxFreeSockets: 16,
+      },
+    });
+
+    try {
+      const response = await client.getJson<{ ok: boolean; url: string }>("/node-proxy").unsafeRunPromise();
+
+      expect(response.body).toEqual({ ok: true, url: "/node-proxy" });
+      expect(client.preset).toBe("highThroughputProxy");
+      expect(client.features).toEqual({
+        dedup: false,
+        batch: false,
+        cache: false,
+        priority: false,
+        retry: false,
+        prewarm: false,
+        adaptiveLimiter: false,
+        compression: false,
+        middleware: 0,
+      });
+    } finally {
+      await run(client.shutdown());
+      await closeServer(server);
+    }
   });
 });

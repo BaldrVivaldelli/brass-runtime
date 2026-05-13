@@ -206,19 +206,19 @@ and cancellation in Brass while letting the final I/O backend be `fetch`,
 Axios, undici, a test double, or an internal client.
 
 For Node BFF/proxy workloads where `fetch`/Undici is the limiting cost, Brass
-also ships a first-party `node:http` / `node:https` transport:
+also ships a first-party `node:http` / `node:https` transport and a Node-only
+factory for the recommended high-throughput proxy shape:
 
 ```ts
 import { toPromise } from "brass-runtime";
-import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+import { makeNodeHttpProxyClient } from "brass-runtime/http";
 
-const http = makeDefaultHttpClient({
+const http = makeNodeHttpProxyClient({
   baseUrl: "https://api.example.com",
-  preset: "proxy",
-  transport: makeNodeHttpTransport({
+  nodeTransport: {
     maxSockets: 512,
     maxFreeSockets: 512,
-  }),
+  },
 });
 
 await toPromise(http.shutdown(), {}); // closes owned Node agents
@@ -380,9 +380,10 @@ Named presets are available as `conservative`, `balanced`, and `aggressive`.
 The default HTTP client uses `balanced` for `preset: "balanced"` and
 `aggressive` for `preset: "default"` / `preset: "production"`.
 `production` is the explicit name for the full production-ready default stack;
-`default` remains as the compatibility name. Use `preset: "proxy"` for
-high-throughput BFF/proxy paths where Brass should not add priority/adaptive
-queues or timeout timers by default. Use `adaptiveLimiterPresets` or
+`default` remains as the compatibility name. Use
+`preset: "highThroughputProxy"` for high-throughput BFF/proxy paths where
+Brass should not add priority/adaptive queues or timeout timers by default;
+`preset: "proxy"` is the shorter compatibility alias. Use `adaptiveLimiterPresets` or
 `makeAdaptiveLimiterConfig(preset, overrides)` when you want a documented
 adaptive limiter baseline with a few local overrides.
 

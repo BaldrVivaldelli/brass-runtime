@@ -93,6 +93,7 @@ const httpObservabilityOptions = Schema.object({
       name: Schema.union([Schema.string({ minLength: 1 }), fn]).optional(),
       attributes: Schema.union([object, fn]).optional(),
       events: Schema.boolean().optional(),
+      sampleRate: ratio.optional(),
     }, { unknownKeys: "passthrough" }),
   ]).optional(),
   adaptiveLimiter: Schema.union([

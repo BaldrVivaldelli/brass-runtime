@@ -76,15 +76,14 @@ external client uses a different response shape.
 
 ```ts
 import { toPromise } from "brass-runtime";
-import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+import { makeNodeHttpProxyClient } from "brass-runtime/http";
 
-const http = makeDefaultHttpClient({
+const http = makeNodeHttpProxyClient({
   baseUrl: "https://api.example.com",
-  preset: "proxy",
-  transport: makeNodeHttpTransport({
+  nodeTransport: {
     maxSockets: 512,
     maxFreeSockets: 512,
-  }),
+  },
   pool: {
     key: "origin",
     concurrency: 512,
@@ -97,9 +96,10 @@ await toPromise(http.shutdown(), {});
 ```
 
 Use this in Node BFF/proxy services when benchmark evidence shows the default
-`fetch` backend is the bottleneck. The transport keeps Brass cancellation,
-pooling, stats, policy, and observability, but performs the final I/O through
-`node:http` / `node:https` keep-alive agents.
+`fetch` backend is the bottleneck. The factory uses
+`preset: "highThroughputProxy"` and performs the final I/O through
+`node:http` / `node:https` keep-alive agents while keeping Brass cancellation,
+pooling, stats, policy, and observability.
 
 ## Named Policy Presets
 
@@ -392,7 +392,8 @@ try {
 `preset: "production"` is the explicit name for the full default stack:
 timeout, priority, retry, dedup, adaptive limiter, safe-method response cache,
 response compression, stats, and shutdown. `preset: "default"` is the same
-stack kept for compatibility.
+stack kept for compatibility. `preset: "highThroughputProxy"` is the explicit
+hot BFF/proxy preset, and `preset: "proxy"` is its shorter compatibility alias.
 
 Construction-time validation catches invalid setup before traffic starts:
 
