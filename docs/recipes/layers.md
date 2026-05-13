@@ -32,8 +32,9 @@ const RepoLayer = Layer.effect(Repo, (ctx: LayerContext) => {
 const AppLayer = Layer.compose(ConfigLayer, RepoLayer);
 
 const userUrl = await runPromise(
-  provideContext(AppLayer, (ctx) =>
-    asyncSucceed(ctx.unsafeGet(Repo).findUser("u1")),
+  provideContext(
+    AppLayer,
+    Layer.use(Repo, (repo) => asyncSucceed(repo.findUser("u1"))),
   ),
 );
 
@@ -42,3 +43,46 @@ console.log(userUrl);
 
 Missing services throw `MissingLayerServiceError`; use `formatLayerError` when
 surfacing the message.
+
+For independent layers, `Layer.all(...)` keeps composition readable. For
+ordered context graphs where later layers read earlier services, use
+`Layer.composeAll(...)`. `Layer.useAll(...)` reads multiple services without
+manual context access:
+
+```ts
+const Logger = defineService<{ readonly info: (message: string) => void }>("Logger");
+const LoggerLayer = Layer.value(Logger, console);
+
+const AppLayer2 = Layer.composeAll(ConfigLayer, RepoLayer, LoggerLayer);
+
+await runPromise(
+  provideContext(
+    AppLayer2,
+    Layer.useAll({ repo: Repo, logger: Logger }, ({ repo, logger }) => {
+      logger.info("loading user");
+      return asyncSucceed(repo.findUser("u1"));
+    }),
+  ),
+);
+```
+
+For app wiring, prefer the focused helpers:
+
+```ts
+import { RuntimeService, makeConfigLayer, makeRuntimeLayer, makeTestLayer } from "brass-runtime";
+import { s } from "brass-runtime/schema";
+
+const ConfigSchema = s.object({ baseUrl: s.url() });
+
+const ConfigLayer2 = makeConfigLayer(Config, ConfigSchema, {
+  baseUrl: "https://api.example.com",
+});
+
+const RuntimeLayer = makeRuntimeLayer((ctx) => ({
+  config: ctx.unsafeGet(Config),
+}));
+
+const TestConfigLayer = makeTestLayer(Config, {
+  baseUrl: "https://test.example.com",
+});
+```

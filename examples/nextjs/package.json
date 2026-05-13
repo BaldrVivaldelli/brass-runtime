@@ -1,0 +1,23 @@
+{
+  "name": "brass-example-nextjs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "brass-runtime": "file:../..",
+    "next": ">=14",
+    "react": ">=18",
+    "react-dom": ">=18"
+  },
+  "devDependencies": {
+    "@types/node": ">=20",
+    "@types/react": ">=18",
+    "@types/react-dom": ">=18",
+    "typescript": "^5.9.3"
+  }
+}
+

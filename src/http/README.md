@@ -242,7 +242,9 @@ El preset explícito de producción (`production`) prende timeout, dedup,
 priority, retry, adaptive limiter `aggressive`, cache para métodos seguros y
 response compression. `default` es el mismo preset por compatibilidad. Si
 querés evitar cache por default, usá `preset: "balanced"`; si querés solo
-wire y DX, usá `preset: "minimal"`.
+wire y DX, usá `preset: "minimal"`. Para BFF/proxy de alto throughput, usá
+`preset: "proxy"`: mantiene transporte, cancelación y helpers JSON, pero no
+activa timeout Brass, priority/adaptive/cache/retry/compression por defecto.
 
 El adaptive limiter mantiene estado por key con TTL (`stateTtlMs`), probe con
 jitter (`probeJitterRatio`), warmup explícito (`warmupRequests`), slow-start
@@ -480,6 +482,36 @@ const http = makeDefaultHttpClient({
   baseUrl: "https://api.example.com",
   middleware: [withHttpObservability(obs)],
 });
+```
+
+Para BFF/proxy de alto TPS, preferí una configuración metrics-only y sin hooks
+globales de runtime en ese camino caliente:
+
+```ts
+import { toPromise } from "brass-runtime";
+import { makeDefaultHttpClient, makeNodeHttpTransport } from "brass-runtime/http";
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  transport: makeNodeHttpTransport({
+    maxSockets: 512,
+    maxFreeSockets: 512,
+  }),
+  middleware: [
+    withHttpObservability({
+      metrics: observability.metrics,
+      logs: false,
+      spans: false,
+      adaptiveLimiter: false,
+      injectTraceHeaders: false,
+      includeHostLabel: false,
+      route: "/downstream/:id",
+    }),
+  ],
+});
+
+await toPromise(http.shutdown(), {}); // cierra los agentes Node creados por el transporte
 ```
 
 Si el cliente tiene adaptive limiter, `withHttpObservability` emite gauges de

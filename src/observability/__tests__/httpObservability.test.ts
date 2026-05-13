@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { Runtime } from "../../core/runtime/runtime";
+import type { MetricsRegistry } from "../../core/runtime/metrics";
 import { asyncFail, asyncSucceed } from "../../core/types/asyncEffect";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../../http/client";
 import type { AdaptiveLimiterStats } from "../../http/adaptiveLimiter";
@@ -193,6 +194,91 @@ describe("HTTP observability middleware", () => {
       "http.request.policy.retry.max_retries": 2,
       "http.request.policy.retry.base_delay_ms": 20,
     });
+  });
+
+  it("caches metric handles for repeated HTTP label sets", async () => {
+    const counter = { increment: vi.fn(), value: vi.fn(() => 0) };
+    const gauge = {
+      set: vi.fn(),
+      increment: vi.fn(),
+      decrement: vi.fn(),
+      value: vi.fn(() => 1),
+    };
+    const histogram = {
+      observe: vi.fn(),
+      buckets: vi.fn(() => ({
+        boundaries: [],
+        counts: [0],
+        sum: 0,
+        count: 0,
+        min: Infinity,
+        max: -Infinity,
+      })),
+      percentile: vi.fn(() => 0),
+    };
+    const metrics: MetricsRegistry = {
+      counter: vi.fn(() => counter),
+      gauge: vi.fn(() => gauge),
+      histogram: vi.fn(() => histogram),
+      snapshot: vi.fn(() => ({ counters: [], gauges: [], histograms: [] })),
+      reset: vi.fn(),
+    };
+    const rt = Runtime.make({});
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics,
+      logs: false,
+      spans: false,
+      injectTraceHeaders: false,
+      route: "/users/:id",
+      clock: (() => {
+        let now = 0;
+        return () => now += 2;
+      })(),
+    })(downstream);
+
+    await rt.toPromise(client({ method: "GET", url: "/users/1" }));
+    await rt.toPromise(client({ method: "GET", url: "/users/2" }));
+
+    expect(metrics.gauge).toHaveBeenCalledTimes(1);
+    expect(metrics.counter).toHaveBeenCalledTimes(1);
+    expect(metrics.histogram).toHaveBeenCalledTimes(1);
+    expect(gauge.increment).toHaveBeenCalledTimes(2);
+    expect(gauge.decrement).toHaveBeenCalledTimes(2);
+    expect(counter.increment).toHaveBeenCalledTimes(2);
+    expect(histogram.observe).toHaveBeenCalledTimes(2);
+
+    metrics.reset();
+    await rt.toPromise(client({ method: "GET", url: "/users/3" }));
+
+    expect(metrics.gauge).toHaveBeenCalledTimes(2);
+    expect(metrics.counter).toHaveBeenCalledTimes(2);
+    expect(metrics.histogram).toHaveBeenCalledTimes(2);
+  });
+
+  it("can record HTTP spans without per-request span events", async () => {
+    const obs = makeObservability({
+      metrics: false,
+      logs: false,
+    });
+    const rt = new Runtime({ env: obs.env, hooks: obs.hooks });
+    const downstream: HttpClientFn = () => asyncSucceed(ok());
+    const client = withHttpObservability({
+      metrics: obs.metrics,
+      logs: false,
+      spans: { events: false },
+      injectTraceHeaders: false,
+      route: "/users/:id",
+    })(downstream);
+
+    await expect(rt.toPromise(client({ method: "GET", url: "https://api.example.test/users/1" }))).resolves.toMatchObject({
+      status: 200,
+    });
+    await flushEvents();
+
+    const httpSpan = obs.tracer.exportFinished().find((span) => span.name === "HTTP GET");
+    expect(httpSpan).toBeDefined();
+    expect(httpSpan?.events.some((event) => event.name === "http.client.response")).toBe(false);
   });
 
   it("uses HTTP error status metadata for metrics, logs, and retryability", async () => {

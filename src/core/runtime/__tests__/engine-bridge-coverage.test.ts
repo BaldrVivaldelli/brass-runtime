@@ -99,6 +99,50 @@ describe("ReferenceWasmBridge", () => {
       bridge: { supportsBinary: false, eventCalls: expect.any(Number), maxEventsPerCall: 1 },
     });
   });
+
+  it("covers continue fallbacks, suspended/running stats, and discarded success continuations", () => {
+    const bridge = new ReferenceWasmBridge();
+
+    expect(bridge.stats()).toMatchObject({
+      running: 0,
+      suspended: 0,
+      bridge: { eventsPerCall: 0 },
+    });
+
+    const running = bridge.createFiber({ version: 1, root: 0, nodes: [{ tag: "Succeed", valueRef: 1 }] });
+    expect(bridge.stats()).toMatchObject({ running: 1 });
+
+    const suspended = bridge.createFiber({ version: 1, root: 0, nodes: [{ tag: "Sync", fnRef: 2 }] });
+    expect(bridge.poll(suspended)).toEqual({ kind: "InvokeSync", fiberId: suspended, fnRef: 2 });
+    expect(bridge.stats()).toMatchObject({ suspended: 1 });
+    expect(bridge.driveBatch(suspended, 1)).toEqual([{ kind: "InvokeSync", fiberId: suspended, fnRef: 2 }]);
+
+    expect(bridge.poll(running)).toEqual({ kind: "Done", fiberId: running, valueRef: 1 });
+    expect(bridge.poll(running)).toEqual({ kind: "Failed", fiberId: running, errorRef: 0 });
+
+    const discardedSuccessCont = bridge.createFiber({
+      version: 1,
+      root: 1,
+      nodes: [
+        { tag: "Fail", errorRef: 9 },
+        { tag: "FlatMap", first: 0, fnRef: 10 },
+      ],
+    });
+    expect(bridge.poll(discardedSuccessCont)).toEqual({ kind: "Failed", fiberId: discardedSuccessCont, errorRef: 9 });
+
+    const fallback = new ReferenceWasmBridge() as any;
+    fallback.driveBatch = () => [];
+    fallback.provideValueBatch = () => [];
+    fallback.provideErrorBatch = () => [];
+    fallback.provideEffectBatch = () => [];
+    fallback.interruptBatch = () => [];
+
+    expect(fallback.poll(1)).toEqual({ kind: "Continue", fiberId: 1 });
+    expect(fallback.provideValue(1, 2)).toEqual({ kind: "Continue", fiberId: 1 });
+    expect(fallback.provideError(1, 2)).toEqual({ kind: "Continue", fiberId: 1 });
+    expect(fallback.provideEffect(1, 0, [])).toEqual({ kind: "Continue", fiberId: 1 });
+    expect(fallback.interrupt(1, 2)).toEqual({ kind: "Interrupted", fiberId: 1, reasonRef: 2 });
+  });
 });
 
 describe("WasmFiberRegistryBridge", () => {
@@ -350,6 +394,66 @@ describe("WasmPackFiberBridge", () => {
     resolveWasmModule.mockReturnValueOnce(null);
     expect(() => new WasmPackFiberBridge()).toThrow(/could not load wasm/);
   });
+
+  it("covers strict zero-copy fallback results with binary support absent and empty metric snapshots", async () => {
+    const wasmModule = await import("../wasmModule");
+    const resolveWasmModule = vi.mocked(wasmModule.resolveWasmModule);
+
+    class ZeroOnlyVm {
+      readonly buffer = new ArrayBuffer(256);
+      private readonly wordsPtr = 32;
+
+      memory() { return { buffer: this.buffer }; }
+      prepare_program_words() { return this.wordsPtr; }
+      prepare_patch_words() { return this.wordsPtr; }
+      create_fiber_from_program_words() { return 7; }
+      drive_batch_ptr() { return 0; }
+      event_batch_len() { return 0; }
+      provide_value_ptr() { return 0; }
+      provide_error_ptr() { return 0; }
+      provide_effect_from_words() { return 0; }
+      interrupt_ptr() { return 0; }
+      metrics_snapshot_ptr() { return 0; }
+      metrics_snapshot_len() { return 0; }
+
+      create_fiber() { return 0; }
+      poll() { return JSON.stringify({ kind: "Continue", fiberId: 1 }); }
+      provide_value() { return JSON.stringify({ kind: "Continue", fiberId: 1 }); }
+      provide_error() { return JSON.stringify({ kind: "Continue", fiberId: 1 }); }
+      provide_effect() { return JSON.stringify({ kind: "Continue", fiberId: 1 }); }
+      interrupt() { return JSON.stringify({ kind: "Interrupted", fiberId: 1, reasonRef: 2 }); }
+      drop_fiber() {}
+      stats_json() { return "{}"; }
+    }
+
+    resolveWasmModule.mockReturnValueOnce({ BrassWasmVm: ZeroOnlyVm });
+    const bridge = new WasmPackFiberBridge();
+
+    expect(bridge.supportsBinary).toBe(false);
+    expect(bridge.supportsZeroCopy).toBe(true);
+    expect(bridge.supportsNoJsonMetrics).toBe(true);
+    expect(bridge.createFiber({ version: 1, root: 0, nodes: [{ tag: "Succeed", valueRef: 1 }] })).toBe(7);
+    expect(bridge.poll(7)).toEqual({ kind: "Continue", fiberId: 7 });
+    expect(bridge.provideValue(7, 1)).toEqual({ kind: "Continue", fiberId: 7 });
+    expect(bridge.provideError(7, 1)).toEqual({ kind: "Continue", fiberId: 7 });
+    expect(bridge.provideEffect(7, 0, [{ tag: "Succeed", valueRef: 2 }])).toEqual({ kind: "Continue", fiberId: 7 });
+    expect(bridge.interrupt(7, 1)).toEqual({ kind: "Interrupted", fiberId: 7, reasonRef: 1 });
+    expect(bridge.stats()).toMatchObject({
+      bridge: {
+        supportsBinary: false,
+        eventsPerCall: 0,
+        zeroCopyPrograms: 1,
+        zeroCopyPatches: 1,
+      },
+    });
+
+    class NullPointerVm extends ZeroOnlyVm {
+      prepare_program_words() { return 0; }
+    }
+    resolveWasmModule.mockReturnValueOnce({ BrassWasmVm: NullPointerVm });
+    const nullPointer = new WasmPackFiberBridge();
+    expect(() => nullPointer.createFiber({ version: 1, root: 0, nodes: [{ tag: "Succeed", valueRef: 1 }] })).toThrow(/null word pointer/);
+  });
 });
 
 describe("fiber ready queue bridge", () => {
@@ -432,5 +536,37 @@ describe("fiber ready queue bridge", () => {
 
     resolveWasmModule.mockReturnValueOnce({});
     expect(() => makeFiberReadyQueue({ engine: "wasm" })).toThrow(/wasm fiber ready queue is not available/);
+  });
+
+  it("covers TS ready queue default capacities, round-robin lane budget, and micro rescheduling", () => {
+    const defaults = makeFiberReadyQueue({});
+    expect(defaults.enqueue(1, "plain.tag")).toBe("micro");
+    expect(defaults.stats().data.lanes[0]).toMatchObject({ key: "plain", capacity: expect.any(Number) });
+    expect(defaults.beginFlush()).toBe(1);
+    expect(defaults.shift()).toBe(1);
+    expect(defaults.endFlush(1)).toBe("none");
+
+    const rr = makeFiberReadyQueue({ laneCapacity: 4, laneBudget: 2, flushBudget: 10, microThreshold: 10 });
+    expect(rr.enqueue(1, "lane:a|one")).toBe("micro");
+    expect(rr.enqueue(2, "lane:a|two")).toBe("none");
+    expect(rr.enqueue(3, "lane:b|one")).toBe("none");
+    expect(rr.beginFlush()).toBe(3);
+    expect(rr.shift()).toBe(1);
+    expect(rr.shift()).toBe(2);
+    expect(rr.shift()).toBe(3);
+    expect(rr.endFlush(3)).toBe("none");
+
+    const micro = makeFiberReadyQueue({ laneCapacity: 4, flushBudget: 4, microThreshold: 10 });
+    micro.enqueue(1, "caller:svc|one");
+    micro.enqueue(2, "lane:|empty");
+    expect(micro.beginFlush()).toBe(2);
+    expect(micro.shift()).toBe(1);
+    expect(micro.endFlush(1)).toBe("micro");
+    expect(micro.stats().data.phase).toBe("scheduled");
+
+    const overflow = makeFiberReadyQueue({ maxLanes: 1, laneCapacity: 2 });
+    overflow.enqueue(1, "lane:first|one");
+    overflow.enqueue(2, "lane:second|two");
+    expect(overflow.stats().data.lanes.map((lane: any) => lane.key)).toContain("overflow");
   });
 });

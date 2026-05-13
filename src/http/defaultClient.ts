@@ -22,13 +22,14 @@ import { toPromise as runToPromise } from "../core/runtime/runtime";
 import {
   type Async,
   type AsyncWithPromise,
+  asyncFail,
   asyncFlatMap,
   asyncSucceed,
   mapTryAsync,
   withAsyncPromise,
 } from "../core/types/asyncEffect";
 import {
-  decodeJsonBodyEffect,
+  decodeJsonBody,
   encodeJsonBodyEffect,
   type AnyJsonSchemaLike,
   type InferJsonSchema,
@@ -138,7 +139,7 @@ export type DefaultPostJson = {
   ): AsyncWithPromise<unknown, HttpError | ValidationError, HttpResponse<A>>;
 };
 
-export type DefaultHttpClientPreset = "minimal" | "balanced" | "default" | "production";
+export type DefaultHttpClientPreset = "minimal" | "proxy" | "balanced" | "default" | "production";
 
 export type DefaultHttpClientFeatures = {
   readonly dedup: boolean;
@@ -156,6 +157,7 @@ export type DefaultHttpClientConfig = LifecycleClientConfig & {
   /**
    * Preset used as the baseline before caller overrides are applied.
    * - minimal: wire client + timeout only.
+   * - proxy: low-latency proxy/BFF path; wire client only, no lifecycle queue or Brass timeout by default.
    * - balanced: retry, priority, dedup, adaptive limiter, response compression.
    * - default: balanced + short safe-method response cache.
    * - production: stable alias for the full production-ready default preset.
@@ -203,6 +205,8 @@ const MINIMAL_PRESET_CONFIG: LifecycleClientConfig = {
   timeoutMs: 30_000,
 };
 
+const PROXY_PRESET_CONFIG: LifecycleClientConfig = {};
+
 const BALANCED_PRESET_CONFIG: LifecycleClientConfig = {
   ...MINIMAL_PRESET_CONFIG,
   dedup: {},
@@ -246,6 +250,7 @@ const DEFAULT_PRESET_CONFIG: LifecycleClientConfig = {
 
 const PRESET_CONFIGS: Record<DefaultHttpClientPreset, LifecycleClientConfig> = {
   minimal: MINIMAL_PRESET_CONFIG,
+  proxy: PROXY_PRESET_CONFIG,
   balanced: BALANCED_PRESET_CONFIG,
   default: DEFAULT_PRESET_CONFIG,
   production: DEFAULT_PRESET_CONFIG,
@@ -296,7 +301,7 @@ export function makeDefaultHttpClient(
   let wire = makeLifecycleClient(lifecycleConfig);
 
   const compressionResult =
-    compression === false || (compression === undefined && preset === "minimal")
+    compression === false || (compression === undefined && (preset === "minimal" || preset === "proxy"))
       ? undefined
       : makeCompressionMiddleware(compression === undefined ? undefined : compression);
 
@@ -416,10 +421,10 @@ function decodeResponse<A>(
   schema?: AnyJsonSchemaLike,
   schemaName?: string,
 ): Async<unknown, ValidationError, HttpResponse<A>> {
-  return asyncFlatMap(
-    decodeJsonBodyEffect<A>(wire.bodyText, schema as any, { schemaName }),
-    (body) => asyncSucceed(toResponse(wire, body)),
-  );
+  const result = decodeJsonBody<A>(wire.bodyText, schema as any, { schemaName });
+  return result.success
+    ? asyncSucceed(toResponse(wire, result.data))
+    : asyncFail(result.error);
 }
 
 function mergeLifecycleConfig(

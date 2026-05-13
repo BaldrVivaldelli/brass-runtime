@@ -24,30 +24,32 @@ export type ResolvedTraceSampling = {
 
 export type TraceSamplingConfig = false | number | TraceSampler | TraceSamplingOptions;
 
-export const alwaysOnSampler: TraceSampler = {
-  shouldSample: () => true,
-};
+const TRACE_SAMPLER_RATIO = Symbol.for("brass-runtime.traceSampler.ratio");
 
-export const alwaysOffSampler: TraceSampler = {
+export const alwaysOnSampler: TraceSampler = withRatio({
+  shouldSample: () => true,
+}, 1);
+
+export const alwaysOffSampler: TraceSampler = withRatio({
   shouldSample: () => false,
-};
+}, 0);
 
 export function ratioSampler(ratio: number): TraceSampler {
   const bounded = clampRatio(ratio);
   if (bounded >= 1) return alwaysOnSampler;
   if (bounded <= 0) return alwaysOffSampler;
 
-  return {
+  return withRatio({
     shouldSample: (input) => traceRatio(input.traceId) < bounded,
-  };
+  }, bounded);
 }
 
 export function makeTraceSampler(options: TraceSamplingOptions = {}): TraceSampler {
   const fallback = options.sampler ?? ratioSampler(options.ratio ?? 1);
   const rules = options.rules ?? [];
 
-  return {
-    shouldSample(input) {
+  const sampler: TraceSampler = {
+    shouldSample(input: TraceSamplingInput) {
       for (const rule of rules) {
         if (!samplingRuleMatches(rule, input)) continue;
         if (rule.sampled !== undefined) return rule.sampled;
@@ -57,6 +59,9 @@ export function makeTraceSampler(options: TraceSamplingOptions = {}): TraceSampl
       return shouldSampleWith(fallback, input);
     },
   };
+
+  const fallbackRatio = samplerRatio(fallback);
+  return rules.length === 0 && fallbackRatio !== undefined ? withRatio(sampler, fallbackRatio) : sampler;
 }
 
 export function resolveTraceSampling(config: TraceSamplingConfig | undefined): ResolvedTraceSampling {
@@ -99,6 +104,25 @@ function matchText(pattern: string | RegExp, value: unknown): boolean {
 function isTraceSampler(value: unknown): value is TraceSampler {
   return typeof value === "function"
     || (typeof value === "object" && value !== null && typeof (value as { shouldSample?: unknown }).shouldSample === "function");
+}
+
+function samplerRatio(sampler: TraceSampler | undefined): number | undefined {
+  if (!sampler || typeof sampler === "function") return undefined;
+  const ratio = (sampler as any)[TRACE_SAMPLER_RATIO];
+  return typeof ratio === "number" && Number.isFinite(ratio) ? ratio : undefined;
+}
+
+function withRatio<T extends TraceSampler>(sampler: T, ratio: number): T {
+  try {
+    Object.defineProperty(sampler, TRACE_SAMPLER_RATIO, {
+      configurable: false,
+      enumerable: false,
+      value: ratio,
+    });
+  } catch {
+    // Non-extensible custom samplers simply run through the generic path.
+  }
+  return sampler;
 }
 
 function traceRatio(traceId: string): number {

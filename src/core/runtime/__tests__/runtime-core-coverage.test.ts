@@ -142,6 +142,11 @@ describe("runtime helpers and observability coverage", () => {
 
     expect(noopRuntime.stats().data.startedFibers).toBe(before);
 
+    const laneRuntime = Runtime.makeWithEngine({}, "ts", { inferLane: false }).withLane("native/lane");
+    const laneBefore = laneRuntime.stats().data.startedFibers;
+    await expect(laneRuntime.toPromise(asyncSync(() => getCurrentFiber()?.lane))).resolves.toBe("native/lane");
+    expect(laneRuntime.stats().data.startedFibers).toBe(laneBefore);
+
     const activeRuntime = new Runtime({ env: {}, hooks: new EventBus(), inferLane: false });
     const activeBefore = activeRuntime.stats().data.startedFibers;
     await expect(activeRuntime.toPromise(asyncSucceed("observed"))).resolves.toBe("observed");

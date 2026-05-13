@@ -58,6 +58,7 @@ The HTTP module (`src/http`) is composed of several sub-modules:
 - **Wire client** (`client.ts`, `httpClient.ts`): Low-level fetch wrapper with pool, timeout, typed errors.
 - **Default client** (`defaultClient.ts`): Recommended one-stop HTTP factory with DX helpers, lifecycle defaults, compression, stats, and middleware integration.
 - **Transport boundary** (`transport.ts`): Effect-based transport abstraction, fetch defaults, and Promise/fluent adapter DX for Axios/undici/internal clients.
+- **Node transport** (`nodeTransport.ts`): Optional Node-only `node:http` / `node:https` keep-alive transport for high-TPS BFF/proxy services.
 - **Request construction/policy** (`requestBuilder.ts`, `requestPolicy.ts`): Shared request sanitization and structured per-request execution knobs.
 - **Lifecycle** (`lifecycle/`): Middleware composition — dedup, batch, cache, priority, retry, stats.
 - **Compression** (`compression/`): Response decompression middleware (gzip, br, deflate) with environment detection.
@@ -66,6 +67,8 @@ The HTTP module (`src/http`) is composed of several sub-modules:
 - **Retry** (`retry/`): Retry middleware with backoff, circuit breaker awareness, priority boost.
 - **Optics** (`optics/`): Response lenses and transformers.
 - **Schema validation** (`validation.ts`): First-party JSON response/request validation integrated with DX helpers.
+- **Layer/DI helpers** (`layer.ts`): Optional service tags and application
+  graph helpers for owning default HTTP client lifecycle.
 
 ### Lifecycle middleware stack (innermost to outermost)
 
@@ -86,6 +89,11 @@ observability as the outermost layer.
 - The transport boundary is an effect. `makeHttp`, `httpClient`,
   `makeLifecycleClient`, and `makeDefaultHttpClient` accept `transport`; fetch
   is only the default backend.
+- `makeDefaultHttpClientLayer` provides `HttpClientService` for optional DI
+  graphs. Keep it additive; do not force Layer usage into the hot HTTP path.
+- Core Layer helpers include `makeConfigLayer`, `makeRuntimeLayer`,
+  `RuntimeService`, `makeTestLayer`, and `makeTestLayers`. Prefer these in
+  framework examples when wiring app graphs.
 - For Promise clients, prefer `promiseHttpTransport()
   .requestConfig(...).send(...).json()` in docs/examples. Brass injects the
   runtime `AbortSignal` into object configs before `send`, so cancellation is

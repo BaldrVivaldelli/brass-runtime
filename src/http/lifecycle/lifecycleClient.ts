@@ -120,7 +120,7 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
 
   const wireConfig = extractWireConfig(config);
   const wireClient = makeHttp(wireConfig);
-  const activeControllers = new Set<AbortController>();
+  const activeCancelers = new Set<() => void>();
   const tracker = new LifecycleStatsTracker({
     onEvent: config.onEvent,
     wireStats: wireClient.stats,
@@ -157,9 +157,9 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
     return buildLifecycleClient(wireClient, tracker, {
       cacheInvalidate: noopInvalidate,
       cacheClear: noopClear,
-      cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
-      shutdown: () => shutdownClient(activeControllers, prewarmMgr, wireClient.shutdown),
-      activeControllers,
+      cancelAll: () => cancelActiveRequests(activeCancelers, prewarmMgr),
+      shutdown: () => shutdownClient(activeCancelers, prewarmMgr, wireClient.shutdown),
+      activeCancelers,
       adaptiveLimiter: wireClient.adaptiveLimiter,
       prewarmManager: prewarmMgr,
       afterResponse: hasPrewarm ? (config.prewarm as PrewarmLifecycleConfig).afterResponse : undefined,
@@ -295,9 +295,9 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
   return buildLifecycleClient(composedFn, tracker, {
     cacheInvalidate: cacheLayer?.invalidate ?? noopInvalidate,
     cacheClear: cacheLayer?.clear ?? noopClear,
-    cancelAll: () => cancelControllers(activeControllers, prewarmMgr),
-    shutdown: () => shutdownClient(activeControllers, prewarmMgr, wireClient.shutdown),
-    activeControllers,
+    cancelAll: () => cancelActiveRequests(activeCancelers, prewarmMgr),
+    shutdown: () => shutdownClient(activeCancelers, prewarmMgr, wireClient.shutdown),
+    activeCancelers,
     adaptiveLimiter: wireClient.adaptiveLimiter,
     queueDepth: priorityMiddleware?.queueDepth,
     prewarmManager: prewarmMgr,
@@ -329,7 +329,7 @@ type LifecycleClientInternals = {
   cacheClear: () => void;
   cancelAll: () => Async<unknown, never, void>;
   shutdown: () => Async<unknown, never, void>;
-  activeControllers: Set<AbortController>;
+  activeCancelers: Set<() => void>;
   adaptiveLimiter?: AdaptiveLimiter;
   queueDepth?: () => number;
   prewarmManager?: PrewarmManager;
@@ -383,10 +383,10 @@ function withLifecycleMetadata(
   });
 }
 
-function cancelControllers(activeControllers: Set<AbortController>, prewarmMgr?: PrewarmManager): Async<unknown, never, void> {
-  for (const controller of Array.from(activeControllers)) {
+function cancelActiveRequests(activeCancelers: Set<() => void>, prewarmMgr?: PrewarmManager): Async<unknown, never, void> {
+  for (const cancel of Array.from(activeCancelers).reverse()) {
     try {
-      controller.abort();
+      cancel();
     } catch {
       // ignore
     }
@@ -399,11 +399,11 @@ function cancelControllers(activeControllers: Set<AbortController>, prewarmMgr?:
 }
 
 function shutdownClient(
-  activeControllers: Set<AbortController>,
+  activeCancelers: Set<() => void>,
   prewarmMgr?: PrewarmManager,
   wireShutdown?: () => void,
 ): Async<unknown, never, void> {
-  cancelControllers(activeControllers, prewarmMgr);
+  cancelActiveRequests(activeCancelers, prewarmMgr);
   wireShutdown?.();
   return asyncSucceed(undefined) as Async<unknown, never, void>;
 }
@@ -417,40 +417,20 @@ function trackRequest(
   return {
     _tag: "Async",
     register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
-      const controller = new AbortController();
       const previousSignal = (req.init as any)?.signal as AbortSignal | undefined;
       let done = false;
       let abortedByPreviousSignal = false;
+      let abortedByLifecycle = false;
       let cancelInner: (() => void) | undefined;
-
-      const abortFromPrevious = () => {
-        abortedByPreviousSignal = true;
-        try {
-          controller.abort(previousSignal?.reason);
-        } catch {
-          controller.abort();
-        }
-        cancelInner?.();
-      };
-
-      if (previousSignal?.aborted) {
-        abortFromPrevious();
-      } else {
-        previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
-      }
-
-      internals.activeControllers.add(controller);
-      tracker.requestStarted();
-      tracker.emit("request-start");
 
       const finish = (exit0: Exit<HttpError, HttpWireResponse>) => {
         if (done) return;
         done = true;
-        const exit = abortedByPreviousSignal && exit0._tag === "Failure" && Cause.isInterruptedOnly(exit0.cause)
+        const exit = (abortedByPreviousSignal || abortedByLifecycle) && exit0._tag === "Failure" && Cause.isInterruptedOnly(exit0.cause)
           ? { _tag: "Failure" as const, cause: Cause.fail({ _tag: "Abort" } satisfies HttpError) }
           : exit0;
         previousSignal?.removeEventListener("abort", abortFromPrevious);
-        internals.activeControllers.delete(controller);
+        internals.activeCancelers.delete(cancelFromLifecycle);
 
         if (exit._tag === "Success") {
           tracker.requestCompleted();
@@ -477,16 +457,40 @@ function trackRequest(
         cb(exit);
       };
 
-      const trackedReq: HttpRequest = {
-        ...req,
-        init: {
-          ...(req.init ?? {}),
-          signal: controller.signal,
-        } as any,
+      const cancelActive = () => {
+        if (done) return;
+        if (cancelInner) {
+          cancelInner();
+        } else {
+          finish({ _tag: "Failure", cause: Cause.interrupt() });
+        }
       };
 
+      const cancelFromLifecycle = () => {
+        abortedByLifecycle = true;
+        cancelActive();
+      };
+
+      const abortFromPrevious = () => {
+        abortedByPreviousSignal = true;
+        cancelActive();
+      };
+
+      if (!previousSignal?.aborted) {
+        previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
+      }
+
+      internals.activeCancelers.add(cancelFromLifecycle);
+      tracker.requestStarted();
+      tracker.emit("request-start");
+
+      if (previousSignal?.aborted) {
+        abortFromPrevious();
+        return () => undefined;
+      }
+
       try {
-        cancelInner = registerHttpEffect(fn(trackedReq), env, finish);
+        cancelInner = registerHttpEffect(fn(req), env, finish);
       } catch (error) {
         finish({
           _tag: "Failure",
@@ -495,17 +499,7 @@ function trackRequest(
       }
 
       return () => {
-        if (done) return;
-        try {
-          controller.abort();
-        } catch {
-          // ignore
-        }
-        if (cancelInner) {
-          cancelInner();
-        } else {
-          finish({ _tag: "Failure", cause: Cause.interrupt() });
-        }
+        cancelActive();
       };
     },
   };

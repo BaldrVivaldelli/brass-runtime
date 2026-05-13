@@ -236,6 +236,86 @@ The exporters are dependency-free:
 - `makeObservability` returns `hooks`, `env`, `metrics`, `tracer`, exporters,
   plus `flush()`, `start()`, `stop()`, and `shutdown()`.
 
+### High-TPS HTTP proxy path
+
+For BFF/proxy paths where p99 matters more than full per-request tracing, keep
+HTTP client metrics separate from global runtime hooks. Runtime hooks are useful
+for fiber/span/log visibility, but on a hot proxy path they add work to every
+effect execution.
+
+```ts
+import { Runtime } from "brass-runtime/core";
+import { makeDefaultHttpClient } from "brass-runtime/http";
+import { makeObservability, withHttpObservability } from "brass-runtime/observability";
+
+const observability = makeObservability({
+  metrics: false,
+  logs: false,
+  traces: false,
+  autoStart: false,
+});
+
+// Deliberately no observability hooks on this runtime.
+const runtime = Runtime.make({});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  middleware: [
+    withHttpObservability({
+      metrics: observability.metrics,
+      logs: false,
+      spans: false,
+      adaptiveLimiter: false,
+      injectTraceHeaders: false,
+      includeHostLabel: false,
+      route: "/downstream/:id",
+    }),
+  ],
+});
+
+await runtime.toPromise(http.getJson("/downstream/123"));
+```
+
+Use stable `route` values instead of raw URLs, and enable `includeHostLabel`
+only when the client really talks to multiple downstream hosts. If you need
+traces on the same path, prefer a low sampling ratio or a separate observed
+client for diagnostic flows; otherwise keep the hot path metrics-only.
+
+For a sampled span path with lower per-request overhead, keep runtime metrics
+off, avoid per-request HTTP span events, and only inject `traceparent` when a
+downstream needs propagation:
+
+```ts
+const traced = makeObservability({
+  metrics: false,
+  logs: false,
+  sampling: 0.01,
+  autoStart: false,
+});
+
+const tracedRuntime = new Runtime({
+  env: traced.env,
+  hooks: traced.tracer,
+});
+
+const tracedHttp = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  preset: "proxy",
+  middleware: [
+    withHttpObservability({
+      metrics: traced.metrics,
+      logs: false,
+      spans: { events: false },
+      adaptiveLimiter: false,
+      injectTraceHeaders: false,
+      includeHostLabel: false,
+      route: "/downstream/:id",
+    }),
+  ],
+});
+```
+
 ### HTTP policy observability
 
 ```ts
@@ -428,6 +508,53 @@ const http = makeDefaultHttpClient({
   baseUrl: "https://api.example.com",
   middleware: [withHttpObservability(observability)],
 });
+```
+
+For applications that use Brass layers, observability can own both the
+observability lifecycle and an observed HTTP client:
+
+```ts
+import { Layer } from "brass-runtime/core";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{
+  readonly serviceName: string;
+  readonly apiBaseUrl: string;
+  readonly otlpEndpoint: string;
+}>("Config");
+
+const ConfigLayer = Layer.value(Config, {
+  serviceName: "orders-api",
+  apiBaseUrl: "https://users-api.internal",
+  otlpEndpoint: "http://grafana-alloy:4318",
+});
+
+const ObservabilityLayer = makeObservabilityLayer((ctx) => {
+  const config = ctx.unsafeGet(Config);
+  return {
+    serviceName: config.serviceName,
+    otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }),
+    flushIntervalMs: 10_000,
+    autoStart: true,
+  };
+});
+
+const HttpLayer = makeObservedHttpClientLayer((ctx) => ({
+  baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+  preset: "production",
+}));
+
+const AppLayer = Layer.composeAll(ConfigLayer, ObservabilityLayer, makeObservedRuntimeLayer(), HttpLayer);
+
+const program = Layer.use(HttpClientService, (http) =>
+  http.getJson("/users/42"),
+);
 ```
 
 Sampling can be configured globally, by ratio, or with rules:

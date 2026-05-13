@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 import { Runtime, abortablePromiseStats, resetAbortablePromiseStats } from "../../core/runtime/runtime";
 import { async, asyncFail, asyncSucceed } from "../../core/types/asyncEffect";
@@ -15,10 +17,17 @@ import {
   promiseHttpTransport,
   type HttpTransport,
 } from "../transport";
+import { makeNodeHttpTransport } from "../nodeTransport";
 
 const rt = Runtime.make({});
 const run = <A>(eff: any) => rt.toPromise(eff) as Promise<A>;
 const wait = (ms = 0) => new Promise((resolve) => setTimeout(resolve, ms));
+const closeServer = (server: Server) => new Promise<void>((resolve, reject) => {
+  server.close((error) => {
+    if (error) reject(error);
+    else resolve();
+  });
+});
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -690,5 +699,74 @@ describe("HTTP effect transports", () => {
       new URL("https://api.example.test/stream"),
       expect.objectContaining({ method: "GET" }),
     );
+  });
+
+  it("runs the node HTTP transport with request body and headers", async () => {
+    const server = createServer((req, res) => {
+      let body = "";
+      req.setEncoding("utf8");
+      req.on("data", (chunk) => {
+        body += chunk;
+      });
+      req.on("end", () => {
+        res.writeHead(201, {
+          "content-type": "text/plain",
+          "x-received-header": String(req.headers["x-test"] ?? ""),
+          "x-received-body": body,
+        });
+        res.end("created");
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+
+    const address = server.address() as AddressInfo;
+    const transport = makeNodeHttpTransport({ maxSockets: 1, maxFreeSockets: 1 });
+
+    try {
+      const response = await run<unknown>(transport({
+        request: {
+          method: "POST",
+          url: "/node",
+          headers: { "x-test": "brass" },
+          body: "payload",
+        },
+        url: new URL(`http://127.0.0.1:${address.port}/node`),
+        signal: new AbortController().signal,
+      } as any));
+
+      expect(response).toMatchObject({
+        status: 201,
+        statusText: "Created",
+        headers: {
+          "content-type": "text/plain",
+          "x-received-body": "payload",
+          "x-received-header": "brass",
+        },
+        bodyText: "created",
+      });
+    } finally {
+      transport.destroy();
+      await closeServer(server);
+    }
+  });
+
+  it("destroys node transport agents through default client shutdown", async () => {
+    const transport = makeNodeHttpTransport();
+    const destroy = vi.spyOn(transport, "destroy");
+    const client = makeDefaultHttpClient({
+      preset: "proxy",
+      transport,
+    });
+
+    await run(client.shutdown());
+
+    expect(destroy).toHaveBeenCalledOnce();
   });
 });

@@ -1,0 +1,23 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  color: #1f2937;
+  background: #f8fafc;
+}
+
+main {
+  max-width: 720px;
+  padding: 32px;
+}
+
+pre {
+  padding: 16px;
+  overflow: auto;
+  background: #111827;
+  color: #f9fafb;
+}
+
+button {
+  padding: 8px 12px;
+}
+

@@ -1,8 +1,12 @@
-import { asyncFlatMap, asyncFold, asyncFail, asyncSucceed, asyncSync, type Async } from "../core/types/asyncEffect";
+import { async, asyncFlatMap, asyncFold, asyncFail, asyncSucceed, asyncSync, type Async } from "../core/types/asyncEffect";
+import type { TraceContext } from "../core/runtime/contex";
+import type { RuntimeHooks } from "../core/runtime/events";
 import { getCurrentFiber } from "../core/runtime/fiber";
-import type { MetricsRegistry } from "../core/runtime/metrics";
+import type { Counter, Gauge, Histogram, MetricsRegistry } from "../core/runtime/metrics";
+import { Cause, type Exit } from "../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../http/client";
 import type { AdaptiveLimiterStats } from "../http/adaptiveLimiter";
+import { registerHttpEffect } from "../http/effectRunner";
 import { httpErrorStatus, isRetryableHttpError } from "../http/errors";
 import { getHttpRequestPolicy, type HttpRequestPolicy, type HttpRequestRetryOverride } from "../http/requestPolicy";
 import type { Observability } from "./setup";
@@ -10,6 +14,7 @@ import { logEffect, type LogLevel } from "./logs";
 import { spanEvent, withSpan, type SpanAttributes } from "./traces";
 import { exemplarFromTraceContext } from "./metrics";
 import { injectTraceContext } from "./traceContext";
+import { shouldSampleWith } from "./sampling";
 import { validateHttpObservabilityOptions } from "./configValidation";
 
 export type HttpOutcome =
@@ -33,6 +38,7 @@ export type HttpObservabilityLogOptions = {
 export type HttpObservabilitySpanOptions = {
   readonly name?: string | ((req: HttpRequest) => string);
   readonly attributes?: SpanAttributes | ((req: HttpRequest) => SpanAttributes);
+  readonly events?: boolean;
 };
 
 export type HttpAdaptiveLimiterObservabilityOptions = {
@@ -59,6 +65,7 @@ export type HttpObservabilityOptions = {
   readonly metrics?: MetricsRegistry | false;
   readonly logs?: false | HttpObservabilityLogOptions;
   readonly spans?: false | HttpObservabilitySpanOptions;
+  readonly spanSink?: RuntimeHooks | false;
   readonly adaptiveLimiter?: boolean | HttpAdaptiveLimiterObservabilityOptions;
   readonly policy?: boolean | HttpPolicyObservabilityOptions;
   readonly injectTraceHeaders?: boolean;
@@ -75,6 +82,7 @@ type ResolvedHttpObservabilityOptions = Required<Pick<
   readonly metrics?: MetricsRegistry;
   readonly logs: false | HttpObservabilityLogOptions;
   readonly spans: false | HttpObservabilitySpanOptions;
+  readonly spanSink?: RuntimeHooks;
   readonly adaptiveLimiter: Required<HttpAdaptiveLimiterObservabilityOptions>;
   readonly policy: ResolvedHttpPolicyObservabilityOptions;
   readonly route?: string | ((req: HttpRequest) => string | undefined);
@@ -87,6 +95,9 @@ type ResolvedHttpPolicyObservabilityOptions = {
 };
 
 const DEFAULT_DURATION_BUCKETS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const MAX_HTTP_METRIC_CACHE_ENTRIES = 4_096;
+const EMPTY_SPAN_ATTRIBUTES: SpanAttributes = Object.freeze({});
+const TRACE_SAMPLER_RATIO = Symbol.for("brass-runtime.traceSampler.ratio");
 const POLICY_LABEL_NAMES: Record<HttpPolicyLabelKey, string> = {
   preset: "policy",
   lane: "lane",
@@ -164,10 +175,20 @@ export function withHttpObservability(options?: Observability | HttpObservabilit
     validateHttpObservabilityOptions(options ?? {});
   }
   const resolved = resolveHttpObservabilityOptions(options);
+  const metricCache = makeHttpMetricCache();
+  attachMetricCache(resolved.metrics, metricCache);
 
   return (next: HttpClientFn): HttpClientFn => {
+    const adaptiveLimiter = adaptiveLimiterOf(next);
+    if (canUseLeanHttpMetricsPath(resolved, adaptiveLimiter)) {
+      return withLeanHttpMetricsObservability(next, resolved, metricCache);
+    }
+    if (canUseLeanHttpSampledSpanPath(resolved, adaptiveLimiter)) {
+      return withLeanHttpSampledSpanObservability(next, resolved, metricCache);
+    }
+
     return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> => {
-      const run = asyncFlatMap(beginHttpObservation(req, resolved), (state) =>
+      const run = asyncFlatMap(beginHttpObservation(req, resolved, metricCache), (state) =>
         asyncFlatMap(logHttpRequest(req, resolved), () =>
           asyncFlatMap(prepareHttpRequest(req, resolved), (wireReq) =>
             asyncFold(
@@ -175,23 +196,29 @@ export function withHttpObservability(options?: Observability | HttpObservabilit
               (error: HttpError): Async<unknown, HttpError, HttpWireResponse> => {
                 const finish = state.finishWithError(error);
                 const adaptiveLimiterAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
+                const traceEvent = !shouldEmitHttpSpanEvents(resolved)
+                  ? asyncSucceed(undefined)
+                  : spanEvent("http.client.error", {
+                      ...finish.spanAttributes,
+                      ...adaptiveLimiterAttrs,
+                      "error.type": error._tag,
+                    });
                 return asyncFlatMap(
-                  spanEvent("http.client.error", {
-                    ...finish.spanAttributes,
-                    ...adaptiveLimiterAttrs,
-                    "error.type": error._tag,
-                  }),
+                  traceEvent,
                   () => asyncFlatMap(logHttpError(req, error, finish, resolved), () => asyncFail(error))
                 );
               },
               (res: HttpWireResponse): Async<unknown, HttpError, HttpWireResponse> => {
                 const finish = state.finishWithResponse(res);
                 const adaptiveLimiterAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
+                const traceEvent = !shouldEmitHttpSpanEvents(resolved)
+                  ? asyncSucceed(undefined)
+                  : spanEvent("http.client.response", {
+                      ...finish.spanAttributes,
+                      ...adaptiveLimiterAttrs,
+                    });
                 return asyncFlatMap(
-                  spanEvent("http.client.response", {
-                    ...finish.spanAttributes,
-                    ...adaptiveLimiterAttrs,
-                  }),
+                  traceEvent,
                   () => asyncFlatMap(logHttpResponse(req, res, finish, resolved), () => asyncSucceed(res))
                 );
               }
@@ -220,38 +247,548 @@ type ActiveHttpObservation = {
   readonly finishWithError: (error: HttpError) => HttpObservationFinish;
 };
 
+type LeanHttpSpan = {
+  readonly fiber: any;
+  readonly sink: RuntimeHooks;
+  readonly previousTrace: TraceContext | null;
+  readonly trace: TraceContext;
+  readonly name: string;
+  ended: boolean;
+};
+
+type LeanHttpFinishMetrics = {
+  readonly counter: Counter;
+  readonly histogram: Histogram;
+};
+
+type CachedHttpMetricHandles = {
+  readonly baseLabels: Record<string, string>;
+  readonly inFlight?: Gauge;
+  readonly finishMetrics: Map<string, LeanHttpFinishMetrics>;
+};
+
+type HttpMetricCache = {
+  disabled: boolean;
+  readonly leanEntries: Map<string, CachedHttpMetricHandles>;
+  readonly inFlightGauges: Map<string, Gauge>;
+  readonly requestCounters: Map<string, Counter>;
+  readonly durationHistograms: Map<string, Histogram>;
+};
+
+type MetricResetRegistryEntry = {
+  readonly caches: Set<HttpMetricCache>;
+  readonly reset: () => void;
+};
+
+const metricResetRegistry = new WeakMap<MetricsRegistry, MetricResetRegistryEntry>();
+
+function canUseLeanHttpMetricsPath(
+  options: ResolvedHttpObservabilityOptions,
+  adaptiveLimiter: AdaptiveLimiterReadable | undefined,
+): boolean {
+  return Boolean(
+    options.metrics &&
+    options.logs === false &&
+    options.spans === false &&
+    !options.injectTraceHeaders &&
+    (!options.adaptiveLimiter.enabled || !adaptiveLimiter)
+  );
+}
+
+function canUseLeanHttpSampledSpanPath(
+  options: ResolvedHttpObservabilityOptions,
+  adaptiveLimiter: AdaptiveLimiterReadable | undefined,
+): boolean {
+  return Boolean(
+    options.spans !== false &&
+    options.spans.events === false &&
+    options.logs === false &&
+    !options.injectTraceHeaders &&
+    (!options.adaptiveLimiter.enabled || !adaptiveLimiter)
+  );
+}
+
+function withLeanHttpSampledSpanObservability(
+  next: HttpClientFn,
+  options: ResolvedHttpObservabilityOptions,
+  metricCache: HttpMetricCache,
+): HttpClientFn {
+  return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> =>
+    async((env, cb) => {
+      const startedAt = options.clock();
+      const baseLabels = requestBaseLabels(req, options);
+      const handles = beginLeanHttpMetricsObservation(baseLabels, options, metricCache);
+      const span = startLeanHttpSpan(req, options);
+      let finished = false;
+      let cancelInner: (() => void) | undefined;
+
+      const finish = (exit: Exit<HttpError, HttpWireResponse>): void => {
+        if (finished) return;
+        finished = true;
+        cancelInner = undefined;
+
+        if (exit._tag === "Success") {
+          recordHttpMetricsFinish(
+            handles,
+            httpStatusOutcome(exit.value.status),
+            String(exit.value.status),
+            startedAt,
+            options,
+            metricCache,
+          );
+          finishLeanHttpSpan(span, "success");
+        } else {
+          const error = httpErrorFromCause(exit.cause);
+          const status = httpErrorStatus(error);
+          recordHttpMetricsFinish(
+            handles,
+            httpErrorOutcome(error),
+            status !== undefined ? String(status) : undefined,
+            startedAt,
+            options,
+            metricCache,
+          );
+          finishLeanHttpSpan(span, Cause.containsInterrupt(exit.cause) ? "interrupted" : "failure", error);
+        }
+
+        cb(exit);
+      };
+
+      try {
+        cancelInner = registerHttpEffect(next(req), env, finish);
+      } catch (error) {
+        const defectExit: Exit<HttpError, HttpWireResponse> = {
+          _tag: "Failure",
+          cause: Cause.die(error),
+        };
+        finish(defectExit);
+      }
+
+      return () => {
+        if (!finished) {
+          finished = true;
+          recordHttpMetricsFinish(
+            handles,
+            "abort",
+            undefined,
+            startedAt,
+            options,
+            metricCache,
+          );
+          finishLeanHttpSpan(span, "interrupted");
+        }
+        const cancel = cancelInner;
+        cancelInner = undefined;
+        cancel?.();
+      };
+    }) as Async<unknown, HttpError, HttpWireResponse>;
+}
+
+function withLeanHttpMetricsObservability(
+  next: HttpClientFn,
+  options: ResolvedHttpObservabilityOptions,
+  metricCache: HttpMetricCache,
+): HttpClientFn {
+  return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> =>
+    async((env, cb) => {
+      const startedAt = options.clock();
+      const baseLabels = requestBaseLabels(req, options);
+      const handles = beginLeanHttpMetricsObservation(baseLabels, options, metricCache);
+      let finished = false;
+      let cancelInner: (() => void) | undefined;
+
+      const finish = (exit: Exit<HttpError, HttpWireResponse>): void => {
+        if (finished) return;
+        finished = true;
+        cancelInner = undefined;
+
+        if (exit._tag === "Success") {
+          recordHttpMetricsFinish(
+            handles,
+            httpStatusOutcome(exit.value.status),
+            String(exit.value.status),
+            startedAt,
+            options,
+            metricCache,
+          );
+        } else {
+          const error = httpErrorFromCause(exit.cause);
+          const status = httpErrorStatus(error);
+          recordHttpMetricsFinish(
+            handles,
+            httpErrorOutcome(error),
+            status !== undefined ? String(status) : undefined,
+            startedAt,
+            options,
+            metricCache,
+          );
+        }
+
+        cb(exit);
+      };
+
+      try {
+        cancelInner = registerHttpEffect(next(req), env, finish);
+      } catch (error) {
+        const defectExit: Exit<HttpError, HttpWireResponse> = {
+          _tag: "Failure",
+          cause: Cause.die(error),
+        };
+        finish(defectExit);
+      }
+
+      return () => {
+        if (!finished) {
+          finished = true;
+          recordHttpMetricsFinish(
+            handles,
+            "abort",
+            undefined,
+            startedAt,
+            options,
+            metricCache,
+          );
+        }
+        const cancel = cancelInner;
+        cancelInner = undefined;
+        cancel?.();
+      };
+    }) as Async<unknown, HttpError, HttpWireResponse>;
+}
+
+function beginLeanHttpMetricsObservation(
+  baseLabels: Record<string, string>,
+  options: ResolvedHttpObservabilityOptions,
+  metricCache: HttpMetricCache,
+): CachedHttpMetricHandles {
+  const cacheKey = metricCacheKey("brass_http_client", baseLabels);
+  const existing = metricCache.disabled ? undefined : metricCache.leanEntries.get(cacheKey);
+  if (existing) {
+    existing.inFlight?.increment();
+    return existing;
+  }
+
+  const inFlight = options.metrics
+    ? getCachedMetric(
+        metricCache,
+        metricCache.inFlightGauges,
+        metricCacheKey("brass_http_client_in_flight", baseLabels),
+        () => options.metrics!.gauge("brass_http_client_in_flight", baseLabels),
+      )
+    : undefined;
+
+  inFlight?.increment();
+  const created = {
+    baseLabels,
+    inFlight,
+    finishMetrics: new Map<string, LeanHttpFinishMetrics>(),
+  };
+  if (!metricCache.disabled && metricCache.leanEntries.size < MAX_HTTP_METRIC_CACHE_ENTRIES) {
+    metricCache.leanEntries.set(cacheKey, created);
+  }
+  return created;
+}
+
+function recordHttpMetricsFinish(
+  handles: CachedHttpMetricHandles,
+  outcome: HttpOutcome,
+  status: string | undefined,
+  startedAt: number,
+  options: ResolvedHttpObservabilityOptions,
+  metricCache: HttpMetricCache,
+): void {
+  const durationMs = Math.max(0, options.clock() - startedAt);
+
+  handles.inFlight?.decrement();
+  if (!options.metrics) return;
+
+  const finishKey = `${outcome}|${status ?? "none"}`;
+  let finishMetrics = metricCache.disabled ? undefined : handles.finishMetrics.get(finishKey);
+  if (!finishMetrics) {
+    const labels = requestFinishLabelsFromBase(handles.baseLabels, outcome, status);
+    finishMetrics = {
+      counter: options.metrics.counter("brass_http_client_requests_total", labels),
+      histogram: options.metrics.histogram(
+        "brass_http_client_duration_ms",
+        [...(options.durationBuckets ?? DEFAULT_DURATION_BUCKETS)],
+        labels,
+      ),
+    };
+    if (!metricCache.disabled) handles.finishMetrics.set(finishKey, finishMetrics);
+  }
+
+  finishMetrics.counter.increment();
+  finishMetrics.histogram.observe(durationMs);
+}
+
+function startLeanHttpSpan(
+  req: HttpRequest,
+  options: ResolvedHttpObservabilityOptions,
+): LeanHttpSpan | undefined {
+  const fiber = getCurrentFiber() as any;
+  const runtime = fiber?.runtime;
+  const sink = options.spanSink ?? runtime?.hooks;
+  if (!fiber?.fiberContext || !runtime || !sink) return undefined;
+
+  const previousTrace = fiber.fiberContext.trace ?? null;
+  const brass = runtime.env?.brass;
+  if (previousTrace?.sampled === false && brass?.respectRemoteSampled !== false) return undefined;
+
+  const name = spanName(req, options.spans);
+  const tracer = resolveRuntimeTracer(runtime);
+  let traceId = previousTrace?.traceId;
+  let sampled = previousTrace?.sampled;
+  let attributes: SpanAttributes | undefined;
+
+  if (!previousTrace) {
+    const ratio = traceSamplerRatio(brass?.sampler);
+    if (ratio !== undefined) {
+      if (ratio <= 0) return undefined;
+      if (ratio < 1 && Math.random() >= ratio) return undefined;
+      sampled = true;
+    }
+    traceId = tracer.newTraceId();
+  }
+
+  attributes = spanStartAttributes(req, options);
+  if (sampled === undefined) {
+    traceId = traceId ?? tracer.newTraceId();
+    sampled = shouldSampleWith(brass?.sampler, {
+      traceId,
+      spanName: name,
+      parentSampled: previousTrace?.sampled,
+      attributes,
+    });
+  }
+  if (sampled === false) return undefined;
+
+  const trace: TraceContext = {
+    traceId: traceId ?? tracer.newTraceId(),
+    spanId: tracer.newSpanId(),
+    parentSpanId: previousTrace?.spanId,
+    sampled: true,
+    traceState: previousTrace?.traceState,
+    ...(previousTrace?.baggage ? { baggage: previousTrace.baggage } : {}),
+  };
+  const state: LeanHttpSpan = {
+    fiber,
+    sink,
+    previousTrace,
+    trace,
+    name,
+    ended: false,
+  };
+
+  fiber.fiberContext = { ...fiber.fiberContext, trace };
+  fiber.addFinalizer?.((exit: Exit<unknown, unknown>) => {
+    const status = exit?._tag === "Success"
+      ? "success"
+      : exit?.cause && Cause.containsInterrupt(exit.cause as any)
+        ? "interrupted"
+        : "failure";
+    finishLeanHttpSpan(state, status, exit?._tag === "Failure" ? exit.cause : undefined);
+  });
+  sink.emit(
+    { type: "span.start", name, attributes, links: [] },
+    leanSpanContext(fiber, trace),
+  );
+  return state;
+}
+
+function finishLeanHttpSpan(
+  state: LeanHttpSpan | undefined,
+  status: "success" | "failure" | "interrupted",
+  error?: unknown,
+): void {
+  if (!state || state.ended) return;
+  state.ended = true;
+  state.sink.emit(
+    { type: "span.end", name: state.name, status, error },
+    leanSpanContext(state.fiber, state.trace),
+  );
+  if (state.fiber?.fiberContext) {
+    state.fiber.fiberContext = { ...state.fiber.fiberContext, trace: state.previousTrace };
+  }
+}
+
+function leanSpanContext(fiber: any, trace: TraceContext) {
+  return {
+    fiberId: fiber?.id,
+    scopeId: fiber?.scopeId,
+    traceId: trace.traceId,
+    spanId: trace.spanId,
+    parentSpanId: trace.parentSpanId,
+    traceState: trace.traceState,
+    baggage: trace.baggage,
+    sampled: trace.sampled,
+  };
+}
+
+function resolveRuntimeTracer(runtime: any) {
+  const tracer = runtime?.env?.brass?.tracer;
+  if (tracer?.newTraceId && tracer?.newSpanId) return tracer;
+  return {
+    newTraceId: () => randomRuntimeId("trace"),
+    newSpanId: () => randomRuntimeId("span"),
+  };
+}
+
+function traceSamplerRatio(sampler: unknown): number | undefined {
+  if (!sampler || typeof sampler === "function") return undefined;
+  const ratio = (sampler as any)[TRACE_SAMPLER_RATIO];
+  return typeof ratio === "number" && Number.isFinite(ratio) ? ratio : undefined;
+}
+
+function randomRuntimeId(prefix: string): string {
+  const cryptoLike = (globalThis as any).crypto;
+  if (typeof cryptoLike?.randomUUID === "function") return cryptoLike.randomUUID();
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function httpErrorFromCause(cause: Cause<HttpError>): HttpError {
+  const failure = Cause.firstFailure(cause);
+  if (failure._tag === "Some") return failure.value;
+  if (Cause.containsInterrupt(cause)) return { _tag: "Abort" };
+
+  const defect = Cause.firstDefect(cause);
+  const value = defect._tag === "Some" ? defect.value : Cause.toError(cause);
+  return {
+    _tag: "FetchError",
+    message: value instanceof Error ? value.message : String(value),
+    cause: value,
+  };
+}
+
+function makeHttpMetricCache(): HttpMetricCache {
+  return {
+    disabled: false,
+    leanEntries: new Map(),
+    inFlightGauges: new Map(),
+    requestCounters: new Map(),
+    durationHistograms: new Map(),
+  };
+}
+
+function attachMetricCache(metrics: MetricsRegistry | undefined, cache: HttpMetricCache): void {
+  if (!metrics) return;
+  const existing = metricResetRegistry.get(metrics);
+  if (existing) {
+    existing.caches.add(cache);
+    return;
+  }
+
+  const entry: MetricResetRegistryEntry = {
+    caches: new Set([cache]),
+    reset: metrics.reset.bind(metrics),
+  };
+
+  try {
+    Object.defineProperty(metrics, "reset", {
+      configurable: true,
+      value: () => {
+        for (const cached of entry.caches) clearHttpMetricCache(cached);
+        entry.reset();
+      },
+    });
+    metricResetRegistry.set(metrics, entry);
+  } catch {
+    cache.disabled = true;
+  }
+}
+
+function clearHttpMetricCache(cache: HttpMetricCache): void {
+  cache.leanEntries.clear();
+  cache.inFlightGauges.clear();
+  cache.requestCounters.clear();
+  cache.durationHistograms.clear();
+}
+
+function getCachedMetric<A>(
+  owner: HttpMetricCache,
+  cache: Map<string, A>,
+  key: string,
+  create: () => A,
+): A {
+  if (owner.disabled) return create();
+  const existing = cache.get(key);
+  if (existing) return existing;
+  const created = create();
+  if (cache.size < MAX_HTTP_METRIC_CACHE_ENTRIES) {
+    cache.set(key, created);
+  }
+  return created;
+}
+
+function metricCacheKey(name: string, labels: Record<string, string>): string {
+  let key = name;
+  for (const [label, value] of Object.entries(labels)) {
+    key += `|${label.length}:${label}=${value.length}:${value}`;
+  }
+  return key;
+}
+
 function beginHttpObservation(
   req: HttpRequest,
-  options: ResolvedHttpObservabilityOptions
+  options: ResolvedHttpObservabilityOptions,
+  metricCache: HttpMetricCache,
 ): Async<unknown, never, ActiveHttpObservation> {
   return asyncSync(() => {
     const startedAt = options.clock();
     let finished = false;
-    const inFlight = options.metrics?.gauge("brass_http_client_in_flight", requestBaseLabels(req, options));
+    const baseLabels = requestBaseLabels(req, options);
+    const inFlight = options.metrics
+      ? getCachedMetric(
+          metricCache,
+          metricCache.inFlightGauges,
+          metricCacheKey("brass_http_client_in_flight", baseLabels),
+          () => options.metrics!.gauge("brass_http_client_in_flight", baseLabels),
+        )
+      : undefined;
     inFlight?.increment();
 
     const finish = (outcome: HttpOutcome, status: string | undefined, extra: SpanAttributes = {}): HttpObservationFinish => {
       const durationMs = Math.max(0, options.clock() - startedAt);
-      const labels = requestFinishLabels(req, outcome, status, options);
+      const labels = requestFinishLabelsFromBase(baseLabels, outcome, status);
 
       if (!finished) {
         finished = true;
         if (inFlight && inFlight.value() > 0) inFlight.decrement();
-        options.metrics?.counter("brass_http_client_requests_total", labels).increment();
-        options.metrics?.histogram("brass_http_client_duration_ms", [...(options.durationBuckets ?? DEFAULT_DURATION_BUCKETS)], labels).observe(durationMs, currentTraceExemplar(durationMs, startedAt + durationMs));
+        if (options.metrics) {
+          getCachedMetric(
+            metricCache,
+            metricCache.requestCounters,
+            metricCacheKey("brass_http_client_requests_total", labels),
+            () => options.metrics!.counter("brass_http_client_requests_total", labels),
+          ).increment();
+          getCachedMetric(
+            metricCache,
+            metricCache.durationHistograms,
+            metricCacheKey("brass_http_client_duration_ms", labels),
+            () => options.metrics!.histogram(
+              "brass_http_client_duration_ms",
+              [...(options.durationBuckets ?? DEFAULT_DURATION_BUCKETS)],
+              labels,
+            ),
+          ).observe(
+            durationMs,
+            options.spans === false ? undefined : currentTraceExemplar(durationMs, startedAt + durationMs),
+          );
+        }
       }
 
       return {
         durationMs,
         outcome,
         labels,
-        spanAttributes: {
-          "http.duration_ms": durationMs,
-          "http.outcome": outcome,
-          ...(status ? { "http.status_code": Number(status) } : {}),
-          ...(status ? { "http.response.status_code": Number(status) } : {}),
-          ...extra,
-        },
+        spanAttributes: options.spans === false
+          ? EMPTY_SPAN_ATTRIBUTES
+          : {
+              "http.duration_ms": durationMs,
+              "http.outcome": outcome,
+              ...(status ? { "http.status_code": Number(status) } : {}),
+              ...(status ? { "http.response.status_code": Number(status) } : {}),
+              ...extra,
+            },
       };
     };
 
@@ -337,6 +874,7 @@ function resolveHttpObservabilityOptions(options?: Observability | HttpObservabi
     metrics: raw?.metrics === false ? undefined : raw?.metrics,
     logs: raw?.logs ?? {},
     spans: raw?.spans ?? {},
+    spanSink: raw?.spanSink === false ? undefined : raw?.spanSink,
     adaptiveLimiter: resolveAdaptiveLimiterObservabilityOptions(raw?.adaptiveLimiter),
     policy: resolveHttpPolicyObservabilityOptions(raw?.policy),
     injectTraceHeaders: raw?.injectTraceHeaders ?? true,
@@ -473,6 +1011,10 @@ function spanName(req: HttpRequest, options: false | HttpObservabilitySpanOption
   return `HTTP ${req.method}`;
 }
 
+function shouldEmitHttpSpanEvents(options: ResolvedHttpObservabilityOptions): boolean {
+  return options.spans !== false && options.spans.events !== false;
+}
+
 function spanStartAttributes(req: HttpRequest, options: ResolvedHttpObservabilityOptions): SpanAttributes {
   const spanOptions = options.spans === false ? {} : options.spans.attributes;
   const custom = typeof spanOptions === "function" ? spanOptions(req) : spanOptions ?? {};
@@ -507,14 +1049,13 @@ function requestBaseLabels(req: HttpRequest, options: ResolvedHttpObservabilityO
   });
 }
 
-function requestFinishLabels(
-  req: HttpRequest,
+function requestFinishLabelsFromBase(
+  baseLabels: Record<string, string>,
   outcome: HttpOutcome,
   status: string | undefined,
-  options: ResolvedHttpObservabilityOptions
 ): Record<string, string> {
   return {
-    ...requestBaseLabels(req, options),
+    ...baseLabels,
     outcome,
     status: status ?? "none",
   };

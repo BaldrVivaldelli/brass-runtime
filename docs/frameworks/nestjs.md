@@ -270,6 +270,55 @@ npm install --save-dev @nestjs/core @nestjs/common @nestjs/platform-express refl
 npm run example:observability:nest
 ```
 
+## Layer Variant
+
+Nest providers can also be backed by one Brass layer graph. This keeps
+validation, runtime hooks, HTTP observability, and shutdown in one place:
+
+```ts
+import { Runtime, Layer, RuntimeService, makeConfigLayer } from "brass-runtime/core";
+import { s } from "brass-runtime/schema";
+import { HttpClientService } from "brass-runtime/http";
+import {
+  ObservabilityService,
+  makeObservabilityLayer,
+  makeObservedRuntimeLayer,
+  makeObservedHttpClientLayer,
+  makeOtlpOptions,
+} from "brass-runtime/observability";
+
+const Config = Layer.tag<{ serviceName: string; apiBaseUrl: string; otlpEndpoint: string }>("Config");
+const AppLayer = Layer.composeAll(
+  makeConfigLayer(Config, s.object({
+    serviceName: s.nonEmptyString(),
+    apiBaseUrl: s.url(),
+    otlpEndpoint: s.url(),
+  }), {
+    serviceName: process.env.OTEL_SERVICE_NAME ?? "orders-api",
+    apiBaseUrl: process.env.USERS_API_BASE_URL ?? "https://users-api.internal",
+    otlpEndpoint: process.env.GRAFANA_OTLP_ENDPOINT ?? "http://grafana-alloy:4318",
+  }),
+  makeObservabilityLayer((ctx) => {
+    const config = ctx.unsafeGet(Config);
+    return { serviceName: config.serviceName, otlp: makeOtlpOptions({ endpoint: config.otlpEndpoint }) };
+  }),
+  makeObservedRuntimeLayer(),
+  makeObservedHttpClientLayer((ctx) => ({
+    baseUrl: ctx.unsafeGet(Config).apiBaseUrl,
+    preset: "production",
+  })),
+);
+
+const built = await Runtime.make({}).toPromise(Layer.build(AppLayer));
+
+export const brassProviders = [
+  { provide: BRASS_OBSERVABILITY, useValue: built.service.unsafeGet(ObservabilityService) },
+  { provide: BRASS_RUNTIME, useValue: built.service.unsafeGet(RuntimeService) },
+  { provide: BRASS_HTTP, useValue: built.service.unsafeGet(HttpClientService) },
+  { provide: BRASS_LAYER_CLOSE, useValue: () => Runtime.make({}).toPromise(built.close()) },
+];
+```
+
 It uses a fake OTLP `fetch` by default so it can run without a collector. To
 send to Grafana/Alloy instead:
 
@@ -280,3 +329,7 @@ GRAFANA_OTLP_AUTHORIZATION='Basic <token>' \
 npm run example:observability:nest
 ```
 
+## Runnable Example
+
+A minimal runnable app lives at
+[examples/nestjs](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples/nestjs).

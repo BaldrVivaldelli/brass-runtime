@@ -33,6 +33,7 @@ export type HttpClientBuilder = {
   readonly transport: (transport: HttpTransport) => HttpClientBuilder;
   readonly preset: (preset: DefaultHttpClientPreset) => HttpClientBuilder;
   readonly minimal: () => HttpClientBuilder;
+  readonly proxy: () => HttpClientBuilder;
   readonly balanced: () => HttpClientBuilder;
   readonly defaultPreset: () => HttpClientBuilder;
   readonly production: () => HttpClientBuilder;
@@ -150,6 +151,7 @@ function makeBuilder(config: MutableBuilderConfig): HttpClientBuilder {
     transport: (transport) => replace({ transport }),
     preset: (preset) => replace({ preset }),
     minimal: () => replace({ preset: "minimal" }),
+    proxy: () => replace({ preset: "proxy" }),
     balanced: () => replace({ preset: "balanced" }),
     defaultPreset: () => replace({ preset: "default" }),
     production: () => replace({ preset: "production" }),
