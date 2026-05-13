@@ -34,11 +34,12 @@ import type {
  * Validates that required globals (`fetch`, `AbortController`) are available.
  * Throws a descriptive error if any are missing.
  */
-function validateGlobals(): void {
-  if (typeof fetch === "undefined") {
+function validateGlobals(config: LifecycleClientConfig): void {
+  if (config.transport === undefined && typeof fetch === "undefined") {
     throw new Error(
       "makeLifecycleClient: global `fetch` is not available. " +
-        "Ensure you are running in an environment with fetch support (Node.js 18+ or modern browser)."
+        "Ensure you are running in an environment with fetch support (Node.js 18+ or modern browser), " +
+        "or provide `transport` in the client config."
     );
   }
   if (typeof AbortController === "undefined") {
@@ -115,7 +116,7 @@ export function makeLifecycleClient(config: LifecycleClientConfig = {}): Lifecyc
   validateLifecycleClientConfig(config);
 
   // Validate globals at construction time
-  validateGlobals();
+  validateGlobals(config);
 
   const wireConfig = extractWireConfig(config);
   const wireClient = makeHttp(wireConfig);

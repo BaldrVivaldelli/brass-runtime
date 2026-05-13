@@ -180,7 +180,7 @@ const defaultClientConfig = Schema.object({
   retry: retryConfig.optional(),
   prewarm: prewarmConfig.optional(),
   onEvent: fn.optional(),
-  preset: Schema.enum(["minimal", "balanced", "default"] as const).optional(),
+  preset: Schema.enum(["minimal", "proxy", "highThroughputProxy", "balanced", "default", "production"] as const).optional(),
   compression: Schema.union([Schema.literal(false), object]).optional(),
   middleware: Schema.array(fn).optional(),
 }, { unknownKeys: "passthrough" });

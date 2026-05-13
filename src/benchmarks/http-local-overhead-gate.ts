@@ -16,7 +16,7 @@ import { runP99Assertions, assertP99Ratio } from "./http-local-overhead.bench";
 async function main(): Promise<void> {
   console.log("🏋️  P99/P50 Ratio Regression Gate");
   console.log("   Variants: default-proxy-effect-transport, default-proxy-effect-timeout-pool, axios-brass-promise-pool-timeout");
-  console.log(`   Config: 1000 calls, 500 warmup, concurrency 8`);
+  console.log(`   Config: 1000 calls, 1000 warmup, concurrency 8`);
   console.log();
 
   const results = await runP99Assertions();

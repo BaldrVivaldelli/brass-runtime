@@ -843,7 +843,7 @@ export function assertP99Ratio(results: BenchmarkVariantResult[]): void {
  */
 export async function runP99Assertions(): Promise<BenchmarkVariantResult[]> {
   const gateCalls = envInt("BRASS_HTTP_OVERHEAD_GATE_CALLS", 1000);
-  const gateWarmup = envNonNegativeInt("BRASS_HTTP_OVERHEAD_GATE_WARMUP", 500);
+  const gateWarmup = envNonNegativeInt("BRASS_HTTP_OVERHEAD_GATE_WARMUP", 1000);
   const gateConcurrency = envInt("BRASS_HTTP_OVERHEAD_GATE_CONCURRENCY", 8);
 
   const results: BenchmarkVariantResult[] = [];

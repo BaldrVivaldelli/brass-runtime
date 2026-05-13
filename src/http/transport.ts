@@ -10,11 +10,13 @@ import type {
   HttpWireResponseStream,
 } from "./client";
 import {
-  isExternalAbortError,
   isHttpError,
+  isExternalAbortError,
   toHttpError,
   type ToHttpErrorOptions,
 } from "./errors";
+
+export { toHttpError, isExternalAbortError, type ToHttpErrorOptions } from "./errors";
 
 export type HttpTransportContext = {
   readonly request: HttpRequest;

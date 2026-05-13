@@ -1,16 +1,10 @@
 // src/http/client.ts
 import { asyncFail, asyncFlatMap, asyncFold, asyncSucceed } from "../core/types/asyncEffect";
 import type { Async } from "../core/types/asyncEffect";
-<<<<<<< Updated upstream
-import { fromPromiseAbortable, type AbortablePromiseFinish } from "../core/runtime/runtime";
-import { ZStream, streamFromReadableStream } from "../core/stream/stream";
-import { Request, mergeHeadersUnder } from "./optics/request";
-=======
 import { fromPromiseAbortable, recordAbortablePromiseStart, recordAbortablePromiseFinish, type AbortablePromiseFinish } from "../core/runtime/runtime";
-import { ZStream } from "../core/stream/stream";
+import { ZStream, streamFromReadableStream } from "../core/stream/stream";
 import { Cause, type Exit } from "../core/types/effect";
-import { mergeHeadersUnder } from "./optics/request";
->>>>>>> Stashed changes
+import { Request, mergeHeadersUnder } from "./optics/request";
 import {
     backoffDelayMs,
     defaultRetryOnError,
@@ -29,8 +23,6 @@ import {
 } from "./pool";
 import { AdaptiveLimiter, type AdaptiveLimiterConfig, type AdaptiveLimiterStats } from "./adaptiveLimiter";
 import { validateMakeHttpConfig } from "./configValidation";
-<<<<<<< Updated upstream
-=======
 import { registerHttpEffect, type EffectCanceler } from "./effectRunner";
 import {
     abortErrorForSignal,
@@ -42,10 +34,13 @@ import {
     type HttpStreamTransport,
     type HttpTransport,
 } from "./transport";
-import { getHttpRequestPolicy } from "./requestPolicy";
-import type { HttpRequestPolicyRef, HttpRequestRetryOverride } from "./requestPolicy";
+
 import { TimerWheel } from "./timerWheel";
->>>>>>> Stashed changes
+
+const exitError = (exit: Exit<any, any>): unknown => {
+    if (exit._tag === "Failure" && exit.cause._tag === "Fail") return exit.cause.error;
+    return undefined;
+};
 
 export type HttpError =
     | { _tag: "Abort" }
@@ -112,6 +107,10 @@ export type MakeHttpConfig = {
     pool?: false | HttpPoolConfig;
     /** Adaptive concurrency limiter. Replaces fixed pool when enabled. */
     adaptiveLimiter?: false | AdaptiveLimiterConfig;
+    /** Custom transport. Defaults to makeFetchTransport(). */
+    transport?: HttpTransport;
+    /** Custom stream transport. Defaults to makeFetchStreamTransport(). */
+    streamTransport?: HttpStreamTransport;
 };
 
 export type HttpWireResponseStream = {
@@ -184,12 +183,6 @@ const isTaggedHttpError = (e: unknown): e is HttpError => {
 
 const isAbortError = (e: unknown): boolean =>
     typeof e === "object" && e !== null && "name" in e && (e as any).name === "AbortError";
-
-const normalizeHttpError = (e: unknown): HttpError => {
-    if (isTaggedHttpError(e)) return e;
-    if (isAbortError(e)) return { _tag: "Abort" };
-    return { _tag: "FetchError", message: String(e) };
-};
 
 export const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
     if (!h) return undefined;
@@ -315,6 +308,8 @@ const makeHttpStats = (
     return { onStart, onFinish, snapshot };
 };
 
+type HttpMetrics = ReturnType<typeof makeHttpStats>;
+
 const makePool = (cfg: MakeHttpConfig): HttpConcurrencyPool | undefined =>
     cfg.pool === undefined || cfg.pool === false ? undefined : new HttpConcurrencyPool(cfg.pool);
 
@@ -349,38 +344,33 @@ const requestPriority = (req: HttpRequest): number | undefined => {
     return (req.init as any)?.priority;
 };
 
-const linkAbortSignals = (
-    runtimeSignal: AbortSignal,
-    requestSignal: AbortSignal | undefined
-): { signal: AbortSignal; cleanup: () => void } => {
-    if (!requestSignal) return { signal: runtimeSignal, cleanup: () => undefined };
+/**
+ * Direct transport path — used when no pool or timeout is configured.
+ * Implements fast-path bypass for bare Async effects.
+ */
+const runDirectTransport = (
+    req: HttpRequest,
+    url: URL,
+    transport: HttpTransport,
+    metrics: HttpMetrics,
+): Async<unknown, HttpError, HttpWireResponse> => ({
+    _tag: "Async",
+    register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
+        let done = false;
+        let cancelInner: EffectCanceler | undefined;
+        const previousSignal = (req.init as { signal?: AbortSignal } | undefined)?.signal;
+        // Skip AbortController allocation when no external signal needs linking.
+        const controller = previousSignal ? new AbortController() : undefined;
+        const signal = controller?.signal ?? noopSignal;
+        const label = fetchLabel(req, url);
+        const startedAt = performance.now();
 
-    const controller = new AbortController();
-    const abort = (source: AbortSignal) => {
-        try {
-            controller.abort(source.reason);
-        } catch {
-            controller.abort();
-        }
-    };
-    const abortFromRuntime = () => abort(runtimeSignal);
-    const abortFromRequest = () => abort(requestSignal);
+        recordAbortablePromiseStart(label);
 
-    if (runtimeSignal.aborted) abortFromRuntime();
-    else runtimeSignal.addEventListener("abort", abortFromRuntime, { once: true });
+        const cleanup = () => {
+            if (previousSignal) previousSignal.removeEventListener("abort", abortFromPrevious);
+        };
 
-    if (requestSignal.aborted) abortFromRequest();
-    else requestSignal.addEventListener("abort", abortFromRequest, { once: true });
-
-<<<<<<< Updated upstream
-    return {
-        signal: controller.signal,
-        cleanup: () => {
-            runtimeSignal.removeEventListener("abort", abortFromRuntime);
-            requestSignal.removeEventListener("abort", abortFromRequest);
-        },
-    };
-=======
         const finish = (
             outcome: AbortablePromiseFinish["outcome"],
             exit: Exit<HttpError, HttpWireResponse>,
@@ -389,6 +379,7 @@ const linkAbortSignals = (
             if (done) return;
             done = true;
             cleanup();
+            recordAbortablePromiseFinish(label, outcome);
             metrics.onFinish({
                 label,
                 outcome,
@@ -403,6 +394,7 @@ const linkAbortSignals = (
         };
 
         const abortCurrent = (reason?: unknown) => {
+            if (!controller) return;
             try {
                 controller.abort(reason);
             } catch {
@@ -431,11 +423,9 @@ const linkAbortSignals = (
         previousSignal?.addEventListener("abort", abortFromPrevious, { once: true });
 
         try {
-            const effect = transport({ request: req, url, signal: controller.signal });
+            const effect = transport({ request: req, url, signal });
 
             // FAST PATH: bare Async effect — bypass registerHttpEffect entirely.
-            // This eliminates polymorphic dispatch through the recursive `run` loop
-            // when the transport returns a simple Async (no FlatMap/Fold wrapping).
             if (effect._tag === "Async") {
                 try {
                     const cancel = effect.register(env, (exit) => {
@@ -451,18 +441,24 @@ const linkAbortSignals = (
                 } catch (error) {
                     finishFailure(normalizeHttpError(error));
                 }
+            } else if (effect._tag === "Succeed") {
+                // FAST PATH: Succeed effect — resolve immediately, no interpreter needed.
+                finish("success", { _tag: "Success", value: (effect as any).value });
+            } else if (effect._tag === "Fail") {
+                // FAST PATH: Fail effect — resolve immediately.
+                finishFailure((effect as any).error);
             } else {
-                // SLOW PATH: wrapped effect (FlatMap, Fold, Sync, etc.) — full interpretation
+                // SLOW PATH: wrapped effect — full interpretation
                 const innerCancel = registerHttpEffect(
                     effect,
                     env,
                     (exit) => {
                         if (exit._tag === "Success") {
-                            finish("success", exit);
+                            finish("success", exit as Exit<HttpError, HttpWireResponse>);
                             cancelInner = undefined;
                             return;
                         }
-                        finish("failure", exit, exitError(exit));
+                        finish("failure", exit as Exit<HttpError, HttpWireResponse>, exitError(exit));
                         cancelInner = undefined;
                     },
                 );
@@ -515,7 +511,6 @@ const releaseFailure = (
         lease.release();
     }
     return undefined;
->>>>>>> Stashed changes
 };
 
 export function makeHttpStream(cfg: MakeHttpConfig = {}): HttpClientStream {
@@ -937,6 +932,8 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     const adaptiveLimiter = makeAdaptiveLimiter(cfg);
     const pool = adaptiveLimiter ? undefined : makePool(cfg);
     const metrics = makeHttpStats(pool, adaptiveLimiter);
+    const transport = cfg.transport ?? makeFetchTransport();
+    const destroyTransport = transportDestroy(transport);
 
     // Shared timer wheel — only created when a client-level timeout is configured.
     const clientTimeoutMs = resolvePositiveTimeout(cfg.timeoutMs);
@@ -949,74 +946,6 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
 
         const timeoutMs = resolvePositiveTimeout(req.timeoutMs ?? cfg.timeoutMs);
 
-<<<<<<< Updated upstream
-        return fromPromiseAbortable<HttpError, HttpWireResponse>(
-            async (signal) => {
-                let lease: { release: (...args: any[]) => void } | undefined;
-                const linkedSignal = linkAbortSignals(signal, (req.init as any)?.signal as AbortSignal | undefined);
-                try {
-                    if (adaptiveLimiter) {
-                        const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
-                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
-                    } else if (pool) {
-                        const key = resolveHttpPoolKey(pool.keyResolver, req, url);
-                        lease = await pool.acquire(key, linkedSignal.signal);
-                    }
-
-                    const started = performance.now();
-                    const res = await fetch(url, {
-                        ...(req.init ?? {}),
-                        method: req.method,
-                        headers: Request.headers.get(req),
-                        body: req.body as any,
-                        signal: linkedSignal.signal,
-                    });
-
-                    const bodyText = await res.text();
-                    const headers = headersOf(res);
-                    const latencyMs = Math.round(performance.now() - started);
-
-                    // Release with latency for adaptive limiter
-                    if (adaptiveLimiter && lease) {
-                        (lease as any).release(latencyMs, { status: res.status });
-                        lease = undefined;
-                    }
-
-                    return {
-                        status: res.status,
-                        statusText: res.statusText,
-                        headers,
-                        bodyText,
-                        ms: latencyMs,
-                    };
-                } finally {
-                    linkedSignal.cleanup();
-                    if (lease) {
-                        if (adaptiveLimiter) {
-                            (lease as any).release(0, { error: true });
-                        } else {
-                            lease.release();
-                        }
-                    }
-                }
-            },
-            normalizeHttpError,
-            {
-                label: fetchLabel(req, url),
-                timeoutMs,
-                timeoutReason: timeoutMs ? () => timeoutReason(req, url, timeoutMs) : undefined,
-                onStart: metrics.onStart,
-                onFinish: metrics.onFinish,
-            }
-        );
-    };
-
-    return decorate(run, metrics.snapshot, adaptiveLimiter ? {
-        adaptiveLimiter,
-        destroy: () => adaptiveLimiter.destroy(),
-        shutdown: () => adaptiveLimiter.shutdown(),
-    } : {});
-=======
         if (!adaptiveLimiter && !pool && timeoutMs === undefined) {
             return runDirectTransport(req, url, transport, metrics);
         }
@@ -1041,7 +970,6 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
     }
 
     return decorate(run, metrics.snapshot, metadata);
->>>>>>> Stashed changes
 }
 
 export const withRetryStream =
