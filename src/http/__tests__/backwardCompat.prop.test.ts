@@ -238,6 +238,7 @@ describe("Property 10: Config backward compatibility defaults", () => {
             baseUrl: configBase.baseUrl ?? "http://localhost:3000",
             transport: succeedingTransport(expectedResponse),
             pool: false,
+            timeoutMs: undefined,
           };
 
           const client = makeHttp(config);
@@ -286,6 +287,7 @@ describe("Property 10: Config backward compatibility defaults", () => {
             baseUrl: configBase.baseUrl ?? "http://localhost:3000",
             transport: failingTransport(error),
             pool: false,
+            timeoutMs: undefined,
           };
 
           const client = makeHttp(config);

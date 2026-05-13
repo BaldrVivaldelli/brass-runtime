@@ -719,3 +719,85 @@ export const benchmarks: BenchmarkDef[] = scenarioKinds().map((kind) => ({
 }));
 
 export default benchmarks;
+
+// --- P99/P50 Ratio Regression Gate ---
+
+export interface BenchmarkVariantResult {
+  variant: string;
+  p50Ms: number;
+  p99Ms: number;
+  ratio: number;
+  threshold: number;
+  passed: boolean;
+}
+
+const P99_RATIO_VARIANTS: ReadonlyArray<{ name: ScenarioKind; threshold: number }> = [
+  { name: "default-proxy-effect-transport", threshold: 4.0 },
+  { name: "default-proxy-effect-timeout-pool", threshold: 4.0 },
+];
+
+export function assertP99Ratio(results: BenchmarkVariantResult[]): void {
+  console.log("\n── P99/P50 Ratio Assertions ──\n");
+  let allPassed = true;
+  for (const r of results) {
+    const status = r.passed ? "PASS" : "FAIL";
+    console.log(
+      `${status} ${r.variant}: P99/P50 = ${r.ratio.toFixed(2)}x (threshold: ${r.threshold}x)` +
+        ` [p50=${r.p50Ms.toFixed(3)}ms, p99=${r.p99Ms.toFixed(3)}ms]`,
+    );
+    if (!r.passed) allPassed = false;
+  }
+  console.log();
+  if (!allPassed) {
+    console.log("❌ Benchmark regression gate FAILED: one or more variants exceeded P99/P50 threshold.");
+    process.exit(1);
+  } else {
+    console.log("✅ Benchmark regression gate PASSED: all variants within P99/P50 threshold.");
+  }
+}
+
+export async function runP99Assertions(): Promise<BenchmarkVariantResult[]> {
+  const gateCalls = envInt("BRASS_HTTP_OVERHEAD_GATE_CALLS", 2000);
+  const gateWarmup = envNonNegativeInt("BRASS_HTTP_OVERHEAD_GATE_WARMUP", 2000);
+  const gateConcurrency = envInt("BRASS_HTTP_OVERHEAD_GATE_CONCURRENCY", 8);
+  const gc = (globalThis as any).gc as (() => void) | undefined;
+
+  const results: BenchmarkVariantResult[] = [];
+
+  for (const { name, threshold } of P99_RATIO_VARIANTS) {
+    // Force GC between variants to avoid cross-contamination
+    if (typeof gc === "function") {
+      gc();
+      gc();
+      await new Promise((r) => setTimeout(r, 50));
+    }
+
+    const runner = makeScenarioRunner(name);
+    try {
+      if (gateWarmup > 0) {
+        await runLoad(name, runner, gateWarmup, 1_000_000);
+        // Force GC after warmup to clear warmup allocations before measurement
+        if (typeof gc === "function") {
+          gc();
+          await new Promise((r) => setTimeout(r, 20));
+        }
+      }
+      const details = await runLoad(name, runner, gateCalls, 0);
+      const p50Ms = details.requestP50Ms;
+      const p99Ms = details.requestP99Ms;
+      const ratio = p50Ms > 0 ? p99Ms / p50Ms : Infinity;
+      results.push({
+        variant: name,
+        p50Ms,
+        p99Ms,
+        ratio: Math.round(ratio * 100) / 100,
+        threshold,
+        passed: ratio <= threshold,
+      });
+    } finally {
+      await runner.cleanup?.();
+    }
+  }
+
+  return results;
+}

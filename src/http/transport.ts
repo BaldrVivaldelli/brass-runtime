@@ -30,6 +30,24 @@ export type HttpStreamTransport = (
   context: HttpTransportContext,
 ) => Async<unknown, HttpError, HttpWireResponseStream>;
 
+/**
+ * Marker interface for promise-based transports that support the direct path.
+ */
+interface PromiseTransportMarker {
+  readonly __promiseTransport: true;
+  readonly requestDirect: (context: HttpTransportContext) => Promise<HttpWireResponse>;
+}
+
+/**
+ * Type guard that checks whether a transport function carries the
+ * `__promiseTransport` marker, indicating it supports the direct promise path.
+ */
+export function isPromiseTransportDirect(
+  transport: HttpTransport,
+): transport is HttpTransport & PromiseTransportMarker {
+  return (transport as any).__promiseTransport === true;
+}
+
 export type HttpTransportTiming = {
   readonly startedAt: number;
   readonly durationMs: number;
@@ -315,7 +333,7 @@ const toPromiseTransportResponse = (
 export function makePromiseHttpTransport<Response>(
   config: PromiseHttpTransportConfig<Response>,
 ): HttpTransport {
-  return (context) =>
+  const transport: HttpTransport = (context) =>
     async((_env, cb) => {
       let done = false;
 
@@ -368,6 +386,23 @@ export function makePromiseHttpTransport<Response>(
         context.signal.removeEventListener("abort", abort);
       };
     });
+
+  // Attach the promise transport marker and requestDirect method
+  const marked = transport as HttpTransport & PromiseTransportMarker;
+  (marked as any).__promiseTransport = true;
+  (marked as any).requestDirect = async (context: HttpTransportContext): Promise<HttpWireResponse> => {
+    const startedAt = nowMs();
+    try {
+      const raw = await config.request(context);
+      const durationMs = Math.round(nowMs() - startedAt);
+      const mapped = await config.response(raw, context, { startedAt, durationMs });
+      return { ...mapped, ms: mapped.ms ?? durationMs } as HttpWireResponse;
+    } catch (error) {
+      throw config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal });
+    }
+  };
+
+  return marked;
 }
 
 function makePromiseHttpTransportBodyBuilder<Response>(

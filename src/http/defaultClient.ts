@@ -6,7 +6,6 @@ import {
   type HttpWireResponse,
 } from "./client";
 import { Cause, type Exit } from "../core/types/effect";
-import { isPromiseTransportDirect } from "./transport";
 import {
   type LifecycleClient,
   type LifecycleClientConfig,
@@ -329,7 +328,6 @@ export function makeDefaultHttpClient(
   }
 
   const features = featureSnapshot(lifecycleConfig, compressionResult !== undefined, middleware.length);
-  const policyPresets = (lifecycleConfig as any).policyPresets;
   const hasMiddleware = compressionResult !== undefined ||
     middleware.length > 0 ||
     (policyPresets !== undefined && Object.keys(policyPresets).length > 0);
@@ -486,48 +484,6 @@ function fusedWireAndDecode<A>(
       cb({ _tag: "Failure", cause: Cause.fail({ _tag: "ValidationError", message: "Internal: unexpected effect shape", body: "", issues: [], phase: "response" } as ValidationError) });
     },
   };
-}
-
-/**
- * Creates a ValidationError for JSON parse failures.
- */
-function makeJsonParseValidationError(bodyText: string, error: unknown, opts?: { schemaName?: string }): ValidationError {
-  return {
-    _tag: "ValidationError",
-    phase: "response",
-    body: bodyText,
-    message: `JSON parse error${opts?.schemaName ? ` for ${opts.schemaName}` : ""}: ${error instanceof Error ? error.message : String(error)}`,
-    issues: [{ path: [], message: error instanceof Error ? error.message : String(error), expected: "valid JSON", received: bodyText.slice(0, 100) }],
-  };
-}
-
-/**
- * Decodes JSON body text and validates against a schema.
- */
-function decodeJsonBody<A>(bodyText: string, schema: any, opts?: { schemaName?: string }): { success: true; data: A } | { success: false; error: ValidationError } {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch (error) {
-    return { success: false, error: makeJsonParseValidationError(bodyText, error, opts) };
-  }
-  if (schema && typeof schema.safeParse === "function") {
-    const result = schema.safeParse(parsed);
-    if (result.success === false) {
-      return { success: false, error: { _tag: "ValidationError", phase: "response", body: bodyText, message: `Schema validation failed${opts?.schemaName ? ` for ${opts.schemaName}` : ""}`, issues: result.issues ?? [], ...(opts?.schemaName ? { schema: opts.schemaName } : {}) } as ValidationError };
-    }
-    return { success: true, data: result.data ?? parsed as A };
-  }
-  if (schema && typeof schema.parse === "function") {
-    try {
-      const data = schema.parse(parsed);
-      return { success: true, data: data as A };
-    } catch (error: any) {
-      const issues = error?.issues ?? [{ path: [], message: error?.message ?? String(error) }];
-      return { success: false, error: { _tag: "ValidationError", phase: "response", body: bodyText, message: `Schema validation failed${opts?.schemaName ? ` for ${opts.schemaName}` : ""}`, issues, ...(opts?.schemaName ? { schema: opts.schemaName } : {}) } as ValidationError };
-    }
-  }
-  return { success: true, data: parsed as A };
 }
 
 /**
