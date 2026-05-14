@@ -189,44 +189,183 @@ export function withHttpObservability(options?: Observability | HttpObservabilit
     }
 
     return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> => {
-      const run = asyncFlatMap(beginHttpObservation(req, resolved, metricCache), (state) =>
-        asyncFlatMap(logHttpRequest(req, resolved), () =>
-          asyncFlatMap(prepareHttpRequest(req, resolved), (wireReq) =>
-            asyncFold(
-              next(wireReq),
-              (error: HttpError): Async<unknown, HttpError, HttpWireResponse> => {
-                const finish = state.finishWithError(error);
-                const adaptiveLimiterAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
-                const traceEvent = !shouldEmitHttpSpanEvents(resolved)
-                  ? asyncSucceed(undefined)
-                  : spanEvent("http.client.error", {
-                      ...finish.spanAttributes,
-                      ...adaptiveLimiterAttrs,
-                      "error.type": error._tag,
-                    });
-                return asyncFlatMap(
-                  traceEvent,
-                  () => asyncFlatMap(logHttpError(req, error, finish, resolved), () => asyncFail(error))
-                );
-              },
-              (res: HttpWireResponse): Async<unknown, HttpError, HttpWireResponse> => {
-                const finish = state.finishWithResponse(res);
-                const adaptiveLimiterAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
-                const traceEvent = !shouldEmitHttpSpanEvents(resolved)
-                  ? asyncSucceed(undefined)
-                  : spanEvent("http.client.response", {
-                      ...finish.spanAttributes,
-                      ...adaptiveLimiterAttrs,
-                    });
-                return asyncFlatMap(
-                  traceEvent,
-                  () => asyncFlatMap(logHttpResponse(req, res, finish, resolved), () => asyncSucceed(res))
-                );
-              }
+      // Optimized full path: instead of chaining asyncFlatMap × 4 (which forces
+      // the runtime interpreter to walk a deep effect tree and create N microtask
+      // ticks), we build a single Async with a direct callback. This mirrors the
+      // lean path approach but preserves all observability features (logs,
+      // spans, traces, adaptive limiter).
+      const run: Async<unknown, HttpError, HttpWireResponse> = async((env, cb) => {
+        const startedAt = resolved.clock();
+        const baseLabels = getCachedBaseLabels(req, resolved, metricCache);
+        const inFlight = resolved.metrics
+          ? getCachedMetric(
+              metricCache,
+              metricCache.inFlightGauges,
+              metricCacheKey("brass_http_client_in_flight", baseLabels),
+              () => resolved.metrics!.gauge("brass_http_client_in_flight", baseLabels),
             )
-          )
-        )
-      );
+          : undefined;
+        inFlight?.increment();
+
+        let finished = false;
+        let cancelInner: (() => void) | undefined;
+
+        // Inline finish — avoids creating ActiveHttpObservation closure + asyncSync wrapping
+        const completeFinish = (
+          outcome: HttpOutcome,
+          status: string | undefined,
+          extra: SpanAttributes,
+        ): HttpObservationFinish => {
+          const durationMs = Math.max(0, resolved.clock() - startedAt);
+          const labels = requestFinishLabelsFromBase(baseLabels, outcome, status);
+
+          if (!finished) {
+            finished = true;
+            if (inFlight && inFlight.value() > 0) inFlight.decrement();
+            if (resolved.metrics) {
+              getCachedMetric(
+                metricCache,
+                metricCache.requestCounters,
+                metricCacheKey("brass_http_client_requests_total", labels),
+                () => resolved.metrics!.counter("brass_http_client_requests_total", labels),
+              ).increment();
+              getCachedMetric(
+                metricCache,
+                metricCache.durationHistograms,
+                metricCacheKey("brass_http_client_duration_ms", labels),
+                () => resolved.metrics!.histogram(
+                  "brass_http_client_duration_ms",
+                  [...(resolved.durationBuckets ?? DEFAULT_DURATION_BUCKETS)],
+                  labels,
+                ),
+              ).observe(
+                durationMs,
+                resolved.spans === false ? undefined : currentTraceExemplar(durationMs, startedAt + durationMs),
+              );
+            }
+          }
+
+          return {
+            durationMs,
+            outcome,
+            labels,
+            spanAttributes: resolved.spans === false
+              ? EMPTY_SPAN_ATTRIBUTES
+              : {
+                  "http.duration_ms": durationMs,
+                  "http.outcome": outcome,
+                  ...(status ? { "http.status_code": Number(status) } : {}),
+                  ...(status ? { "http.response.status_code": Number(status) } : {}),
+                  ...extra,
+                },
+          };
+        };
+
+        const fiber = getCurrentFiber() as any;
+        fiber?.addFinalizer?.(() => {
+          completeFinish("abort", undefined, { "http.cancelled": true });
+        });
+
+        // Inline log request (skip if no log level)
+        const reqLogLevel = resolved.logs === false ? false : resolved.logs.requestLevel ?? false;
+        if (reqLogLevel) {
+          // Fire-and-forget log — don't await since logs shouldn't block requests
+          const logEff = logEffect(reqLogLevel, "http.client.request", requestLogFields(req, resolved));
+          registerHttpEffect(logEff as any, env, () => undefined);
+        }
+
+        // Inline prepare request (inject trace headers if enabled)
+        const wireReq = resolved.injectTraceHeaders ? injectCurrentTraceContext(req) : req;
+
+        const onSuccess = (res: HttpWireResponse): void => {
+          const finish = completeFinish(httpStatusOutcome(res.status), String(res.status), {});
+          // Always observe adaptive limiter (has metric side effects via setGauge)
+          const adaptiveAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
+          // Span event (if enabled)
+          if (shouldEmitHttpSpanEvents(resolved)) {
+            const ev = spanEvent("http.client.response", {
+              ...finish.spanAttributes,
+              ...adaptiveAttrs,
+            });
+            registerHttpEffect(ev as any, env, () => undefined);
+          }
+          // Response log
+          const respLevel = resolved.logs === false
+            ? false
+            : (resolved.logs.responseLevel ?? false) ||
+              (finish.outcome === "error" ? (resolved.logs.errorLevel ?? "warn") : false);
+          if (respLevel) {
+            const logEff = logEffect(respLevel, "http.client.response", {
+              ...requestLogFields(req, resolved),
+              status: res.status,
+              statusText: res.statusText,
+              outcome: finish.outcome,
+              durationMs: finish.durationMs,
+            });
+            registerHttpEffect(logEff as any, env, () => undefined);
+          }
+          cb({ _tag: "Success", value: res });
+        };
+
+        const onError = (error: HttpError): void => {
+          const status = httpErrorStatus(error);
+          const finish = completeFinish(
+            httpErrorOutcome(error),
+            status !== undefined ? String(status) : undefined,
+            {
+              "error.type": error._tag,
+              "http.retryable": isRetryableHttpError(error),
+            },
+          );
+          // Always observe adaptive limiter (has metric side effects via setGauge)
+          const adaptiveAttrs = observeAdaptiveLimiter(wireReq, next, resolved);
+          if (shouldEmitHttpSpanEvents(resolved)) {
+            const ev = spanEvent("http.client.error", {
+              ...finish.spanAttributes,
+              ...adaptiveAttrs,
+              "error.type": error._tag,
+            });
+            registerHttpEffect(ev as any, env, () => undefined);
+          }
+          // Error log
+          const errLevel = resolved.logs === false ? false : resolved.logs.errorLevel ?? "error";
+          if (errLevel) {
+            const statusText = httpErrorStatusText(error);
+            const logEff = logEffect(errLevel, "http.client.error", {
+              ...requestLogFields(req, resolved),
+              outcome: finish.outcome,
+              durationMs: finish.durationMs,
+              ...(status !== undefined ? { status } : {}),
+              ...(statusText ? { statusText } : {}),
+              retryable: isRetryableHttpError(error),
+              errorTag: error._tag,
+              message: httpErrorMessage(error),
+            });
+            registerHttpEffect(logEff as any, env, () => undefined);
+          }
+          cb({ _tag: "Failure", cause: Cause.fail(error) });
+        };
+
+        try {
+          cancelInner = registerHttpEffect(next(wireReq), env, (exit) => {
+            cancelInner = undefined;
+            if (exit._tag === "Success") onSuccess(exit.value);
+            else {
+              const failure = Cause.firstFailure(exit.cause);
+              if (failure._tag === "Some") onError(failure.value);
+              else cb(exit);
+            }
+          });
+        } catch (error) {
+          cb({ _tag: "Failure", cause: Cause.die(error) });
+        }
+
+        return () => {
+          const cancel = cancelInner;
+          cancelInner = undefined;
+          cancel?.();
+        };
+      }) as Async<unknown, HttpError, HttpWireResponse>;
 
       if (resolved.spans === false) return run;
       return withSpan(spanName(req, resolved.spans), run, spanStartAttributes(req, resolved));
@@ -274,6 +413,9 @@ type HttpMetricCache = {
   readonly inFlightGauges: Map<string, Gauge>;
   readonly requestCounters: Map<string, Counter>;
   readonly durationHistograms: Map<string, Histogram>;
+  // Cache of baseLabels by request signature (method|host|route|policyKey) to
+  // avoid re-allocating the labels object on every request with the same shape.
+  readonly baseLabelsCache: Map<string, Record<string, string>>;
 };
 
 type MetricResetRegistryEntry = {
@@ -317,7 +459,7 @@ function withLeanHttpSampledSpanObservability(
   return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> =>
     async((env, cb) => {
       const startedAt = options.clock();
-      const baseLabels = requestBaseLabels(req, options);
+      const baseLabels = getCachedBaseLabels(req, options, metricCache);
       const handles = beginLeanHttpMetricsObservation(baseLabels, options, metricCache);
       const span = startLeanHttpSpan(req, options);
       let finished = false;
@@ -393,7 +535,7 @@ function withLeanHttpMetricsObservability(
   return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> =>
     async((env, cb) => {
       const startedAt = options.clock();
-      const baseLabels = requestBaseLabels(req, options);
+      const baseLabels = getCachedBaseLabels(req, options, metricCache);
       const handles = beginLeanHttpMetricsObservation(baseLabels, options, metricCache);
       let finished = false;
       let cancelInner: (() => void) | undefined;
@@ -676,7 +818,31 @@ function makeHttpMetricCache(): HttpMetricCache {
     inFlightGauges: new Map(),
     requestCounters: new Map(),
     durationHistograms: new Map(),
+    baseLabelsCache: new Map(),
   };
+}
+
+/** Get baseLabels for a request, using the cache to avoid re-allocation. */
+function getCachedBaseLabels(
+  req: HttpRequest,
+  options: ResolvedHttpObservabilityOptions,
+  cache: HttpMetricCache,
+): Record<string, string> {
+  if (cache.disabled) return requestBaseLabels(req, options);
+  // Build cache key from the labels' identity fields
+  const route = requestRoute(req, options);
+  const host = options.includeHostLabel ? requestHost(req) : undefined;
+  // Quick path: skip policy labels in cache key for performance.
+  // Policy labels are typically same for a route, but we include policy preset
+  // if it's present to disambiguate.
+  const policy = getHttpRequestPolicy(req);
+  const preset = typeof policy === "string" ? policy : (policy as any)?.preset;
+  const key = `${req.method}|${host ?? ""}|${route ?? ""}|${preset ?? ""}`;
+  const existing = cache.baseLabelsCache.get(key);
+  if (existing) return existing;
+  const fresh = requestBaseLabels(req, options);
+  cache.baseLabelsCache.set(key, fresh);
+  return fresh;
 }
 
 function attachMetricCache(metrics: MetricsRegistry | undefined, cache: HttpMetricCache): void {

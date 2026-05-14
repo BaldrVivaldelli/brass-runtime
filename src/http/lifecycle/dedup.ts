@@ -5,7 +5,7 @@ import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
 import { getHttpRequestPolicy } from "../requestPolicy";
-import { computeDedupKey, SAFE_METHODS } from "./dedupKey";
+import { computeDedupKey, computeDedupKeyFast, makeDedupKeyContext, type DedupKeyContext, SAFE_METHODS } from "./dedupKey";
 
 /**
  * Configuration for the deduplication middleware.
@@ -84,6 +84,9 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
   const inFlight = new Map<string, DedupEntry>();
   const customKeyFn = config?.dedupKey;
   const onEvent = config?.onEvent;
+  // Hoist dedup key context so per-request key computation reuses the
+  // pre-computed origin and validation. Used only when no custom key fn.
+  const dedupKeyCtx: DedupKeyContext = makeDedupKeyContext("");
 
   return (next: HttpClientFn): HttpClientFn => {
     return (req: HttpRequest): Async<unknown, HttpError, HttpWireResponse> => {
@@ -113,7 +116,7 @@ export function withDedup(config?: DedupConfig): HttpMiddleware {
         }
       } else {
         // Use default key computation with empty baseUrl (URL resolution happens upstream)
-        key = computeDedupKey(req, "");
+        key = computeDedupKeyFast(req, dedupKeyCtx);
       }
 
       // Return a lazy Async effect

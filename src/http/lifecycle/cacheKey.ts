@@ -40,6 +40,84 @@ export const SEPARATOR = "\u0000";
 export const DEFAULT_CACHE_RELEVANT_HEADERS = ["accept", "authorization", "content-type"];
 
 /**
+ * Pre-computed cache key context. Hoisting `relevantSet`, `baseUrl`, and
+ * `cachedOrigin` once at middleware construction time avoids per-request
+ * allocations in `computeCacheKey`.
+ */
+export type CacheKeyContext = {
+  readonly baseUrl: string;
+  readonly relevantSet: Set<string>;
+  readonly cachedOrigin: string | undefined;
+};
+
+/**
+ * Pre-compute the cache key context once, to be reused across all requests
+ * routed through the same cache middleware.
+ */
+export function makeCacheKeyContext(baseUrl: string, extraHeaders: string[] = []): CacheKeyContext {
+  const relevantSet = new Set<string>(DEFAULT_CACHE_RELEVANT_HEADERS);
+  for (let i = 0; i < extraHeaders.length; i++) {
+    relevantSet.add(extraHeaders[i].toLowerCase());
+  }
+  return {
+    baseUrl,
+    relevantSet,
+    cachedOrigin: baseUrl ? absoluteOrigin(baseUrl) : undefined,
+  };
+}
+
+/**
+ * Fast-path cache key computation using a pre-computed context.
+ * Avoids per-request Set/Array allocations and URL construction when possible.
+ */
+export function computeCacheKeyFast(req: HttpRequest, ctx: CacheKeyContext): string {
+  // Skip toUpperCase if already uppercase (most HTTP libraries normalize)
+  const m: string = req.method;
+  const method = (m === "GET" || m === "POST" || m === "PUT" || m === "DELETE" || m === "PATCH" || m === "HEAD" || m === "OPTIONS")
+    ? m
+    : (m as string).toUpperCase();
+
+  // Resolve URL — fast path for absolute paths with cached origin
+  let resolvedUrl: string;
+  const url = req.url;
+  if (ctx.cachedOrigin && url.length > 0 && url.charCodeAt(0) === 47 && url.charCodeAt(1) !== 47) {
+    resolvedUrl = ctx.cachedOrigin + url;
+  } else {
+    resolvedUrl = new URL(url, ctx.baseUrl || undefined).toString();
+  }
+
+  // Header filtering — skip entirely if no headers
+  const headers = req.headers;
+  let sortedHeaders = "";
+  if (headers) {
+    const keys = Object.keys(headers);
+    if (keys.length > 0) {
+      // Collect matching headers without spread/filter chain
+      const matched: string[] = [];
+      for (let i = 0; i < keys.length; i++) {
+        const k = keys[i];
+        const lk = k.toLowerCase();
+        if (ctx.relevantSet.has(lk)) {
+          matched.push(`${lk}:${headers[k]}`);
+        }
+      }
+      if (matched.length > 0) {
+        if (matched.length === 1) {
+          sortedHeaders = matched[0];
+        } else {
+          matched.sort();
+          sortedHeaders = matched.join(",");
+        }
+      }
+    }
+  }
+
+  const body = httpBodyKeyPart(req.body);
+
+  return `${method}${SEPARATOR}${resolvedUrl}${SEPARATOR}${sortedHeaders}${SEPARATOR}${body}`;
+}
+
+/**
  * Computes a deterministic Cache_Key string from an HTTP request.
  *
  * The key is composed of: method (uppercase), resolved URL, sorted filtered headers,
@@ -96,7 +174,7 @@ export function resolveKeyUrl(url: string, baseUrl: string): string {
   return new URL(url, baseUrl || undefined).toString();
 }
 
-function absoluteOrigin(url: string): string | undefined {
+export function absoluteOrigin(url: string): string | undefined {
   const schemeIdx = url.indexOf("://");
   if (schemeIdx <= 0) return undefined;
   const authorityStart = schemeIdx + 3;

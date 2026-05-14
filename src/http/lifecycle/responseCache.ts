@@ -4,7 +4,7 @@ import type { Exit } from "../../core/types/effect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpMiddleware, HttpRequest, HttpWireResponse } from "../client";
 import { registerHttpEffect } from "../effectRunner";
-import { computeCacheKey } from "./cacheKey";
+import { computeCacheKey, computeCacheKeyFast, makeCacheKeyContext, type CacheKeyContext } from "./cacheKey";
 import { SAFE_METHODS } from "./dedupKey";
 import { LRUCache } from "./lruCache";
 import { now } from "./timing";
@@ -119,6 +119,11 @@ export function withCache(config?: CacheConfig): {
   const onEvent = config?.onEvent;
   const onLifecycleEvent = config?.onLifecycleEvent;
 
+  // Hoist cache key context so per-request key computation reuses the
+  // pre-computed Set, baseUrl origin, and validation. This is the main
+  // hot-path optimization for the cache middleware.
+  const cacheKeyCtx: CacheKeyContext = makeCacheKeyContext(baseUrl, cacheRelevantHeaders);
+
   const cache = new LRUCache<HttpWireResponse>({
     maxEntries,
     onEvict: (count) => onLifecycleEvent?.({ type: "cache-eviction", count }),
@@ -144,8 +149,8 @@ export function withCache(config?: CacheConfig): {
         return next(req);
       }
 
-      // Compute cache key
-      const key = computeCacheKey(req, baseUrl, cacheRelevantHeaders);
+      // Compute cache key — fast path uses hoisted context
+      const key = computeCacheKeyFast(req, cacheKeyCtx);
 
       return {
         _tag: "Async",
@@ -249,8 +254,8 @@ export function withCache(config?: CacheConfig): {
         return next(req);
       }
 
-      // Compute cache key
-      const key = computeCacheKey(req, baseUrl, cacheRelevantHeaders);
+      // Compute cache key — fast path uses hoisted context
+      const key = computeCacheKeyFast(req, cacheKeyCtx);
 
       return {
         _tag: "Async",
