@@ -784,10 +784,11 @@ const runPoolTransport = (
     _tag: "Async",
     register: (env: unknown, cb: (exit: Exit<HttpError, HttpWireResponse>) => void) => {
         const previousSignal = (req.init as { signal?: AbortSignal } | undefined)?.signal;
-        // Skip AbortController allocation when no external signal needs linking.
-        // Timeout/cancel still work via effect cancellation (cancelInner).
-        const controller = previousSignal ? new AbortController() : undefined;
-        const signal = controller?.signal ?? noopSignal;
+        // Keep a real controller on the pool/timeout path. Promise transports
+        // such as Axios rely on the signal being aborted for timeout/cancel to
+        // stop the host request, not only to ignore its late settlement.
+        const controller = new AbortController();
+        const signal = controller.signal;
         const label = fetchLabel(req, url);
         const startedAt = performance.now();
 
@@ -936,43 +937,7 @@ export function makeHttp(cfg: MakeHttpConfig = {}): HttpClient {
             return runDirectTransport(req, url, transport, metrics);
         }
 
-        return fromPromiseAbortable<HttpError, HttpWireResponse>(
-            async (signal, env) => {
-                let lease: HttpLease | undefined;
-                const linkedSignal = linkAbortSignals(signal, (req.init as { signal?: AbortSignal } | undefined)?.signal);
-                try {
-                    if (linkedSignal.signal.aborted) throw abortErrorForSignal(linkedSignal.signal);
-                    if (adaptiveLimiter) {
-                        const key = resolveHttpPoolKey(adaptiveLimiter.keyResolver, req, url);
-                        lease = await adaptiveLimiter.acquire(key, linkedSignal.signal, { priority: requestPriority(req) });
-                    } else if (pool) {
-                        const key = resolveHttpPoolKey(pool.keyResolver, req, url);
-                        lease = await pool.acquire(key, linkedSignal.signal);
-                    }
-
-                    const response = await runTransportEffect(
-                        transport({ request: req, url, signal: linkedSignal.signal }),
-                        env,
-                        linkedSignal.signal,
-                    );
-                    lease = releaseSuccess(lease, adaptiveLimiter, response);
-                    return response;
-                } finally {
-                    linkedSignal.cleanup();
-                    if (lease) {
-                        releaseFailure(lease, adaptiveLimiter);
-                    }
-                }
-            },
-            normalizeHttpError,
-            {
-                label: fetchLabel(req, url),
-                timeoutMs,
-                timeoutReason: timeoutMs ? () => timeoutReason(req, url, timeoutMs) : undefined,
-                onStart: metrics.onStart,
-                onFinish: metrics.onFinish,
-            }
-        );
+        return runPoolTransport(req, url, transport, metrics, pool, adaptiveLimiter, undefined, timeoutMs);
     };
 
     const metadata: HttpClientMetadata = {};
