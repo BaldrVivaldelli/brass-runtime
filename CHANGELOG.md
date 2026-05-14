@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.18.2 - Release Metadata Alignment
+
+### Fixed
+
+- Aligned `package.json` and `package-lock.json` with the npm release line after
+  the `1.18.0`/`1.18.1` publishes were cut from commits whose checked-in
+  package metadata still referenced older versions.
+- Kept the HTTP P99 consolidation and runtime performance changes from the
+  `1.17.0` entry as the functional release contents; this patch is for
+  traceable version metadata and tag hygiene.
+
 ## 1.17.0 - HTTP P99 Consolidation & Runtime Performance
 
 ### Performance
