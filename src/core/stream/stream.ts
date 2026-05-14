@@ -670,11 +670,29 @@ function drainStreamSyncFull<R, E, A>(stream: ZStream<R, E, A>): A[] | null {
 }
 
 
+// Cached AbortError for reuse — avoids allocating a new DOMException per stream abort.
+const ABORTED_ERROR: Error = (() => {
+    if (typeof DOMException === "function") {
+        try {
+            return new DOMException("aborted", "AbortError");
+        } catch {
+            // Fall through
+        }
+    }
+    const e = new Error("aborted");
+    e.name = "AbortError";
+    return e;
+})();
+
 function readerStream<E>(
     reader: ReadableStreamDefaultReader<Uint8Array>,
     normalizeError: Normalize<E>,
     signal?: AbortSignal
 ): ZStream<unknown, E, Uint8Array> {
+    // Hoist signal check — most streams don't have a signal (or have noopSignal).
+    const noopSignal = (globalThis as any).__brassNoopSignal;
+    const needsSignalListener = signal !== undefined && signal !== noopSignal;
+
     const pull: ZIO<
         unknown,
         Option<E>,
@@ -682,55 +700,49 @@ function readerStream<E>(
     > =
         async((_, cb) => {
             let done = false;
-            const cleanup = () => signal?.removeEventListener("abort", abort);
+            let abortFn: (() => void) | undefined;
+
             const finish = (exit: Exit<Option<E>, [Uint8Array, ZStream<unknown, E, Uint8Array>]>) => {
                 if (done) return;
                 done = true;
-                cleanup();
+                if (needsSignalListener && abortFn) signal!.removeEventListener("abort", abortFn);
                 cb(exit);
             };
-            const abort = () => {
-                try {
-                    reader.cancel();
-                } catch {
-                    // ignore
-                }
-                const error = typeof DOMException === "function"
-                    ? new DOMException("aborted", "AbortError")
-                    : new Error("aborted");
-                finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(error)) } });
-            };
 
-            if (signal?.aborted) {
-                abort();
-                return;
+            if (needsSignalListener) {
+                if (signal!.aborted) {
+                    try { reader.cancel(); } catch { /* ignore */ }
+                    finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(ABORTED_ERROR)) } });
+                    return;
+                }
+
+                abortFn = () => {
+                    try { reader.cancel(); } catch { /* ignore */ }
+                    finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(ABORTED_ERROR)) } });
+                };
+                signal!.addEventListener("abort", abortFn, { once: true });
             }
 
-            signal?.addEventListener("abort", abort, { once: true });
-
             reader.read()
-                .then(({ done, value }) => {
-                    if (done) {
-                        finish({ _tag: "Failure", cause: { _tag: "Fail", error: none } }); // fin normal
+                .then(({ done: readDone, value }) => {
+                    if (readDone) {
+                        finish({ _tag: "Failure", cause: { _tag: "Fail", error: none } });
                         return;
                     }
                     finish({
                         _tag: "Success",
                         value: [value as Uint8Array, fromPull(pull)]
                     });
-                })
-                .catch((e) => {
+                }, (e) => {
                     // Error real => Some(e)
                     finish({ _tag: "Failure", cause: { _tag: "Fail", error: some(normalizeError(e)) } });
                 });
 
             return () => {
-                cleanup();
-                try {
-                    reader.cancel();
-                } catch {
-                    // ignore
-                }
+                if (done) return;
+                done = true;
+                if (needsSignalListener && abortFn) signal!.removeEventListener("abort", abortFn);
+                try { reader.cancel(); } catch { /* ignore */ }
             };
         }) as any;
 

@@ -58,16 +58,23 @@ export function decodeJsonBody<A = unknown>(
 
   if (!validator) return { success: true, data: parsed as A };
 
+  // Fast path: branch once instead of using IIFE
+  let validation: SchemaResult<A>;
   let legacyMessage: string | undefined;
-  const validation: SchemaResult<A> = isSchema(validator) ? validator.safeParse(parsed) as SchemaResult<A> : (() => {
+  if (isSchema(validator)) {
+    validation = validator.safeParse(parsed) as SchemaResult<A>;
+  } else {
     const result = validator(parsed);
-    if (result.success) return { success: true, data: result.data };
+    if (result.success) {
+      return { success: true, data: result.data };
+    }
     legacyMessage = result.error;
-    return {
+    validation = {
       success: false,
       issues: result.issues ?? [makeSchemaIssue([], "valid JSON shape", parsed, result.error)],
     };
-  })();
+  }
+
   if (validation.success) return { success: true, data: validation.data };
 
   return {
@@ -123,6 +130,14 @@ export function decodeJsonBodyEffect<A = unknown>(
   validator?: JsonSchemaLike<A>,
   options?: { readonly schemaName?: string },
 ): Async<unknown, ValidationError, A> {
+  // Fast path: no validator — parse JSON directly without intermediate result object
+  if (!validator) {
+    try {
+      return asyncSucceed(JSON.parse(bodyText) as A);
+    } catch (error) {
+      return asyncFail(makeJsonParseValidationError(bodyText, error, options ?? {}));
+    }
+  }
   const result = decodeJsonBody(bodyText, validator, options);
   return result.success ? asyncSucceed(result.data) : asyncFail(result.error);
 }

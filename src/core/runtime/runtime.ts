@@ -322,13 +322,20 @@ const NATIVE_FAST_PATH_STEP_BUDGET = 32768;
 
 class NativeTopLevelRunner<R, E, A> {
     private current: Async<R, E, any>;
-    private readonly stack: NativeContinuation<R, E>[] = [];
-    private readonly joiners: Array<(exit: Exit<E, A>) => void> = [];
-    private readonly finalizers: Array<(exit: Exit<E, A>) => void | Async<any, any, any>> = [];
+    // Lazy-allocated — most requests don't need these
+    private stack: NativeContinuation<R, E>[] | undefined;
+    private joiners: Array<(exit: Exit<E, A>) => void> | undefined;
+    private finalizers: Array<(exit: Exit<E, A>) => void | Async<any, any, any>> | undefined;
     private result: Exit<E, A> | undefined;
     private yielded = false;
+    private readonly firstJoiner: (exit: Exit<E, A>) => void;
 
-    private readonly frame: any;
+    // Frame is now the runner itself — avoids allocating a separate frame object
+    // with 4 closures per request. We implement the Fiber-like interface inline.
+    readonly id = 0;
+    readonly name = "native-fast-path";
+    readonly fiberContext: { trace: null; fiberRefs?: Map<number, unknown> } = { trace: null };
+    get lane(): any { return this.runtime.lane; }
 
     constructor(
         private readonly runtime: Runtime<R>,
@@ -336,23 +343,30 @@ class NativeTopLevelRunner<R, E, A> {
         cb: (exit: Exit<E, A>) => void,
     ) {
         this.current = effect;
-        this.joiners.push(cb);
-        this.frame = {
-            id: 0,
-            runtime,
-            name: "native-fast-path",
-            fiberContext: { trace: null },
-            lane: runtime.lane,
-            status: () => this.result ? "Done" : "Running",
-            join: (joiner: (exit: Exit<E, A>) => void) => {
-                if (this.result) joiner(this.result);
-                else this.joiners.push(joiner);
-            },
-            interrupt: () => undefined,
-            addFinalizer: (finalizer: (exit: Exit<E, A>) => void | Async<any, any, any>) => {
-                this.finalizers.push(finalizer);
-            },
-        };
+        this.firstJoiner = cb;
+    }
+
+    // Fiber-like interface methods (used by frame consumers)
+    status(): "Done" | "Running" {
+        return this.result ? "Done" : "Running";
+    }
+
+    join(joiner: (exit: Exit<E, A>) => void): void {
+        if (this.result) {
+            joiner(this.result);
+            return;
+        }
+        if (!this.joiners) this.joiners = [];
+        this.joiners.push(joiner);
+    }
+
+    interrupt(): void {
+        // no-op for the fast-path runner
+    }
+
+    addFinalizer(finalizer: (exit: Exit<E, A>) => void | Async<any, any, any>): void {
+        if (!this.finalizers) this.finalizers = [];
+        this.finalizers.push(finalizer);
     }
 
     start(): void {
@@ -385,11 +399,13 @@ class NativeTopLevelRunner<R, E, A> {
                         break;
 
                     case "FlatMap":
+                        if (!this.stack) this.stack = [];
                         this.stack.push({ _tag: "SuccessCont", k: current.andThen });
                         this.current = current.first;
                         break;
 
                     case "Fold":
+                        if (!this.stack) this.stack = [];
                         this.stack.push({
                             _tag: "FoldCont",
                             onFailure: current.onFailure,
@@ -407,11 +423,13 @@ class NativeTopLevelRunner<R, E, A> {
                         break;
 
                     case "Interruptibility":
+                        if (!this.stack) this.stack = [];
                         this.stack.push({ _tag: "InterruptibilityCont" });
                         this.current = current.effect;
                         break;
 
                     case "InterruptibilityMask":
+                        if (!this.stack) this.stack = [];
                         this.stack.push({ _tag: "InterruptibilityCont" });
                         try {
                             this.current = current.body((effect: Async<any, any, any>) => ({
@@ -425,6 +443,7 @@ class NativeTopLevelRunner<R, E, A> {
                         break;
 
                     case "InterruptibilityRestore":
+                        if (!this.stack) this.stack = [];
                         this.stack.push({ _tag: "InterruptibilityCont" });
                         this.current = current.effect;
                         break;
@@ -434,6 +453,7 @@ class NativeTopLevelRunner<R, E, A> {
                         const hadValue = refs.has(current.refId);
                         const previousValue = refs.get(current.refId);
                         refs.set(current.refId, current.value);
+                        if (!this.stack) this.stack = [];
                         this.stack.push({
                             _tag: "FiberRefCont",
                             refId: current.refId,
@@ -501,7 +521,7 @@ class NativeTopLevelRunner<R, E, A> {
     private onSuccess(value: any): void {
         let currentValue = value;
         while (true) {
-            const frame = this.stack.pop();
+            const frame = this.stack ? this.stack.pop() : undefined;
             if (!frame) {
                 this.notify(Exit.succeed(currentValue));
                 return;
@@ -535,7 +555,7 @@ class NativeTopLevelRunner<R, E, A> {
     private onCause(cause: Cause<E>): void {
         let currentCause = cause;
 
-        while (this.stack.length > 0) {
+        while (this.stack && this.stack.length > 0) {
             const frame = this.stack.pop()!;
             if (frame._tag === "InterruptibilityCont") continue;
 
@@ -564,14 +584,20 @@ class NativeTopLevelRunner<R, E, A> {
     private notify(exit: Exit<E, A>): void {
         if (this.result) return;
         this.result = exit;
-        this.runFinalizers(exit);
-        for (const joiner of this.joiners) joiner(exit);
-        this.joiners.length = 0;
+        if (this.finalizers) this.runFinalizers(exit);
+        // Call the first joiner directly (always present) to avoid array iteration
+        this.firstJoiner(exit);
+        // Only iterate joiners array if additional joiners were registered
+        if (this.joiners) {
+            for (const joiner of this.joiners) joiner(exit);
+            this.joiners.length = 0;
+        }
     }
 
     private runFinalizers(exit: Exit<E, A>): void {
-        while (this.finalizers.length > 0) {
-            const finalizer = this.finalizers.pop()!;
+        const finalizers = this.finalizers!;
+        while (finalizers.length > 0) {
+            const finalizer = finalizers.pop()!;
             try {
                 const result = finalizer(exit);
                 if (result && typeof result === "object" && "_tag" in result) {
@@ -584,8 +610,8 @@ class NativeTopLevelRunner<R, E, A> {
     }
 
     private fiberRefs(): Map<number, unknown> {
-        this.frame.fiberContext.fiberRefs ??= new Map<number, unknown>();
-        return this.frame.fiberContext.fiberRefs;
+        this.fiberContext.fiberRefs ??= new Map<number, unknown>();
+        return this.fiberContext.fiberRefs;
     }
 
     private restoreFiberRef(frame: { refId: number; hadValue: boolean; previousValue: unknown }): void {
@@ -595,7 +621,7 @@ class NativeTopLevelRunner<R, E, A> {
     }
 
     private withFrame<T>(body: () => T): T {
-        return withCurrentFiber(this.frame, body);
+        return withCurrentFiber(this as any, body);
     }
 }
 

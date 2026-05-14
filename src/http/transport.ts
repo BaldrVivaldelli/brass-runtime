@@ -255,6 +255,10 @@ const nowMs = (): number =>
     ? performance.now()
     : Date.now();
 
+/** Check if a value is a thenable (Promise-like). Used for sync vs async detection. */
+const isThenable = <T>(value: T | Promise<T>): value is Promise<T> =>
+  value !== null && typeof value === "object" && typeof (value as any).then === "function";
+
 const hasMethod = <Name extends string>(
   value: unknown,
   name: Name,
@@ -336,54 +340,94 @@ export function makePromiseHttpTransport<Response>(
   const transport: HttpTransport = (context) =>
     async((_env, cb) => {
       let done = false;
+      const signal = context.signal;
+      // Skip listener registration when the signal is the shared noopSignal
+      // (which is never aborted). This eliminates 2 add/removeEventListener
+      // calls per request on the hot path without external signal.
+      const needsAbortListener = signal !== (globalThis as any).__brassNoopSignal;
+
+      let abort: (() => void) | undefined;
 
       const finish = (exit: Parameters<typeof cb>[0]) => {
         if (done) return;
         done = true;
-        context.signal.removeEventListener("abort", abort);
+        if (needsAbortListener && abort) signal.removeEventListener("abort", abort);
         cb(exit);
       };
 
       const fail = (error: HttpError) =>
         finish({ _tag: "Failure", cause: Cause.fail(error) });
 
-      const abort = () => fail(abortErrorForSignal(context.signal));
-
-      if (context.signal.aborted) {
-        abort();
+      if (signal.aborted) {
+        fail(abortErrorForSignal(signal));
         return;
       }
 
-      context.signal.addEventListener("abort", abort, { once: true });
+      if (needsAbortListener) {
+        abort = () => fail(abortErrorForSignal(signal));
+        signal.addEventListener("abort", abort, { once: true });
+      }
 
-      const run = async () => {
-        const startedAt = nowMs();
-        try {
-          const raw = await config.request(context);
+      const startedAt = nowMs();
+      // Inline async work without the wrapper IIFE — this saves an AsyncFunction
+      // allocation per request. We wrap config.request in a try/catch to handle
+      // sync throws, then use Promise.resolve for normal async resolution.
+      let requestPromise: Promise<Response>;
+      try {
+        const result = config.request(context);
+        requestPromise = isThenable(result) ? result : Promise.resolve(result);
+      } catch (error) {
+        if (signal.aborted) { fail(abortErrorForSignal(signal)); return; }
+        fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal }));
+        return;
+      }
+
+      requestPromise.then(
+        (raw) => {
+          if (done) return;
           const durationMs = Math.round(nowMs() - startedAt);
-          const mapped = await config.response(raw, context, { startedAt, durationMs });
-          finish({
-            _tag: "Success",
-            value: {
-              ...mapped,
-              ms: mapped.ms ?? durationMs,
-            },
-          });
-        } catch (error) {
-          if (context.signal.aborted) {
-            fail(abortErrorForSignal(context.signal));
-            return;
+          try {
+            const r = config.response(raw, context, { startedAt, durationMs });
+            // Hot path: response is sync (not a thenable)
+            if (!isThenable(r)) {
+              const mapped = r;
+              finish({
+                _tag: "Success",
+                value: (mapped.ms !== undefined ? mapped : { ...mapped, ms: durationMs }) as HttpWireResponse,
+              });
+              return;
+            }
+            // Async response mapping
+            r.then(
+              (m) => {
+                if (done) return;
+                finish({
+                  _tag: "Success",
+                  value: (m.ms !== undefined ? m : { ...m, ms: durationMs }) as HttpWireResponse,
+                });
+              },
+              (error) => {
+                if (done) return;
+                if (signal.aborted) { fail(abortErrorForSignal(signal)); return; }
+                fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal }));
+              },
+            );
+          } catch (error) {
+            if (signal.aborted) { fail(abortErrorForSignal(signal)); return; }
+            fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal }));
           }
-          fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal: context.signal }));
-        }
-      };
-
-      void run();
+        },
+        (error) => {
+          if (done) return;
+          if (signal.aborted) { fail(abortErrorForSignal(signal)); return; }
+          fail(config.error?.(error, context) ?? normalizeHttpError(error, { signal }));
+        },
+      );
 
       return () => {
         if (done) return;
         done = true;
-        context.signal.removeEventListener("abort", abort);
+        if (needsAbortListener && abort) signal.removeEventListener("abort", abort);
       };
     });
 

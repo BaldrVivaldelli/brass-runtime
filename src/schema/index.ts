@@ -379,9 +379,17 @@ function objectSchema<Shape extends SchemaShape>(
 ): Schema<InferObject<Shape>> {
   const unknownKeys = options.unknownKeys ?? "strip";
   const shapeEntries = Object.entries(shape) as Array<[string, AnySchema]>;
+  // Hoisted parallel arrays for better V8 inlining (avoid tuple destructuring per field).
+  const fieldKeys: string[] = new Array(shapeEntries.length);
+  const fieldSchemas: AnySchema[] = new Array(shapeEntries.length);
+  for (let i = 0; i < shapeEntries.length; i++) {
+    fieldKeys[i] = shapeEntries[i][0];
+    fieldSchemas[i] = shapeEntries[i][1];
+  }
+  const fieldCount = fieldKeys.length;
   const knownKeys =
     unknownKeys === "strict"
-      ? new Set(shapeEntries.map(([key]) => key))
+      ? new Set(fieldKeys)
       : undefined;
 
   return makeSchema("object", false, (input, path) => {
@@ -391,14 +399,19 @@ function objectSchema<Shape extends SchemaShape>(
 
     const source = input as Record<string, unknown>;
     const out: Record<string, unknown> = unknownKeys === "passthrough" ? { ...source } : {};
+    // Optimization: when path is empty (top-level), allocate a fresh empty
+    // array instead of copying. This is the common case for safeParse.
+    // Note: we can't reuse the input path directly because EMPTY_PATH is frozen.
     const childPath: SchemaPathPart[] = path.length === 0 ? [] : [...path];
     let issues: SchemaIssue[] | undefined;
 
-    for (const [key, fieldSchema] of shapeEntries) {
+    for (let i = 0; i < fieldCount; i++) {
+      const key = fieldKeys[i];
+      const fieldSchema = fieldSchemas[i];
       childPath.push(key);
       if (!(key in source)) {
         if (!fieldSchema.isOptional) {
-          issues ??= [];
+          if (!issues) issues = [];
           issues.push(makeSchemaIssue(childPath, fieldSchema.name ?? fieldSchema.kind, undefined, "Required field is missing"));
         }
         childPath.pop();
@@ -411,8 +424,11 @@ function objectSchema<Shape extends SchemaShape>(
       if (result.success) {
         out[key] = result.data;
       } else {
-        issues ??= [];
-        issues.push(...result.issues);
+        if (!issues) issues = [];
+        const resultIssues = result.issues;
+        for (let j = 0; j < resultIssues.length; j++) {
+          issues.push(resultIssues[j]);
+        }
       }
     }
 
@@ -420,7 +436,7 @@ function objectSchema<Shape extends SchemaShape>(
       for (const key of Object.keys(source)) {
         if (!knownKeys.has(key)) {
           childPath.push(key);
-          issues ??= [];
+          if (!issues) issues = [];
           issues.push(makeSchemaIssue(childPath, "known key", source[key], "Unknown key is not allowed"));
           childPath.pop();
         }
