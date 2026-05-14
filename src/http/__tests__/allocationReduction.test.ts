@@ -19,8 +19,8 @@ afterEach(() => {
  * Validates: Requirements 2.1, 2.2, 2.3, 2.4
  */
 describe("Allocation reduction in runPoolTransport", () => {
-  describe("Requirement 2.1: No AbortController when no external signal", () => {
-    it("transport receives a shared no-op signal (not freshly allocated) when no external signal is present", async () => {
+  describe("Requirement 2.1: Abortable signal without external signal", () => {
+    it("transport receives a non-aborted signal when no external signal is present", async () => {
       const observedSignals: AbortSignal[] = [];
 
       const transport: HttpTransport = ({ signal }) => {
@@ -44,12 +44,10 @@ describe("Allocation reduction in runPoolTransport", () => {
       await run(client({ method: "GET", url: "/first" }));
       await run(client({ method: "GET", url: "/second" }));
 
-      // Both requests should receive the same shared signal instance
-      // (the runtime injects its own signal per fiber, but both should be
-      // non-aborted and consistent within the same execution context)
       expect(observedSignals).toHaveLength(2);
       expect(observedSignals[0].aborted).toBe(false);
       expect(observedSignals[1].aborted).toBe(false);
+      expect(observedSignals[0]).not.toBe(observedSignals[1]);
     });
 
     it("transport receives a non-aborted signal when pool is configured but no external signal", async () => {
@@ -76,18 +74,40 @@ describe("Allocation reduction in runPoolTransport", () => {
       await run(client({ method: "GET", url: "/b" }));
       await run(client({ method: "GET", url: "/c" }));
 
-      // The runtime injects its own AbortSignal per fiber execution, so each
-      // request gets a different signal. The noopSignal optimization applies at
-      // the pool transport level, but the runtime wraps it via linkAbortSignals.
-      // All signals should be non-aborted (the optimization still avoids
-      // unnecessary AbortController allocation at the pool layer).
       expect(observedSignals).toHaveLength(3);
       expect(observedSignals[0].aborted).toBe(false);
       expect(observedSignals[1].aborted).toBe(false);
       expect(observedSignals[2].aborted).toBe(false);
-      // Each fiber gets its own signal from the runtime
       expect(observedSignals[0]).not.toBe(observedSignals[1]);
       expect(observedSignals[1]).not.toBe(observedSignals[2]);
+    });
+
+    it("runs an uncontended pool transport synchronously during registration", () => {
+      let transportCalled = false;
+      let exitResult: any;
+
+      const transport: HttpTransport = () => {
+        transportCalled = true;
+        return asyncSucceed({
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          bodyText: "ok",
+          ms: 1,
+        });
+      };
+
+      const client = makeHttp({
+        baseUrl: "https://api.example.test",
+        pool: { concurrency: 10 },
+        transport,
+      });
+
+      const effect = client({ method: "GET", url: "/sync-pool" });
+      effect.register({}, (exit) => { exitResult = exit; });
+
+      expect(transportCalled).toBe(true);
+      expect(exitResult).toMatchObject({ _tag: "Success" });
     });
   });
 
@@ -121,7 +141,8 @@ describe("Allocation reduction in runPoolTransport", () => {
       // Each request should get a distinct signal (from a new AbortController)
       expect(observedSignals).toHaveLength(2);
       expect(observedSignals[0]).not.toBe(observedSignals[1]);
-      // The signals should not be the external signals themselves (they're from linked controllers)
+      // The signals should not be the external signals themselves; HTTP owns a
+      // request-scoped controller and propagates external abort into it.
       expect(observedSignals[0]).not.toBe(externalController1.signal);
       expect(observedSignals[1]).not.toBe(externalController2.signal);
       // Neither should be aborted
@@ -149,22 +170,21 @@ describe("Allocation reduction in runPoolTransport", () => {
         transport,
       });
 
-      // Request without external signal — runtime provides its own signal
+      // Request without external signal — HTTP creates a cancellable signal
       await run(client({ method: "GET", url: "/no-signal" }));
-      // Request with external signal — linkAbortSignals creates a new linked controller
+      // Request with external signal — HTTP still owns the request signal and
+      // wires the external signal into it.
       const controller = new AbortController();
       await run(client({ method: "GET", url: "/with-signal", init: { signal: controller.signal } } as any));
       // Another request without external signal
       await run(client({ method: "GET", url: "/no-signal-again" }));
 
       expect(observedSignals).toHaveLength(3);
-      // The runtime always provides a per-fiber signal, so all three are different
-      // (each fiber gets its own AbortController from the runtime)
+      // All three requests receive request-scoped signals.
       expect(observedSignals[0]).not.toBe(observedSignals[1]);
       expect(observedSignals[0]).not.toBe(observedSignals[2]);
-      // With an additional external signal, linkAbortSignals creates a linked
-      // controller (2 signals → new controller), so the second signal is distinct
-      // from both the first and third
+      // With an additional external signal, the second request is still
+      // isolated from both no-external-signal requests.
       expect(observedSignals[1]).not.toBe(observedSignals[2]);
       // All should be non-aborted
       expect(observedSignals[0].aborted).toBe(false);
@@ -175,11 +195,7 @@ describe("Allocation reduction in runPoolTransport", () => {
 
   describe("Requirement 2.3: Shared ONCE_OPTIONS (indirect verification)", () => {
     it("abort propagation works correctly with external signal (addEventListener uses shared options)", async () => {
-      let transportResolve: (() => void) | undefined;
-      const transportPromise = new Promise<void>((resolve) => { transportResolve = resolve; });
-
       const transport: HttpTransport = ({ signal }) => {
-        // Hold the request open until we abort
         return asyncSucceed({
           status: 200,
           statusText: "OK",
@@ -202,10 +218,8 @@ describe("Allocation reduction in runPoolTransport", () => {
       await run(client({ method: "GET", url: "/test", init: { signal: externalController.signal } } as any));
 
       // Verify addEventListener was called with an options object that has once: true.
-      // The linkAbortSignals implementation uses { once: true } for abort listeners.
-      // Note: the options object may or may not be frozen depending on the code path
-      // (linkAbortSignals uses inline { once: true }, ONCE_OPTIONS is used in the
-      // pool transport path). What matters is that once: true is set.
+      // The exact options object is an implementation detail; what matters is
+      // that the listener is one-shot.
       if (addEventListenerSpy.mock.calls.length > 0) {
         const abortCalls = addEventListenerSpy.mock.calls.filter(
           (call) => call[0] === "abort"
@@ -218,12 +232,10 @@ describe("Allocation reduction in runPoolTransport", () => {
     });
   });
 
-  describe("Requirement 2.4: Skip addEventListener when no external signal", () => {
+  describe("Requirement 2.4: No external signal linking when no external signal", () => {
     it("no abort listener is registered on the external signal when no external signal is present", async () => {
-      // When no external signal is provided, the runtime still injects its own
-      // signal per fiber. However, the optimization is that no ADDITIONAL
-      // abort listener is registered to link an external signal — the runtime
-      // signal is passed through directly via linkAbortSignals (single signal path).
+      // When no external signal is provided, there is no additional external
+      // abort listener to register. The request still receives a real signal.
       let observedSignal: AbortSignal | undefined;
       const transport: HttpTransport = ({ signal }) => {
         observedSignal = signal;
@@ -244,15 +256,13 @@ describe("Allocation reduction in runPoolTransport", () => {
 
       await run(client({ method: "GET", url: "/no-signal" }));
 
-      // The transport receives a signal (from the runtime), and it should not be aborted
+      // The transport receives a request signal, and it should not be aborted.
       expect(observedSignal).toBeDefined();
       expect(observedSignal!.aborted).toBe(false);
 
-      // The key optimization: when there's no external signal, linkAbortSignals
-      // receives only the runtime signal and returns it directly without creating
-      // a new AbortController or registering additional abort listeners for linking.
-      // The runtime's own signal management is separate from the HTTP layer's
-      // allocation optimization.
+      // The key optimization: when there's no external signal, the HTTP layer
+      // does not register any external abort listener. The request still gets a
+      // real signal so cancellation and timeout can abort host transports.
     });
   });
 
@@ -443,6 +453,43 @@ describe("Allocation reduction in runPoolTransport", () => {
       // Should produce an interrupt exit
       expect(exitResult).toBeDefined();
       expect(exitResult._tag).toBe("Failure");
+    });
+
+    it("cancellation aborts the signal passed to the transport on the pool path", async () => {
+      let observedSignal: AbortSignal | undefined;
+      let abortObserved = false;
+
+      const transport: HttpTransport = ({ signal }) => {
+        observedSignal = signal;
+        return {
+          _tag: "Async",
+          register: (_env: unknown, cb: (exit: any) => void) => {
+            const onAbort = () => {
+              abortObserved = true;
+              cb({ _tag: "Failure", cause: { _tag: "Fail", error: { _tag: "Abort" } } });
+            };
+            signal.addEventListener("abort", onAbort, { once: true });
+            return () => signal.removeEventListener("abort", onAbort);
+          },
+        } as any;
+      };
+
+      const client = makeHttp({
+        baseUrl: "https://api.example.test",
+        pool: { concurrency: 10 },
+        transport,
+      });
+
+      const effect = client({ method: "GET", url: "/cancel-aborts-signal" });
+      const cancel = effect.register({}, () => {});
+
+      expect(observedSignal).toBeDefined();
+      expect(observedSignal!.aborted).toBe(false);
+
+      cancel?.();
+
+      expect(observedSignal!.aborted).toBe(true);
+      expect(abortObserved).toBe(true);
     });
   });
 });

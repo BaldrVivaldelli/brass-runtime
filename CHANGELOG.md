@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.18.3 - HTTP Pool/Timeout Fast Path
+
+### Performance
+
+- Connected the non-streaming HTTP wire client to the existing `runPoolTransport`
+  fast path whenever a request uses `pool`, `adaptiveLimiter`, or `timeoutMs`.
+  The uncontended pool path now uses synchronous `tryAcquireSync` before falling
+  back to queued async acquire, avoiding the generic `fromPromiseAbortable`
+  wrapper and extra promise/microtask boundaries on hot BFF/proxy paths.
+- Improved local HTTP overhead benchmark results for the proxy effect transport
+  path with 30k calls, 5k warmup, concurrency 32:
+  - `default-proxy-effect-timeout`: p99 `1.915ms` -> `1.559ms`,
+    throughput `70.9k/s` -> `101.5k/s`.
+  - `default-proxy-effect-pool`: p99 `1.564ms` -> `1.276ms`,
+    throughput `79.2k/s` -> `115.7k/s`.
+  - `default-proxy-effect-timeout-pool`: p99 `2.014ms` -> `1.209ms`,
+    throughput `70.2k/s` -> `103.1k/s`.
+
+### Fixed
+
+- Preserved real host-request cancellation on the pool/timeout fast path by
+  passing transports a request-scoped `AbortController` signal. Promise
+  transports such as Axios can now observe aborts on cancellation and timeout
+  while still benefiting from the pool fast path.
+- Added regression coverage ensuring uncontended pool transports run during
+  effect registration and that cancellation aborts the signal passed to the
+  transport.
+
+### Validation
+
+- `npm run test:types`
+- `npm test -- src/http/__tests__`
+- `BRASS_HTTP_OVERHEAD_CALLS=30000 BRASS_HTTP_OVERHEAD_WARMUP_CALLS=5000 BRASS_HTTP_OVERHEAD_CONCURRENCY=32 BRASS_HTTP_OVERHEAD_VARIANTS=default-proxy-effect-transport,default-proxy-effect-timeout,default-proxy-effect-pool,default-proxy-effect-timeout-pool npm run benchmark:http:overhead`
+
 ## 1.18.2 - Release Metadata Alignment
 
 ### Fixed
