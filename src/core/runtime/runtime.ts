@@ -1,6 +1,6 @@
 import { async, Async } from "../types/asyncEffect";
 import { globalScheduler, inferCallerLaneFromStack, Scheduler } from "./scheduler";
-import { Fiber, getCurrentFiber, withCurrentFiber } from "./fiber";
+import { Fiber, getCurrentFiber, setCurrentFiber, withCurrentFiber } from "./fiber";
 import { Cause, Exit } from "../types/effect";
 import type { RuntimeEvent, RuntimeEmitContext, RuntimeHooks } from "./events";
 import { makeForkPolicy } from "./forkPolicy";
@@ -93,7 +93,16 @@ export class Runtime<R> {
         this.forkPolicy = makeForkPolicy(this.env as any, this.hooks);
         this.fiberEngine = this.makeFiberEngine(this.engineMode, args.wasm);
         this.fallbackUsed = false;
+        // Pre-compute static fast-path eligibility. The remaining check
+        // (getCurrentFiber()) is dynamic and must happen per-call.
+        this.staticFastPathOk =
+            this.hooks === NoopHooks &&
+            this.scheduler === globalScheduler &&
+            !this.inferLane &&
+            this.engineMode === "ts";
     }
+
+    private readonly staticFastPathOk: boolean;
 
     private makeFiberEngine(mode: RuntimeEngineMode, wasm?: WasmFiberEngineOptions): FiberEngine<R> {
         if (mode === "ts") return new JsFiberEngine(this as any);
@@ -263,11 +272,10 @@ export class Runtime<R> {
     }
 
     private tryRunNativeTopLevel<E, A>(effect: Async<R, E, A>, cb: (exit: Exit<E, A>) => void): boolean {
-        if (this.hooks !== NoopHooks) return false;
+        // Static checks (hooks, scheduler, inferLane, engineMode) are pre-computed.
+        // The only dynamic check is getCurrentFiber() — must verify we're at top-level.
+        if (!this.staticFastPathOk) return false;
         if (getCurrentFiber() !== null) return false;
-        if (this.scheduler !== globalScheduler) return false;
-        if (this.inferLane) return false;
-        if (this.engineMode !== "ts") return false;
         new NativeTopLevelRunner(this, effect, cb).start();
         return true;
     }
@@ -374,7 +382,10 @@ class NativeTopLevelRunner<R, E, A> {
     }
 
     private runLoop(): void {
-        this.withFrame(() => {
+        // Inline withCurrentFiber to avoid the closure allocation per call.
+        // The try/finally still ensures _current is restored on throw.
+        const prevFiber = setCurrentFiber(this as any);
+        try {
             this.yielded = false;
             let budget = NATIVE_FAST_PATH_STEP_BUDGET;
 
@@ -383,10 +394,21 @@ class NativeTopLevelRunner<R, E, A> {
 
                 switch (current._tag) {
                     case "Succeed":
+                        // Fast path: no stack means we can notify directly
+                        // without the onSuccess loop.
+                        if (!this.stack || this.stack.length === 0) {
+                            this.notify(Exit.succeed(current.value));
+                            return;
+                        }
                         this.onSuccess(current.value);
                         break;
 
                     case "Fail":
+                        // Fast path: no stack means we can notify directly
+                        if (!this.stack || this.stack.length === 0) {
+                            this.notify(Exit.failCause(Cause.fail(current.error as E)));
+                            return;
+                        }
                         this.onCause(Cause.fail(current.error as E));
                         break;
 
@@ -474,7 +496,9 @@ class NativeTopLevelRunner<R, E, A> {
                 this.yielded = true;
                 queueMicrotask(() => this.runLoop());
             }
-        });
+        } finally {
+            setCurrentFiber(prevFiber);
+        }
     }
 
     private runAsync(current: { register: (env: R, cb: (exit: Exit<E, any>) => void) => void | (() => void) }): boolean {
