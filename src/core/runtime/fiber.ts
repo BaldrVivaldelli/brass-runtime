@@ -769,3 +769,14 @@ export function withCurrentFiber<T>(fiber: RuntimeFiber<any, any, any>, f: () =>
         _current = prev;
     }
 }
+
+/**
+ * Direct setter for the current fiber. Used by NativeTopLevelRunner to avoid
+ * the closure allocation of withCurrentFiber when running tight loops.
+ * Caller MUST restore the previous value via setCurrentFiber to maintain invariants.
+ */
+export function setCurrentFiber(fiber: RuntimeFiber<any, any, any> | null): RuntimeFiber<any, any, any> | null {
+    const prev = _current;
+    _current = fiber;
+    return prev;
+}
