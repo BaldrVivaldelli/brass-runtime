@@ -1,4 +1,5 @@
 import {
+  type HttpClient,
   type HttpError,
   type HttpMethod,
   type HttpMiddleware,
@@ -41,6 +42,7 @@ import { validateDefaultHttpClientConfig } from "./configValidation";
 import { makeAdaptiveLimiterConfig, type AdaptiveLimiterConfig } from "./adaptiveLimiter";
 import { buildHttpRequest as buildReq, type HttpRequestPolicyInit } from "./requestBuilder";
 import { withHttpPolicyPresets, type HttpPolicyPresets } from "./requestPolicy";
+import { makeBareMetalHttp, type BareMetalHttpConfig } from "./bareMetalClient";
 
 type InitNoMethodBody = Omit<RequestInit, "method" | "body"> & {
   timeoutMs?: number;
@@ -147,7 +149,8 @@ export type DefaultHttpClientPreset =
   | "highThroughputProxy"
   | "balanced"
   | "default"
-  | "production";
+  | "production"
+  | "bareMetal";
 
 export type DefaultHttpClientFeatures = {
   readonly dedup: boolean;
@@ -264,6 +267,7 @@ const PRESET_CONFIGS: Record<DefaultHttpClientPreset, LifecycleClientConfig> = {
   balanced: BALANCED_PRESET_CONFIG,
   default: DEFAULT_PRESET_CONFIG,
   production: DEFAULT_PRESET_CONFIG,
+  bareMetal: {},
 };
 
 function isDefaultCacheableResponse(req: HttpRequest, res: HttpWireResponse): boolean {
@@ -307,6 +311,11 @@ export function makeDefaultHttpClient(
     ...lifecycleOverrides
   } = config;
 
+  // --- Bare-metal fast path: bypass lifecycle stack entirely ---
+  if (preset === "bareMetal") {
+    return buildBareMetalBranch(lifecycleOverrides, middleware, config);
+  }
+
   const lifecycleConfig = mergeLifecycleConfig(PRESET_CONFIGS[preset], lifecycleOverrides);
   let wire = makeLifecycleClient(lifecycleConfig);
 
@@ -339,6 +348,216 @@ export function makeDefaultHttpClient(
     compressionStats: compressionResult?.stats,
     useInlineDecode,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Bare-metal preset helpers
+// ---------------------------------------------------------------------------
+
+/** Lifecycle keys that are ignored when preset is "bareMetal". */
+const LIFECYCLE_KEYS = [
+  "dedup",
+  "batch",
+  "cache",
+  "priority",
+  "retry",
+  "prewarm",
+  "adaptiveLimiter",
+  "compression",
+] as const;
+
+/**
+ * Detects lifecycle keys present in the config overrides and returns their names.
+ */
+function findIgnoredLifecycleKeys(overrides: Record<string, unknown>): string[] {
+  const found: string[] = [];
+  for (const key of LIFECYCLE_KEYS) {
+    if (key in overrides && overrides[key] !== undefined && overrides[key] !== false) {
+      found.push(key);
+    }
+  }
+  return found;
+}
+
+/**
+ * Extracts bare-metal-relevant config from the full DefaultHttpClientConfig.
+ */
+function extractBareMetalConfig(config: DefaultHttpClientConfig): BareMetalHttpConfig {
+  return {
+    baseUrl: config.baseUrl,
+    headers: config.headers,
+    timeoutMs: config.timeoutMs,
+    transport: config.transport,
+    streamTransport: config.streamTransport,
+    pool: config.pool,
+    adaptiveLimiter: undefined, // bare-metal ignores adaptiveLimiter from lifecycle overrides
+    onEvent: config.onEvent as BareMetalHttpConfig["onEvent"],
+  };
+}
+
+/**
+ * Builds the bare-metal branch of makeDefaultHttpClient.
+ *
+ * Warns about ignored lifecycle keys, creates the bare-metal wire,
+ * applies user middleware, and returns a DefaultHttpClient with DX helpers.
+ */
+function buildBareMetalBranch(
+  lifecycleOverrides: Record<string, unknown>,
+  middleware: readonly HttpMiddleware[],
+  config: DefaultHttpClientConfig,
+): DefaultHttpClient {
+  // Warn about ignored lifecycle keys
+  const ignored = findIgnoredLifecycleKeys(lifecycleOverrides);
+  if (ignored.length > 0 && config.onEvent) {
+    // Cast through unknown: LifecycleClientConfig.onEvent accepts LifecycleEvent,
+    // but for the bareMetal preset we emit a simpler warning event.
+    (config.onEvent as unknown as (event: { type: "warning"; message: string }) => void)({
+      type: "warning",
+      message: `bareMetal preset ignores: ${ignored.join(", ")}`,
+    });
+  }
+
+  // Create bare-metal wire
+  let bareWire = makeBareMetalHttp(extractBareMetalConfig(config));
+
+  // Apply user middleware
+  for (const mw of middleware) {
+    bareWire = bareWire.with(mw);
+  }
+
+  const features: DefaultHttpClientFeatures = Object.freeze({
+    dedup: false,
+    batch: false,
+    cache: false,
+    priority: false,
+    retry: false,
+    prewarm: false,
+    adaptiveLimiter: false,
+    compression: false,
+    middleware: middleware.length,
+  });
+
+  return buildBareMetalDefaultClient(bareWire, { preset: "bareMetal", features });
+}
+
+/**
+ * Builds a DefaultHttpClient from a bare-metal HttpClient.
+ *
+ * Similar to `buildDefaultClient` but operates on `HttpClient` instead of
+ * `LifecycleClient`, providing the same DX helpers (get, post, getJson, etc.)
+ * without lifecycle-specific features (cache, cancelAll).
+ */
+function buildBareMetalDefaultClient(
+  bareWire: HttpClient,
+  meta: {
+    readonly preset: DefaultHttpClientPreset;
+    readonly features: DefaultHttpClientFeatures;
+  },
+): DefaultHttpClient {
+  const withPromise = <E, A>(eff: Async<unknown, E, A>): AsyncWithPromise<unknown, E, A> =>
+    withAsyncPromise<unknown, E, A>((e, env) => runToPromise(e, env))(eff as any);
+
+  const requestRaw = (req: HttpRequest) => bareWire(req);
+  const request = (req: HttpRequest) => withPromise(requestRaw(req));
+
+  const get = (url: string, init?: InitNoMethodBody) => request(buildReq("GET", url, init as InitWithHeaders));
+  const post = (url: string, body?: string, init?: InitWithHeaders) =>
+    request(buildReq("POST", url, init, body));
+
+  const getText = (url: string, init?: InitNoMethodBody) => {
+    const req = buildReq("GET", url, init as InitWithHeaders);
+    return withPromise(
+      mapTryAsync(requestRaw(req), (w) => toResponse(w, w.bodyText)),
+    );
+  };
+
+  const getJson: DefaultGetJson = ((url: string, init?: AnyJsonInit) => {
+    const req = setHeaderIfMissing("accept", "application/json")(
+      buildReq("GET", url, init as InitWithHeaders),
+    );
+    return withPromise(
+      asyncFlatMap(requestRaw(req), (w) => decodeResponse(w, init?.schema, init?.schemaName)),
+    );
+  }) as DefaultGetJson;
+
+  const postJson: DefaultPostJson = ((url: string, bodyObj: unknown, init?: AnyPostJsonInit) => {
+    return withPromise(
+      asyncFlatMap(
+        encodeJsonBodyEffect(bodyObj, init?.bodySchema, { schemaName: init?.bodySchemaName }),
+        (bodyText) => {
+          const req = setHeaderIfMissing("content-type", "application/json")(
+            setHeaderIfMissing("accept", "application/json")(
+              buildReq("POST", url, init, bodyText),
+            ),
+          );
+          return asyncFlatMap(requestRaw(req), (w) => decodeResponse(w, init?.schema, init?.schemaName));
+        },
+      ),
+    );
+  }) as DefaultPostJson;
+
+  // Create a LifecycleClient-compatible wrapper for the `wire` property
+  const wireAsLifecycle: LifecycleClient = Object.assign(
+    (req: HttpRequest) => bareWire(req),
+    {
+      with: (mw: HttpMiddleware) => {
+        const newBare = bareWire.with(mw);
+        return buildBareMetalDefaultClient(newBare, {
+          ...meta,
+          features: { ...meta.features, middleware: meta.features.middleware + 1 },
+        }).wire;
+      },
+      stats: () => ({
+        cacheHits: 0,
+        cacheMisses: 0,
+        cacheEvictions: 0,
+        dedupHits: 0,
+        dedupActive: 0,
+        queueDepth: 0,
+        requestsStarted: 0,
+        requestsCompleted: 0,
+        requestsFailed: 0,
+        retries: 0,
+        batchDispatches: 0,
+        batchedRequests: 0,
+        wire: bareWire.stats(),
+      }) as LifecycleStats,
+      cancelAll: () => asyncSucceed(undefined) as Async<unknown, never, void>,
+      shutdown: () => {
+        bareWire.shutdown?.();
+        return asyncSucceed(undefined) as Async<unknown, never, void>;
+      },
+      cache: {
+        invalidate: () => {},
+        clear: () => {},
+      },
+      ...(bareWire.adaptiveLimiter ? { adaptiveLimiter: bareWire.adaptiveLimiter } : {}),
+    },
+  ) as LifecycleClient;
+
+  return {
+    request,
+    get,
+    post,
+    getText,
+    getJson,
+    postJson,
+    with: (mw) =>
+      buildBareMetalDefaultClient(bareWire.with(mw), {
+        ...meta,
+        features: {
+          ...meta.features,
+          middleware: meta.features.middleware + 1,
+        },
+      }),
+    wire: wireAsLifecycle,
+    stats: () => wireAsLifecycle.stats(),
+    cache: wireAsLifecycle.cache,
+    cancelAll: wireAsLifecycle.cancelAll,
+    shutdown: wireAsLifecycle.shutdown,
+    preset: meta.preset,
+    features: meta.features,
+  };
 }
 
 function buildDefaultClient(
@@ -610,5 +829,5 @@ function isEnabled(value: unknown): boolean {
 }
 
 function isLeanPreset(preset: DefaultHttpClientPreset): boolean {
-  return preset === "minimal" || preset === "proxy" || preset === "highThroughputProxy";
+  return preset === "minimal" || preset === "proxy" || preset === "highThroughputProxy" || preset === "bareMetal";
 }

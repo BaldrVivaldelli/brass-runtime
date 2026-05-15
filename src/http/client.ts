@@ -178,7 +178,7 @@ export const withMiddleware =
                 shutdown: c.shutdown,
             });
 
-const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = emptyStats): HttpClientStream =>
+export const decorateStream = (run: HttpClientStreamFn, stats: () => HttpClientStats = emptyStats): HttpClientStream =>
     Object.assign(((req: HttpRequest) => run(req)) as HttpClientStreamFn, { stats });
 
 export const normalizeHeadersInit = (h: any): Record<string, string> | undefined => {
@@ -201,7 +201,7 @@ export const normalizeHeadersInit = (h: any): Record<string, string> | undefined
 };
 
 // --- aplica defaults + init.headers usando optics ---
-const normalizeRequest =
+export const normalizeRequest =
     (defaultHeaders: Record<string, string>) =>
         (req0: HttpRequest): HttpRequest => {
             // defaults por abajo (no pisan req.headers)
@@ -219,7 +219,7 @@ const normalizeRequest =
             return req;
         };
 
-const resolvePositiveTimeout = (value: number | undefined): number | undefined => {
+export const resolvePositiveTimeout = (value: number | undefined): number | undefined => {
     if (value === undefined || !Number.isFinite(value)) return undefined;
     const n = Math.floor(value);
     return n > 0 ? n : undefined;
@@ -237,7 +237,7 @@ type MutableHttpStats = {
     lastDurationMs?: number;
 };
 
-const makeHttpStats = (
+export const makeHttpStats = (
     pool: HttpConcurrencyPool | undefined,
     adaptiveLimiter: AdaptiveLimiter | undefined,
 ) => {
@@ -307,13 +307,13 @@ const makeHttpStats = (
 
 type HttpMetrics = ReturnType<typeof makeHttpStats>;
 
-const makePool = (cfg: MakeHttpConfig): HttpConcurrencyPool | undefined =>
+export const makePool = (cfg: MakeHttpConfig): HttpConcurrencyPool | undefined =>
     cfg.pool === undefined || cfg.pool === false ? undefined : new HttpConcurrencyPool(cfg.pool);
 
-const makeAdaptiveLimiter = (cfg: MakeHttpConfig): AdaptiveLimiter | undefined =>
+export const makeAdaptiveLimiter = (cfg: MakeHttpConfig): AdaptiveLimiter | undefined =>
     cfg.adaptiveLimiter === undefined || cfg.adaptiveLimiter === false ? undefined : new AdaptiveLimiter(cfg.adaptiveLimiter);
 
-const resolveRequestUrl = (req: HttpRequest, baseUrl: string): URL | HttpError => {
+export const resolveRequestUrl = (req: HttpRequest, baseUrl: string): URL | HttpError => {
     try {
         return new URL(req.url, baseUrl);
     } catch {
@@ -321,15 +321,15 @@ const resolveRequestUrl = (req: HttpRequest, baseUrl: string): URL | HttpError =
     }
 };
 
-const fetchLabel = (req: HttpRequest, url: URL): string => `http:${req.method}:${url.origin}`;
-const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError => ({
+export const fetchLabel = (req: HttpRequest, url: URL): string => `http:${req.method}:${url.origin}`;
+export const timeoutReason = (req: HttpRequest, url: URL, timeoutMs: number): HttpError => ({
     _tag: "Timeout",
     timeoutMs,
     phase: "request",
     message: `HTTP ${req.method} ${url.origin} timed out after ${timeoutMs}ms`,
 });
 
-const requestPriority = (req: HttpRequest): number | undefined => {
+export const requestPriority = (req: HttpRequest): number | undefined => {
     const fromPolicy = getHttpRequestPolicy(req).priority;
     if (fromPolicy !== undefined) return fromPolicy;
     return (req.init as any)?.priority;
@@ -345,7 +345,7 @@ const exitError = <E, A>(exit: Exit<E, A>): unknown => {
     return Cause.toError(exit.cause);
 };
 
-const runTransportEffect = <A>(
+export const runTransportEffect = <A>(
     effect: Async<unknown, HttpError, A>,
     env: unknown,
     signal: AbortSignal,
@@ -393,7 +393,7 @@ const runTransportEffect = <A>(
         }
     });
 
-const runDirectTransport = (
+export const runDirectTransport = (
     req: HttpRequest,
     url: URL,
     transport: HttpTransport,
@@ -498,7 +498,7 @@ const transportDestroy = (transport: HttpTransport | HttpStreamTransport): (() =
 
 type HttpLease = { release: (...args: any[]) => void };
 
-const releaseSuccess = (
+export const releaseSuccess = (
     lease: HttpLease | undefined,
     adaptiveLimiter: AdaptiveLimiter | undefined,
     response: { readonly status: number; readonly ms: number },
@@ -512,7 +512,7 @@ const releaseSuccess = (
     return undefined;
 };
 
-const releaseFailure = (
+export const releaseFailure = (
     lease: HttpLease | undefined,
     adaptiveLimiter: AdaptiveLimiter | undefined,
 ): undefined => {
@@ -771,7 +771,7 @@ class PoolRequestState {
  *   3. The timeout callback (when timeoutMs is set)
  * All other functions are methods on PoolRequestState — no per-request closure allocation.
  */
-const runPoolTransport = (
+export const runPoolTransport = (
     req: HttpRequest,
     url: URL,
     transport: HttpTransport,

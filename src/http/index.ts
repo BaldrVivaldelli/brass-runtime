@@ -15,6 +15,7 @@ export * from "./batching";
 export * from "./prewarm";
 export * from "./adaptiveLimiter";
 export * from "./defaultClient";
+export * from "./bareMetalClient";
 export * from "./builder";
 export * from "./server";
 export * from "./layer";
