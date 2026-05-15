@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.19.0 - Bare-Metal HTTP Mode
+
+### Features
+
+- Added `makeBareMetalHttp` factory: a zero-overhead HTTP client that bypasses
+  all middleware layers (retry, dedup, cache, batch, priority, compression,
+  adaptive limiter, prewarm) and delegates directly to the wire transport.
+  Preserves typed errors, cancellation, pool/adaptive-limiter, and stats.
+- Added `makeBareMetalHttpStream` factory: streaming counterpart with the same
+  zero-overhead guarantees. Pool leases are released on headers received.
+- Added `preset: "bareMetal"` to `makeDefaultHttpClient` for easy opt-in via
+  the standard preset system. DX helpers (get, post, getJson, postJson, getText)
+  work identically. Lifecycle config keys are ignored with a construction-time
+  warning. User middleware is still applied.
+- Bare-metal clients expose `.with(mw)` escape hatch for composing observability
+  without pulling in the full lifecycle stack.
+- Exported `runDirectTransport`, `runPoolTransport`, and related wire-level
+  helpers from `src/http/client.ts` for advanced custom client composition.
+
+### Usage
+
+```typescript
+import { makeBareMetalHttp, makeDefaultHttpClient } from "brass-runtime/http";
+
+// Standalone factory
+const client = makeBareMetalHttp({ baseUrl: "https://api.internal" });
+
+// Via preset
+const defaultClient = makeDefaultHttpClient({ preset: "bareMetal" });
+
+// With custom transport (e.g., Axios adapter)
+const axiosClient = makeBareMetalHttp({ transport: myAxiosTransport });
+```
+
 ## 1.18.3 - HTTP Pool/Timeout Fast Path
 
 ### Performance
