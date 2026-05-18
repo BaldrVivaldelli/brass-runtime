@@ -1,4 +1,8 @@
 import type { Async } from "../../core/types/asyncEffect";
+import type { BanditState } from "./contextBudget/types";
+import type { HostProfile } from "./hostProfile";
+import type { BudgetConfigInput, BudgetEvent, ModelTier, TokenUsage } from "./llmBudget/types";
+import type { PatchStrategyConfig, RewardEntry } from "./patchStrategy/types";
 
 export type AgentMode = "read-only" | "propose" | "write" | "autonomous";
 
@@ -89,6 +93,16 @@ export type AgentGoal = {
     readonly initialPatch?: string;
     /** How to materialize initialPatch in write/autonomous mode. Default: apply. */
     readonly initialPatchMode?: "apply" | "rollback";
+    /** Whether an LLM provider is available for planning/repair. */
+    readonly llmAvailable?: boolean;
+    /** Optional bandit state for adaptive context budget prioritization. */
+    readonly banditState?: BanditState;
+    /** Patch strategy configuration from .brass-agent.json. */
+    readonly patchStrategy?: PatchStrategyConfig;
+    /** Historical reward data loaded at boot. */
+    readonly rewardHistory?: readonly RewardEntry[];
+    /** Optional budget configuration for token budget tracking and model routing. */
+    readonly budget?: BudgetConfigInput;
 };
 
 export type AgentPhase = "boot" | "discovering" | "planning" | "validating" | "proposing" | "done" | "failed";
@@ -160,7 +174,8 @@ export type AgentEvent =
         readonly steps: number;
         readonly durationMs: number;
         readonly at: number;
-    };
+    }
+    | BudgetEvent;
 
 export type AgentEventSink = {
     readonly emit: (event: AgentEvent) => void;
@@ -220,6 +235,7 @@ export type LLMRequest = {
 
 export type LLMResponse = {
     readonly content: string;
+    readonly usage?: TokenUsage;
 };
 
 export type AgentError =
@@ -301,10 +317,11 @@ export type PermissionService = {
 export type AgentEnv = {
     readonly fs: FileSystem;
     readonly shell: Shell;
-    readonly llm: LLM;
+    readonly llm: LLM | undefined;
     readonly patch: PatchService;
     readonly permissions: PermissionService;
     readonly approvals?: ApprovalService;
     readonly events?: AgentEventSink;
     readonly toolPolicies?: AgentToolPolicyConfig;
+    readonly hostProfile?: HostProfile;
 };

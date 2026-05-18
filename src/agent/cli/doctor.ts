@@ -220,10 +220,10 @@ const llmCheck = (config: AgentConfig | undefined): AgentDoctorCheck => {
         return {
             id: "llm",
             label: "LLM provider",
-            status: keyPresent ? "ok" : "fail",
+            status: keyPresent ? "ok" : "warn",
             message: keyPresent
                 ? `Google/Gemini provider is configured (${provider}).`
-                : "Google/Gemini provider is selected but no API key env var is set. Export GEMINI_API_KEY or put it in .env/.brass-agent.env.",
+                : "No LLM provider configured. Tool-only workflows will work; planning requires LLM credentials.",
         };
     }
 
@@ -233,10 +233,10 @@ const llmCheck = (config: AgentConfig | undefined): AgentDoctorCheck => {
         return {
             id: "llm",
             label: "LLM provider",
-            status: endpointPresent && keyPresent ? "ok" : "fail",
+            status: endpointPresent && keyPresent ? "ok" : "warn",
             message: endpointPresent && keyPresent
                 ? `OpenAI-compatible provider is configured (${provider}).`
-                : "OpenAI-compatible provider is selected but endpoint or API key env var is missing. Export BRASS_LLM_API_KEY or put it in .env/.brass-agent.env.",
+                : "No LLM provider configured. Tool-only workflows will work; planning requires LLM credentials.",
         };
     }
 
@@ -262,7 +262,7 @@ const llmCheck = (config: AgentConfig | undefined): AgentDoctorCheck => {
         id: "llm",
         label: "LLM provider",
         status: "warn",
-        message: "No real LLM credentials found. The CLI will fall back to the fake provider unless config selects a real provider.",
+        message: "No LLM provider configured. Tool-only workflows will work; planning requires LLM credentials.",
     };
 };
 

@@ -26,6 +26,11 @@ import {
 import { extractUnifiedDiff } from "../tools/patch";
 import { redactText } from "./redaction";
 import { describeLanguagePolicy, spanishLike } from "./language";
+import { selectStrategy } from "./patchStrategy/selector";
+import { extractSignals } from "./patchStrategy/signalExtractor";
+import { strategyPromptFragment } from "./patchStrategy/promptStrategy";
+import type { PatchStrategy } from "./patchStrategy/types";
+import { sampleBeta } from "./contextBudget/banditEngine";
 import type { AgentAction, AgentEnv, AgentError, AgentMode, AgentState, Observation } from "./types";
 
 const hasObservation = <T extends Observation["type"]>(state: AgentState, type: T): boolean =>
@@ -154,7 +159,7 @@ const causeMessage = (cause: unknown): string => {
 const errorDetail = (state: AgentState, cause: unknown): string =>
     redactForPrompt(state, causeMessage(cause)).slice(0, 2_000);
 
-const buildPlanningPrompt = (state: AgentState): string => {
+const buildPlanningPrompt = (state: AgentState, strategy?: PatchStrategy): string => {
     const discovery = discoverValidationCommands(state);
 
     return redactForPrompt(state, [
@@ -166,6 +171,7 @@ const buildPlanningPrompt = (state: AgentState): string => {
         "Only propose a patch when the observations are strong enough.",
         "Use the project command discovery summary as context, but do not invent commands that were not run.",
         describeLanguagePolicy(state.goal),
+        strategy ? strategyPromptFragment(strategy) : "",
         "",
         `Goal: ${state.goal.text}`,
         `Workspace: ${state.goal.cwd}`,
@@ -479,6 +485,9 @@ export const decideNextAction = (state: AgentState): Async<AgentEnv, AgentError,
 
     if (latest?.type === "agent.error") {
         if (shouldRequestRepairAfterPatchError(state)) {
+            if (state.goal.llmAvailable === false) {
+                return asyncSucceed({ type: "agent.finish", summary: buildErrorSummary(state) }) as any;
+            }
             return asyncSucceed(repairAction(state, "previous patch failed to apply")) as any;
         }
 
@@ -524,13 +533,28 @@ export const decideNextAction = (state: AgentState): Async<AgentEnv, AgentError,
         const validationAction = nextValidationActionBeforePlanning(state);
         if (validationAction) return asyncSucceed(validationAction) as any;
 
-        const contextAction = nextContextDiscoveryAction(state);
+        const contextAction = nextContextDiscoveryAction(state, state.goal.banditState);
         if (contextAction) return asyncSucceed(contextAction) as any;
+
+        if (state.goal.llmAvailable === false) {
+            return asyncSucceed({
+                type: "agent.finish",
+                summary: "No LLM provider configured. Tool-only execution complete.",
+            }) as any;
+        }
+
+        const signals = extractSignals(state);
+        const strategy = selectStrategy(
+            signals,
+            state.goal.patchStrategy,
+            state.goal.rewardHistory ?? [],
+            { sampleBeta: (a, b) => sampleBeta(a, b, Math.random), random: Math.random },
+        );
 
         return asyncSucceed({
             type: "llm.complete",
             purpose: "plan",
-            prompt: buildPlanningPrompt(state),
+            prompt: buildPlanningPrompt(state, strategy),
         }) as any;
     }
 
@@ -553,6 +577,9 @@ export const decideNextAction = (state: AgentState): Async<AgentEnv, AgentError,
             if (validationAction) return asyncSucceed(validationAction) as any;
 
             if (shouldRequestRepairAfterValidation(state)) {
+                if (state.goal.llmAvailable === false) {
+                    return asyncSucceed({ type: "agent.finish", summary: buildErrorSummary(state) }) as any;
+                }
                 return asyncSucceed(repairAction(state, "validation failed after applying the generated patch")) as any;
             }
 
