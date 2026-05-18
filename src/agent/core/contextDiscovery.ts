@@ -1,4 +1,6 @@
 import type { AgentAction, AgentContextConfig, AgentState, Observation, SearchMatch } from "./types";
+import type { BanditState } from "./contextBudget/types";
+import { shouldApplyBandit, reorderCandidates } from "./contextBudget/integration";
 
 const DEFAULT_CONTEXT_GLOBS = [
     "*.ts",
@@ -411,7 +413,7 @@ export const summarizeContextDiscovery = (state: AgentState): ContextDiscoverySu
     };
 };
 
-export const nextContextDiscoveryAction = (state: AgentState): AgentAction | undefined => {
+export const nextContextDiscoveryAction = (state: AgentState, banditState?: BanditState): AgentAction | undefined => {
     const config = configFor(state);
     if (!config.enabled) return undefined;
     if (state.goal.initialPatch?.trim()) return undefined;
@@ -421,8 +423,18 @@ export const nextContextDiscoveryAction = (state: AgentState): AgentAction | und
     const directPaths = extractLikelyFilePaths(state);
     const resultPaths = pathsFromSearchResults(state, config.maxSearchResults);
 
+    // Reorder candidates using bandit priorities when applicable
+    const allCandidates = [...directPaths, ...resultPaths];
+    const orderedCandidates = banditState && shouldApplyBandit(
+        banditState,
+        config.enabled,
+        Boolean(state.goal.initialPatch?.trim())
+    )
+        ? reorderCandidates(allCandidates, banditState, Math.random)
+        : allCandidates;
+
     if (readsRemaining > 0) {
-        const nextPath = [...directPaths, ...resultPaths].find((path) =>
+        const nextPath = orderedCandidates.find((path) =>
             path !== "package.json" &&
             !alreadyRead(state, path) &&
             !knownMissing(state, path)

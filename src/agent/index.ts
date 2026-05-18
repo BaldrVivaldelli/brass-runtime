@@ -13,6 +13,9 @@ export * from "./core/rollbackSafety";
 export * from "./core/redaction";
 export * from "./core/language";
 export * from "./core/batch";
+export * from "./core/hostProfile";
+export * from "./core/hostSignals";
+export * from "./core/hostInference";
 
 export * from "./tools/permissions";
 export * from "./tools/approvals";

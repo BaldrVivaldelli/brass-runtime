@@ -48,12 +48,22 @@ export const actionToEffect = (action: AgentAction, state: AgentState): Async<Ag
             ) as any;
 
         case "llm.complete":
-            return asyncFlatMap(service("llm") as any, (llm: AgentEnv["llm"]) =>
-                asyncMap(
+            return asyncFlatMap(service("llm") as any, (llm: AgentEnv["llm"]) => {
+                if (!llm) {
+                    return asyncFail({
+                        _tag: "LLMError",
+                        cause: "llm_unavailable: no LLM provider is configured",
+                    } satisfies AgentError) as any;
+                }
+                return asyncMap(
                     llm.complete({ purpose: action.purpose, prompt: action.prompt }) as any,
-                    (response: import("../core/types").LLMResponse): Observation => ({ type: "llm.response", purpose: action.purpose, content: response.content })
-                ) as any
-            ) as any;
+                    (response: import("../core/types").LLMResponse): Observation => ({
+                        type: "llm.response",
+                        purpose: action.purpose,
+                        content: response.content,
+                    })
+                ) as any;
+            }) as any;
 
         case "patch.propose":
             return asyncSucceed({ type: "patch.proposed", patch: action.patch } satisfies Observation) as any;

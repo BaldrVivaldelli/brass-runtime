@@ -38,6 +38,13 @@ import { makeCliApprovalService } from "./approvals";
 import { printAgentDoctorReport, runAgentDoctor } from "./doctor";
 import { loadAgentEnvFile, type AgentEnvFileLoadResult } from "./envFile";
 import { initializeAgentWorkspace, printAgentInitResult, type AgentInitProfile } from "./init";
+import { buildHostProfile } from "../core/hostInference";
+import type { HostSignalInput } from "../core/hostSignals";
+import type { HostProfile } from "../core/hostProfile";
+import { loadRewardStore, flushRewardStore, computeReward } from "../core/patchStrategy";
+import { selectStrategy } from "../core/patchStrategy/selector";
+import { extractSignals } from "../core/patchStrategy/signalExtractor";
+import { sampleBeta } from "../core/contextBudget/banditEngine";
 
 type DynamicImport = (specifier: string) => Promise<any>;
 const dynamicImport = new Function("specifier", "return import(specifier)") as DynamicImport;
@@ -52,7 +59,7 @@ type CliOutputMode = "human" | "json" | "events-json" | "protocol-json";
 type CliApprovalMode = "auto" | "interactive" | "approve" | "deny";
 type CliPreset = AgentPreset;
 
-type ParsedCliArgs = {
+export type ParsedCliArgs = {
     readonly cwd: string;
     readonly discoverWorkspace: boolean;
     readonly where: boolean;
@@ -61,6 +68,7 @@ type ParsedCliArgs = {
     readonly modeSpecified: boolean;
     readonly showHelp: boolean;
     readonly output: CliOutputMode;
+    readonly outputSpecified: boolean;
     readonly approval: CliApprovalMode;
     readonly approvalSpecified: boolean;
     readonly configPath?: string;
@@ -82,6 +90,7 @@ type ParsedCliArgs = {
     readonly initProfile: AgentInitProfile;
     readonly initDryRun: boolean;
     readonly language?: AgentResponseLanguage;
+    readonly hostProfile: boolean;
 };
 
 type CliBatchRun = {
@@ -100,7 +109,7 @@ type CliRunResult = {
     readonly exitCode: number;
 };
 
-type ResolvedCliArgs = ParsedCliArgs & {
+export type ResolvedCliArgs = ParsedCliArgs & {
     readonly config: AgentConfig;
     readonly workspaceDiscovery: ReturnType<typeof discoverNodeWorkspaceRoot>;
     readonly resolvedConfigPath?: string;
@@ -140,7 +149,7 @@ const readFlagValue = (argv: readonly string[], index: number, flag: string): re
     return [next, index + 1];
 };
 
-const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
+export const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
     let cwd = process.cwd();
     let discoverWorkspace = true;
     let where = false;
@@ -148,6 +157,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
     let modeSpecified = false;
     let showHelp = false;
     let output: CliOutputMode = "human";
+    let outputSpecified = false;
     let approval: CliApprovalMode = "auto";
     let approvalSpecified = false;
     let configPath: string | undefined;
@@ -169,6 +179,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
     let initProfile: AgentInitProfile = "default";
     let initDryRun = false;
     let language: AgentResponseLanguage | undefined;
+    let hostProfile = false;
     const goalParts: string[] = [];
 
     for (let index = 0; index < argv.length; index += 1) {
@@ -186,6 +197,11 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
 
         if (arg === "--doctor") {
             doctor = true;
+            continue;
+        }
+
+        if (arg === "--host-profile") {
+            hostProfile = true;
             continue;
         }
 
@@ -250,16 +266,19 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
 
         if (arg === "--json") {
             output = "json";
+            outputSpecified = true;
             continue;
         }
 
         if (arg === "--events-json") {
             output = "events-json";
+            outputSpecified = true;
             continue;
         }
 
         if (arg === "--protocol-json") {
             output = "protocol-json";
+            outputSpecified = true;
             continue;
         }
 
@@ -430,6 +449,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
         modeSpecified,
         showHelp,
         output,
+        outputSpecified,
         approval,
         approvalSpecified,
         ...(configPath ? { configPath } : {}),
@@ -448,6 +468,7 @@ const parseCliArgs = (argv: readonly string[]): ParsedCliArgs => {
         initForce,
         initProfile,
         initDryRun,
+        hostProfile,
         ...(language ? { language } : {}),
         ...(saveRunDir ? { saveRunDir } : {}),
         ...(patchFile ? { patchFile } : {}),
@@ -724,6 +745,120 @@ const printHelp = () => {
     ].join("\n"));
 };
 
+// --- Host Profile Command ---
+
+const KNOWN_WORKSPACE_MARKERS = [".vscode", ".cursor", ".kiro", ".git", ".github", ".gitlab-ci.yml", "Jenkinsfile"];
+
+const scanWorkspaceMarkers = (cwd: string): readonly string[] => {
+    try {
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const found: string[] = [];
+        for (const marker of KNOWN_WORKSPACE_MARKERS) {
+            if (fs.existsSync(path.join(cwd, marker))) {
+                found.push(marker);
+            }
+        }
+        return found;
+    } catch {
+        return [];
+    }
+};
+
+export const buildHostProfileFromProcess = (resolved: ResolvedCliArgs): HostProfile => {
+    const workspaceMarkers = scanWorkspaceMarkers(resolved.cwd);
+    const configPaths: string[] = [];
+    if (resolved.resolvedConfigPath) {
+        configPaths.push(resolved.resolvedConfigPath);
+    }
+
+    const input: HostSignalInput = {
+        argv: process.argv,
+        env: process.env as Readonly<Record<string, string | undefined>>,
+        stdoutIsTTY: process.stdout.isTTY ?? false,
+        stdinIsTTY: process.stdin.isTTY ?? false,
+        ttyColumns: process.stdout.columns,
+        parentProcessName: undefined,
+        workspaceMarkers,
+        stdinFirstLine: undefined,
+        configPaths,
+    };
+
+    return buildHostProfile(input);
+};
+
+export const printHostProfileHuman = (profile: HostProfile): void => {
+    console.log("Transport: " + profile.transport);
+    console.log("");
+    console.log("Capabilities:");
+    const caps = profile.capabilities;
+    console.log("  hasOwnLLM: " + caps.hasOwnLLM);
+    console.log("  wantsJson: " + caps.wantsJson);
+    console.log("  supportsStreamingEvents: " + caps.supportsStreamingEvents);
+    console.log("  supportsMcp: " + caps.supportsMcp);
+    console.log("  canAskApproval: " + caps.canAskApproval);
+    console.log("  canRenderDiff: " + caps.canRenderDiff);
+    console.log("  canApplyPatch: " + caps.canApplyPatch);
+    console.log("  interactiveTty: " + caps.interactiveTty);
+    console.log("");
+    console.log("Constraints:");
+    const con = profile.constraints;
+    console.log("  readOnlyByDefault: " + con.readOnlyByDefault);
+    console.log("  patchPreviewRequired: " + con.patchPreviewRequired);
+    console.log("  requireNoNetwork: " + con.requireNoNetwork);
+    console.log("");
+    console.log("Identity:");
+    if (profile.identity) {
+        console.log("  name: " + profile.identity.name);
+        console.log("  confidence: " + profile.identity.confidence);
+    } else {
+        console.log("  (none detected)");
+    }
+};
+
+/**
+ * Applies capability-driven defaults from the host profile to the resolved CLI args.
+ *
+ * When the user has NOT explicitly specified an output mode:
+ * - If supportsStreamingEvents is true → default to "events-json"
+ * - Else if wantsJson is true → default to "json"
+ * - (When both are true, supportsStreamingEvents takes priority → "events-json")
+ *
+ * When the user has NOT explicitly specified an approval mode:
+ * - If canAskApproval is false → default to "deny"
+ *
+ * **Validates: Requirements 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8**
+ */
+export const applyCapabilityDefaults = (resolved: ResolvedCliArgs): ResolvedCliArgs => {
+    const profile = buildHostProfileFromProcess(resolved);
+    const caps = profile.capabilities;
+
+    let output = resolved.output;
+    let approval = resolved.approval;
+
+    // Apply output mode defaults only when user did NOT explicitly specify
+    if (!resolved.outputSpecified) {
+        if (caps.supportsStreamingEvents) {
+            output = "events-json";
+        } else if (caps.wantsJson) {
+            output = "json";
+        }
+    }
+
+    // Apply approval mode defaults only when user did NOT explicitly specify
+    if (!resolved.approvalSpecified) {
+        if (!caps.canAskApproval) {
+            approval = "deny";
+        }
+    }
+
+    if (output === resolved.output && approval === resolved.approval) {
+        return resolved;
+    }
+
+    return { ...resolved, output, approval };
+};
+
 const envByName = (name: string | undefined): string | undefined => name ? process.env[name] : undefined;
 
 const makeGoogleLLMFromEnv = (config?: AgentLLMConfig): LLM | undefined => {
@@ -790,6 +925,47 @@ const makeLLMFromEnv = (config?: AgentLLMConfig): LLM => {
     return makeGoogleLLMFromEnv(config)
         ?? makeOpenAICompatibleLLMFromEnv(config)
         ?? makeFakeLLM({ content: fakeResponse });
+};
+
+/**
+ * Returns an LLM instance when a provider is explicitly configured or credentials
+ * are auto-detected. Returns undefined when no provider is configured and
+ * auto-detection finds no credentials (instead of falling back to fake LLM).
+ * The fake LLM is ONLY instantiated when explicitly configured via
+ * BRASS_LLM_PROVIDER=fake or config.llm.provider=fake.
+ */
+export const makeLLMFromEnvOptional = (config?: AgentLLMConfig): LLM | undefined => {
+    const provider = (process.env.BRASS_LLM_PROVIDER ?? config?.provider)?.trim().toLowerCase();
+    const fakeResponse = process.env.BRASS_FAKE_LLM_RESPONSE ?? config?.fakeResponse;
+
+    if (provider === "fake") return makeFakeLLM({ content: fakeResponse });
+
+    if (provider === "google" || provider === "gemini") {
+        const google = makeGoogleLLMFromEnv(config);
+        if (!google) {
+            throw new Error(
+                "Google LLM provider requires BRASS_GOOGLE_API_KEY, GOOGLE_API_KEY, GEMINI_API_KEY, or config.llm.apiKeyEnv."
+            );
+        }
+        return google;
+    }
+
+    if (provider === "openai" || provider === "openai-compatible") {
+        const openAICompatible = makeOpenAICompatibleLLMFromEnv(config);
+        if (!openAICompatible) {
+            throw new Error(
+                "OpenAI-compatible LLM provider requires BRASS_LLM_ENDPOINT/config.llm.endpoint and BRASS_LLM_API_KEY/config.llm.apiKeyEnv."
+            );
+        }
+        return openAICompatible;
+    }
+
+    if (provider) {
+        throw new Error(`Unsupported LLM provider: ${provider}`);
+    }
+
+    // Auto-detect: try known providers, return undefined if none found
+    return makeGoogleLLMFromEnv(config) ?? makeOpenAICompatibleLLMFromEnv(config);
 };
 
 const parseApprovalModeFromEnv = (): CliApprovalMode | undefined => {
@@ -1149,12 +1325,13 @@ const makeEventsSink = (parsed: ResolvedCliArgs, compactOptions: CompactOptions)
 
 const makeAgentEnv = (parsed: ResolvedCliArgs, events: AgentEventSink | undefined): AgentEnv => {
     const shell = NodeShell;
+    const llm = makeLLMFromEnvOptional(parsed.config.llm);
 
     return {
         shell,
         fs: makeNodeFileSystem(shell),
         patch: makeNodePatchService(shell),
-        llm: makeLLMFromEnv(parsed.config.llm),
+        llm,
         permissions: makeConfiguredPermissions(parsed.config.permissions),
         approvals: makeApprovalServiceFromCli(parsed),
         ...(events ? { events } : {}),
@@ -1184,12 +1361,15 @@ const runCliAgent = async (
         ? await readPatchFile(run.cwd, run.patchFile)
         : undefined;
 
+    const rewardHistory = await loadRewardStore(run.cwd);
+
     const state = await runtime.toPromise(
         runAgent(runtime, {
             id: `agent-${Date.now()}-${run.index + 1}`,
             cwd: run.cwd,
             text: run.goalText,
             mode: run.mode,
+            llmAvailable: env.llm !== undefined,
             ...(parsed.config.project ? { project: parsed.config.project } : {}),
             ...(parsed.config.context ? { context: parsed.config.context } : {}),
             ...(parsed.config.patchQuality ? { patchQuality: parsed.config.patchQuality } : {}),
@@ -1197,8 +1377,32 @@ const runCliAgent = async (
             ...(parsed.config.redaction ? { redaction: parsed.config.redaction } : {}),
             ...(parsed.language ? { language: { response: parsed.language } } : parsed.config.language ? { language: parsed.config.language } : {}),
             ...(initialPatch ? { initialPatch, initialPatchMode: run.patchFileMode } : {}),
+            ...(parsed.config.patchStrategy ? { patchStrategy: parsed.config.patchStrategy } : {}),
+            rewardHistory,
         })
     );
+
+    // Flush reward store with updated entry (non-fatal on failure)
+    try {
+        if (state.goal.patchStrategy?.enabled !== false) {
+            const reward = computeReward(state);
+            const signals = extractSignals(state);
+            const selectedArm = selectStrategy(
+                signals,
+                state.goal.patchStrategy,
+                rewardHistory,
+                { sampleBeta: (a, b) => sampleBeta(a, b, Math.random), random: Math.random },
+            );
+            const newEntry = {
+                arm: selectedArm,
+                reward,
+                timestamp: Date.now(),
+            };
+            await flushRewardStore(run.cwd, [...rewardHistory, newEntry]);
+        }
+    } catch {
+        // Non-fatal: reward store flush failure is acceptable
+    }
 
     if (run.saveRunDir) {
         await writeRunArtifacts(state, run.saveRunDir, compactOptions);
@@ -1267,7 +1471,8 @@ const printWorkspaceWhere = (parsed: ResolvedCliArgs): void => {
 };
 
 const main = async () => {
-    const parsed = await resolveParsedConfig(parseCliArgs(process.argv.slice(2)));
+    const rawParsed = await resolveParsedConfig(parseCliArgs(process.argv.slice(2)));
+    const parsed = applyCapabilityDefaults(rawParsed);
     const isBatch = parsed.batchRuns.length > 0;
 
     if (parsed.showHelp) {
@@ -1314,6 +1519,22 @@ const main = async () => {
 
         process.exitCode = report.status === "fail" ? 1 : 0;
         return;
+    }
+
+    if (parsed.hostProfile) {
+        try {
+            const profile = buildHostProfileFromProcess(parsed);
+            if (parsed.output === "json") {
+                console.log(JSON.stringify(profile, null, 2));
+            } else {
+                printHostProfileHuman(profile);
+            }
+            process.exit(0);
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : String(err);
+            process.stderr.write(`Error: host profile detection failed: ${message}\n`);
+            process.exit(1);
+        }
     }
 
     if (!parsed.goalText && !isBatch) {
@@ -1384,7 +1605,10 @@ const main = async () => {
     }
 };
 
-main().catch((error) => {
-    console.error(error);
-    process.exit(1);
-});
+/* istanbul ignore next -- CLI entry point, not testable in unit context */
+if (typeof process !== "undefined" && !process.env.VITEST) {
+    main().catch((error) => {
+        console.error(error);
+        process.exit(1);
+    });
+}

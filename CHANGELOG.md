@@ -1,5 +1,59 @@
 # Changelog
 
+## 1.20.0 - Agent Intelligence Layer
+
+### Features
+
+- **LLM Budget Optimization** (`src/agent/core/llmBudget/`): Token budget tracking,
+  response confidence estimation, and complexity-based model routing for brass-agent.
+  - `resolveBudgetConfig` / `validateBudgetConfig`: merge goal+config budgets with defaults,
+    reject invalid inputs at construction time.
+  - `BudgetState` tracking: immutable accumulation of token usage across LLM calls with
+    three-zone classification (under / warning / exceeded).
+  - `estimateTokens`: chars/4 fallback when providers don't report usage.
+  - `estimateConfidence`: heuristic scoring (diff blocks, conciseness, goal references,
+    hedging language) for response quality signals.
+  - `routeModel`: complexity-based "small" vs "large" tier selection using goal length,
+    files read, search matches, validation errors, and repair attempts.
+  - Budget gate in `runAgent`: intercepts `llm.complete` actions, emits structured events
+    (`budget.usage`, `budget.routed`, `budget.confidence`, `budget.warning`, `budget.exceeded`),
+    and gracefully terminates on hard cap with phase-aware summaries.
+  - `LearningStore` persistence: cross-run history at `.brass/llm-budget.json` with cap
+    enforcement and corrupt-file recovery.
+
+- **Adaptive Context Budget** (`src/agent/core/contextBudget/`): Multi-armed bandit
+  prioritization for context discovery actions using Thompson Sampling.
+  - Bandit engine with Beta-distributed arms, Bayesian updates, and configurable
+    exploration/exploitation tradeoff.
+  - Context action scoring and ranking based on historical reward signals.
+  - State persistence at `.brass/context-budget.json` with graceful degradation.
+
+- **Adaptive Patch Strategy** (`src/agent/core/patchStrategy/`): Feedback-driven patch
+  generation strategy selection using reward-weighted history.
+  - Strategy selector choosing between diff formats based on historical success rates.
+  - Reward tracking with exponential decay for recency weighting.
+  - Integration with the patch generation pipeline in `decide.ts`.
+
+- **Agent Host LLM Refactor** (`src/agent/core/`): Restructured LLM interaction layer
+  for cleaner separation between host profile detection and LLM provider routing.
+  - Unified host profile inference with transport-aware defaults.
+  - Cleaner LLM request/response pipeline with typed purpose discrimination.
+
+### Testing
+
+- 14 property-based tests (fast-check) covering budget config, state accumulation,
+  immutability, zone classification, token estimation, confidence bounds/signals,
+  model routing, and persistence invariants.
+- 5 integration tests for the budget-aware runner (warning zone, hard cap, no-budget
+  passthrough, no-LLM graceful degradation, subsequent call blocking).
+- Full property test suites for context budget bandit engine, patch strategy selector,
+  and host LLM refactor modules.
+
+### Validation
+
+- `npm run test:types` — 0 errors
+- `npm test` — 1860+ tests passing
+
 ## 1.19.0 - Bare-Metal HTTP Mode
 
 ### Features

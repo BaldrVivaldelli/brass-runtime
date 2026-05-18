@@ -11,6 +11,8 @@ import type {
     ApprovalRisk,
 } from "./types";
 import type { AgentBatchConfig } from "./batch";
+import type { PatchStrategyConfig } from "./patchStrategy/types";
+import type { BudgetConfigInput } from "./llmBudget/types";
 
 export type AgentConfigApprovalMode = "auto" | "interactive" | "approve" | "deny";
 
@@ -80,6 +82,8 @@ export type AgentConfig = {
     readonly permissions?: AgentPermissionConfig;
     readonly tools?: AgentToolPolicyConfig;
     readonly batch?: AgentBatchConfig;
+    readonly patchStrategy?: PatchStrategyConfig;
+    readonly budget?: BudgetConfigInput;
 };
 
 export type LoadedAgentConfig = {

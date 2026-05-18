@@ -249,6 +249,10 @@ const validateAgentConfig = (config: unknown, sourcePath: string): AgentConfig =
         }
     }
 
+    if (config.budget !== undefined) {
+        if (!isRecord(config.budget)) throw new Error("config.budget must be an object.");
+    }
+
     return config as AgentConfig;
 };
 
