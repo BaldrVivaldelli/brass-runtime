@@ -2,14 +2,34 @@ import type { AgentState, Observation } from "../types";
 import type { GoalSignals, GoalLengthCategory } from "./types";
 
 /**
- * File path detection regex.
- * Matches common path patterns including:
+ * File path detection supports common path patterns including:
  * - Unix-style paths: ./src/foo.ts, /home/user/file.js
  * - Windows-style paths: C:\Users\file.ts, src\foo.js
  * - Bare file references with extensions: foo.ts, bar/baz.tsx
+ *
+ * Keep this as a bounded linear scan rather than a nested path regex; goal text
+ * is user-controlled and CodeQL flags the regex form as a potential ReDoS risk.
  */
-const FILE_PATH_PATTERN =
-    /(?:file:\/\/)?(?:[A-Za-z]:)?[./\\]?(?:[A-Za-z0-9_@.-]+[/\\])*[A-Za-z0-9_@.-]+\.(?:tsx|jsx|mts|cts|mjs|cjs|json|yaml|html|scss|ts|js|md|yml|css)(?::\d+){0,2}/i;
+const FILE_EXTENSIONS = [
+    "tsx",
+    "jsx",
+    "mts",
+    "cts",
+    "mjs",
+    "cjs",
+    "json",
+    "yaml",
+    "html",
+    "scss",
+    "ts",
+    "js",
+    "md",
+    "yml",
+    "css",
+] as const;
+
+const ASCII_CASE_BIT = 32;
+const MAX_FILE_PATH_CANDIDATE_LENGTH = 512;
 
 /**
  * Keywords to detect in goal text (case-insensitive, word-boundary match).
@@ -47,10 +67,151 @@ const categorizeGoalLength = (text: string): GoalLengthCategory => {
     return "long";
 };
 
+const isAsciiAlpha = (code: number): boolean =>
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+
+const isAsciiDigit = (code: number): boolean => code >= 48 && code <= 57;
+
+const isPathCandidateChar = (code: number): boolean =>
+    isAsciiAlpha(code) ||
+    isAsciiDigit(code) ||
+    code === 95 || // _
+    code === 64 || // @
+    code === 46 || // .
+    code === 45 || // -
+    code === 47 || // /
+    code === 92 || // \
+    code === 58; // :
+
+const matchesExtension = (
+    text: string,
+    start: number,
+    end: number,
+    extension: string
+): boolean => {
+    if (end - start !== extension.length) return false;
+
+    for (let offset = 0; offset < extension.length; offset++) {
+        const textCode = text.charCodeAt(start + offset) | ASCII_CASE_BIT;
+        if (textCode !== extension.charCodeAt(offset)) {
+            return false;
+        }
+    }
+
+    return true;
+};
+
+const matchesKnownExtension = (text: string, start: number, end: number): boolean => {
+    for (const extension of FILE_EXTENSIONS) {
+        if (matchesExtension(text, start, end, extension)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+const stripTrailingPathPunctuation = (
+    text: string,
+    start: number,
+    end: number
+): number => {
+    let currentEnd = end;
+    while (currentEnd > start) {
+        const code = text.charCodeAt(currentEnd - 1);
+        if (code !== 46 && code !== 58) break;
+        currentEnd--;
+    }
+    return currentEnd;
+};
+
+const stripLineSuffixes = (text: string, start: number, end: number): number => {
+    let currentEnd = end;
+
+    for (let suffixCount = 0; suffixCount < 2; suffixCount++) {
+        let cursor = currentEnd - 1;
+        if (cursor < start || !isAsciiDigit(text.charCodeAt(cursor))) break;
+
+        while (cursor >= start && isAsciiDigit(text.charCodeAt(cursor))) {
+            cursor--;
+        }
+
+        if (cursor < start || text.charCodeAt(cursor) !== 58) break;
+        currentEnd = cursor;
+    }
+
+    return currentEnd;
+};
+
+const findLastDot = (text: string, start: number, end: number): number => {
+    for (let index = end - 1; index >= start; index--) {
+        if (text.charCodeAt(index) === 46) {
+            return index;
+        }
+    }
+
+    return -1;
+};
+
+const findFilenameStart = (text: string, start: number, dotIndex: number): number => {
+    let filenameStart = start;
+
+    for (let index = start; index < dotIndex; index++) {
+        const code = text.charCodeAt(index);
+        if (code === 47 || code === 92) {
+            filenameStart = index + 1;
+        }
+    }
+
+    return filenameStart;
+};
+
+const isFilePathCandidate = (text: string, start: number, end: number): boolean => {
+    const punctuationEnd = stripTrailingPathPunctuation(text, start, end);
+    const pathEnd = stripLineSuffixes(text, start, punctuationEnd);
+    const dotIndex = findLastDot(text, start, pathEnd);
+
+    if (dotIndex < 0 || dotIndex + 1 >= pathEnd) return false;
+    if (!matchesKnownExtension(text, dotIndex + 1, pathEnd)) return false;
+
+    return dotIndex > findFilenameStart(text, start, dotIndex);
+};
+
 /**
  * Detect whether the goal text contains file path references.
  */
-const detectFilePaths = (text: string): boolean => FILE_PATH_PATTERN.test(text);
+const detectFilePaths = (text: string): boolean => {
+    let candidateStart = -1;
+    let candidateTooLong = false;
+
+    for (let index = 0; index <= text.length; index++) {
+        const isCandidateChar =
+            index < text.length && isPathCandidateChar(text.charCodeAt(index));
+
+        if (isCandidateChar) {
+            if (candidateStart < 0) {
+                candidateStart = index;
+            }
+            if (index + 1 - candidateStart > MAX_FILE_PATH_CANDIDATE_LENGTH) {
+                candidateTooLong = true;
+            }
+            continue;
+        }
+
+        if (candidateStart >= 0) {
+            if (
+                !candidateTooLong &&
+                isFilePathCandidate(text, candidateStart, index)
+            ) {
+                return true;
+            }
+            candidateStart = -1;
+            candidateTooLong = false;
+        }
+    }
+
+    return false;
+};
 
 /**
  * Detect keyword presence in goal text (case-insensitive, word-boundary).

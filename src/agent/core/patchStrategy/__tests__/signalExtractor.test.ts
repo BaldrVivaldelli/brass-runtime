@@ -57,7 +57,37 @@ const arbAgentState = (goalText: fc.Arbitrary<string> = arbGoalText): fc.Arbitra
         steps: fc.nat({ max: 20 }),
     });
 
+const makeState = (goalText: string): AgentState => ({
+    goal: {
+        id: "test-goal",
+        cwd: "/tmp/test",
+        text: goalText,
+        mode: "write",
+    },
+    phase: "planning",
+    observations: [],
+    errors: [],
+    steps: 0,
+});
+
+const hasFilePaths = (goalText: string): boolean =>
+    extractSignals(makeState(goalText)).hasFilePaths;
+
 describe("signalExtractor property tests", () => {
+    describe("file path detection", () => {
+        it("detects common supported path forms", () => {
+            expect(hasFilePaths("Fix src/agent/core/patchStrategy/signalExtractor.ts")).toBe(true);
+            expect(hasFilePaths("Read ./src/index.ts:12:4")).toBe(true);
+            expect(hasFilePaths("Open C:\\Users\\me\\file.JSON")).toBe(true);
+            expect(hasFilePaths("Inspect file:///tmp/project/README.md.")).toBe(true);
+        });
+
+        it("ignores long path-like runs without regex backtracking", () => {
+            expect(hasFilePaths("-".repeat(2_000))).toBe(false);
+            expect(hasFilePaths(`${"a/".repeat(300)}not-a-known-extension.txt`)).toBe(false);
+        });
+    });
+
     /**
      * Property 8: Signal extractor determinism
      *
