@@ -1,5 +1,63 @@
 # Changelog
 
+## 1.21.0 - Agent Adaptive Systems
+
+### Features
+
+- **Adaptive Error Recovery** (`src/agent/core/errorRecovery/`): Category-aware error
+  classification and recovery strategy engine integrated into `decide.ts`.
+  - `classifyError`: maps AgentError to PatchError/LLMError/ShellError/FsError with subcategories.
+  - `decideRecoveryAction`: pure decision function with priority-ordered strategies
+    (terminate, skip, escalate, retry with refined prompt, wait with exponential backoff).
+  - Escalation threshold (3 consecutive same-category errors) triggers mode change or termination.
+  - Error pattern persistence at `.brass/error-patterns.json` for cross-run learning.
+
+- **Adaptive Validation Intensity** (`src/agent/core/validationIntensity/`): Feedback-driven
+  validation command filtering and fail-fast reordering.
+  - Three intensity levels: full → reduced → skip, with threshold-based transitions.
+  - `filterByIntensity`: gates validation commands by level (skip=none, reduced=typecheck only, full=all).
+  - `sortByFailFast`: reorders commands by historical failure rate × inverse time-to-failure.
+  - `computeNextIntensity`: state machine with failure-resets and consecutive-pass promotions.
+  - History persistence at `.brass/validation-history.json`.
+
+- **Adaptive Output Verbosity** (`src/agent/core/outputVerbosity/`): Environment-aware
+  event filtering layer over `AgentEventSink`.
+  - Signal composition: CI override → user pref → pipe detection → TTY width → historical duration.
+  - `VerbosityFilter`: wraps event sink, gates emission by level (minimal/normal/verbose).
+  - `RunDurationTracker`: mid-run escalation from minimal→normal after 30s elapsed.
+  - Preferences persistence at `.brass/output-prefs.json` with bounded history buffer.
+
+- **Approval Strategy Learning** (`src/agent/core/approvalLearning/`): Adaptive auto-approval
+  using exponential decay confidence scoring.
+  - `computeConfidence`: weighted approval rate over sliding window with decay weighting.
+  - `shouldAutoApprove`: gates on confidence > threshold AND samples >= minSampleSize.
+  - `makeLearningApprovalService`: transparent `ApprovalService` wrapper with observation recording.
+  - `validateConfig`: strict validation of threshold (0,1], window, decayFactor (0,1), minSampleSize.
+  - History persistence at `.brass/approval-history.json`.
+
+- **Workspace Profile Evolution** (`src/agent/core/workspaceMemory/`): Cross-session
+  workspace learning with bandit prior seeding and mid-run re-inference triggers.
+  - Memory categories: file change frequency, command failure rate, goal pattern success, co-change clusters.
+  - `evictToCapacity`: LRU eviction with key tiebreaker, capped at 500 entries per category.
+  - `seedContextBanditPriors` / `seedPatchStrategyPriors`: convert workspace stats to Beta priors.
+  - `detectTrigger` / `shouldReInfer`: mid-run host profile re-inference with 10-step cooldown.
+  - Memory persistence at `.brass/workspace-memory.json`.
+
+### Testing
+
+- 13 property tests for error recovery (classification, escalation, strategy decisions).
+- 12 property tests for validation intensity (ordering, filtering, transitions, stats).
+- 11 property tests for output verbosity (signals, filtering, escalation, store).
+- 10 property tests for approval learning (confidence, decay, window, threshold, isolation).
+- 10 property tests for workspace memory (cap, isolation, round-trip, seeding, triggers).
+- Integration tests for decide.ts recovery flow, validation filter wiring, verbosity
+  initialization, and runner lifecycle.
+
+### Validation
+
+- `npm run test:types` — 0 errors
+- `npm test` — 2123 tests passing across 229 test files
+
 ## 1.20.0 - Agent Intelligence Layer
 
 ### Features
