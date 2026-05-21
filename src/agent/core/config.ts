@@ -13,6 +13,7 @@ import type {
 import type { AgentBatchConfig } from "./batch";
 import type { PatchStrategyConfig } from "./patchStrategy/types";
 import type { BudgetConfigInput } from "./llmBudget/types";
+import type { LearningConfig } from "./approvalLearning/types";
 
 export type AgentConfigApprovalMode = "auto" | "interactive" | "approve" | "deny";
 
@@ -84,6 +85,7 @@ export type AgentConfig = {
     readonly batch?: AgentBatchConfig;
     readonly patchStrategy?: PatchStrategyConfig;
     readonly budget?: BudgetConfigInput;
+    readonly approvalLearning?: Partial<LearningConfig>;
 };
 
 export type LoadedAgentConfig = {

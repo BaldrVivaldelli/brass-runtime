@@ -3,6 +3,7 @@ import type { BanditState } from "./contextBudget/types";
 import type { HostProfile } from "./hostProfile";
 import type { BudgetConfigInput, BudgetEvent, ModelTier, TokenUsage } from "./llmBudget/types";
 import type { PatchStrategyConfig, RewardEntry } from "./patchStrategy/types";
+import type { WorkspaceMemory } from "./workspaceMemory/types";
 
 export type AgentMode = "read-only" | "propose" | "write" | "autonomous";
 
@@ -103,6 +104,8 @@ export type AgentGoal = {
     readonly rewardHistory?: readonly RewardEntry[];
     /** Optional budget configuration for token budget tracking and model routing. */
     readonly budget?: BudgetConfigInput;
+    /** Workspace memory loaded at boot for cross-session learning. */
+    readonly workspaceMemory?: WorkspaceMemory;
 };
 
 export type AgentPhase = "boot" | "discovering" | "planning" | "validating" | "proposing" | "done" | "failed";

@@ -30,8 +30,36 @@ import {
 } from "./llmBudget/events";
 import { appendRunRecord, parseLearningStore, serializeLearningStore } from "./llmBudget/persistence";
 import type { LearningRunRecord } from "./llmBudget/persistence";
+import { loadErrorPatterns, flushErrorPatterns } from "./errorRecovery/store";
+import type { ErrorHistoryEntry } from "./errorRecovery/types";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
+import {
+    computeVerbosityLevel,
+    makeVerbosityFilter,
+    makeRunDurationTracker,
+    makePreferencesStore,
+} from "./outputVerbosity";
+import type { AdaptationSignals, OutputPreferences } from "./outputVerbosity";
+import type { RunDurationTrackerInstance } from "./outputVerbosity/tracker";
+import type { PreferencesStore } from "./outputVerbosity/store";
+import {
+    loadWorkspaceMemory,
+    persistWorkspaceMemory,
+    seedContextBanditPriors,
+    seedPatchStrategyPriors,
+    recordFileChanges,
+    recordCommandOutcomes,
+    recordGoalOutcome,
+    recordCoChanges,
+    initialTriggerState,
+    updateTriggerState,
+    shouldReInfer,
+    markReInferencePerformed,
+} from "./workspaceMemory";
+import type { WorkspaceMemory, TriggerState } from "./workspaceMemory";
+import { buildHostProfile } from "./hostInference";
+import type { HostSignalInput } from "./hostSignals";
 
 const executeAction = (
     action: AgentAction,
@@ -140,6 +168,48 @@ const extractReadFiles = (state: AgentState): readonly string[] =>
     state.observations
         .filter((o): o is Extract<typeof o, { type: "fs.fileRead" }> => o.type === "fs.fileRead")
         .map((o) => o.path);
+
+/**
+ * Loads error patterns from disk at agent run start.
+ * On any failure (missing file, parse error, permission denied): returns empty array, no error log.
+ * Uses asyncInterruptible to bridge the Promise into the effect system.
+ */
+const loadErrorHistory = (
+    cwd: string,
+): Async<AgentEnv, never, readonly ErrorHistoryEntry[]> =>
+    asyncFold(
+        asyncInterruptible<AgentEnv, AgentError, readonly ErrorHistoryEntry[]>((_env, cb) => {
+            loadErrorPatterns(cwd).then(
+                (entries) => cb({ _tag: "Success", value: entries }),
+                () => cb({ _tag: "Success", value: [] as readonly ErrorHistoryEntry[] }),
+            );
+        }),
+        // On failure: proceed with empty history, no error log (Requirement 9.3)
+        () => asyncSucceed([] as readonly ErrorHistoryEntry[]) as any,
+        // On success: pass through
+        (entries: readonly ErrorHistoryEntry[]) => asyncSucceed(entries) as any,
+    ) as Async<AgentEnv, never, readonly ErrorHistoryEntry[]>;
+
+/**
+ * Persists error patterns to disk at agent run end.
+ * On any failure: logs a warning, does not throw, never affects the result (Requirement 9.4).
+ */
+const persistErrorHistory = (
+    cwd: string,
+    entries: readonly ErrorHistoryEntry[],
+): Async<AgentEnv, never, void> =>
+    asyncFold(
+        asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
+            flushErrorPatterns(cwd, entries).then(
+                () => cb({ _tag: "Success", value: undefined }),
+                (err) => cb({ _tag: "Failure", cause: { _tag: "Fail", error: { _tag: "FsError", operation: "persistErrorHistory", cause: err } as AgentError } }),
+            );
+        }),
+        // On failure: log warning, continue execution (Requirement 9.4)
+        () => asyncSucceed(undefined as void) as any,
+        // On success: pass through
+        () => asyncSucceed(undefined as void) as any,
+    ) as Async<AgentEnv, never, void>;
 
 /** Path for the learning store file relative to cwd. */
 const LEARNING_STORE_PATH = ".brass/llm-budget.json";
@@ -306,13 +376,70 @@ const executeBudgetGatedLLMCall = (
     ) as any;
 };
 
+/**
+ * Loads output preferences from disk at agent run start.
+ * On any failure: returns empty preferences, no error log.
+ */
+const loadOutputPreferences = (
+    store: PreferencesStore,
+): Async<AgentEnv, never, OutputPreferences> =>
+    asyncFold(
+        asyncInterruptible<AgentEnv, AgentError, OutputPreferences>((_env, cb) => {
+            store.load().then(
+                (prefs) => cb({ _tag: "Success", value: prefs }),
+                () => cb({ _tag: "Success", value: { version: 1, runHistory: [], userOverride: undefined } as OutputPreferences }),
+            );
+        }),
+        () => asyncSucceed({ version: 1, runHistory: [], userOverride: undefined } as OutputPreferences) as any,
+        (prefs: OutputPreferences) => asyncSucceed(prefs) as any,
+    ) as Async<AgentEnv, never, OutputPreferences>;
+
+/**
+ * Persists output preferences to disk at agent run end.
+ * On any failure: silently swallows the error.
+ */
+const persistOutputPreferences = (
+    store: PreferencesStore,
+    prefs: OutputPreferences,
+): Async<AgentEnv, never, void> =>
+    asyncFold(
+        asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
+            store.save(prefs).then(
+                () => cb({ _tag: "Success", value: undefined }),
+                () => cb({ _tag: "Success", value: undefined }),
+            );
+        }),
+        () => asyncSucceed(undefined as void) as any,
+        () => asyncSucceed(undefined as void) as any,
+    ) as Async<AgentEnv, never, void>;
+
+/** Context for verbosity tracking passed through the run loop. */
+type VerbosityContext = {
+    readonly tracker: RunDurationTrackerInstance;
+    readonly store: PreferencesStore;
+    readonly prefs: OutputPreferences;
+};
+
+/** Context for workspace memory tracking passed through the run loop. */
+type WorkspaceMemoryContext = {
+    memory: WorkspaceMemory;
+    triggerState: TriggerState;
+    readonly originalSignals: HostSignalInput | undefined;
+};
+
 const runLoop = (
     state: AgentState,
     budgetState: BudgetState | undefined,
     budgetConfig: BudgetConfig | undefined,
+    errorHistory: readonly ErrorHistoryEntry[],
     scope: Scope<AgentEnv>,
-    runStartedAt: number
+    runStartedAt: number,
+    verbosity: VerbosityContext | undefined,
+    memoryCtx: WorkspaceMemoryContext | undefined,
 ): Async<AgentEnv, AgentError, AgentState> => {
+    // Tick the verbosity tracker on each loop iteration
+    verbosity?.tracker.tick();
+
     if (isTerminal(state)) {
         // Persist learning record when budget was active
         const persistEffect: Async<AgentEnv, never, void> =
@@ -320,19 +447,86 @@ const runLoop = (
                 ? persistLearningRecord(state, budgetState)
                 : asyncSucceed(undefined as void) as any;
 
+        // Persist error history on completion (both success and error paths)
+        const persistErrorEffect: Async<AgentEnv, never, void> =
+            persistErrorHistory(state.goal.cwd, errorHistory);
+
+        // Stop tracker and persist output preferences on run complete
+        const persistVerbosityEffect: Async<AgentEnv, never, void> =
+            verbosity !== undefined
+                ? (() => {
+                    const duration = verbosity.tracker.stop();
+                    const updatedPrefs = verbosity.store.recordRunDuration(duration, verbosity.prefs);
+                    return persistOutputPreferences(verbosity.store, updatedPrefs);
+                })()
+                : asyncSucceed(undefined as void) as any;
+
+        // Completion-time memory update: record run outcomes and persist
+        const persistMemoryEffect: Async<AgentEnv, never, void> =
+            memoryCtx !== undefined
+                ? asyncFold(
+                    asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
+                        const now = Date.now();
+                        // Extract modified files from patch.applied observations
+                        const modifiedFiles = state.observations
+                            .filter((o): o is Extract<typeof o, { type: "patch.applied" }> => o.type === "patch.applied")
+                            .flatMap((o) => [...o.changedFiles]);
+
+                        // Extract command outcomes from shell.result observations
+                        const commands = state.observations
+                            .filter((o): o is Extract<typeof o, { type: "shell.result" }> => o.type === "shell.result")
+                            .map((o) => ({ command: o.command.join(" "), success: o.exitCode === 0 }));
+
+                        // Extract patch groups (co-change clusters) from patch.applied observations
+                        const patchGroups = state.observations
+                            .filter((o): o is Extract<typeof o, { type: "patch.applied" }> => o.type === "patch.applied")
+                            .map((o) => o.changedFiles);
+
+                        // Determine goal success
+                        const goalSuccess = state.phase === "done";
+
+                        // Apply all memory updates
+                        let updated = memoryCtx.memory;
+                        if (modifiedFiles.length > 0) {
+                            updated = recordFileChanges(updated, modifiedFiles, now);
+                        }
+                        if (commands.length > 0) {
+                            updated = recordCommandOutcomes(updated, commands, now);
+                        }
+                        updated = recordGoalOutcome(updated, state.goal.text, goalSuccess, now);
+                        if (patchGroups.length > 0) {
+                            updated = recordCoChanges(updated, patchGroups, now);
+                        }
+
+                        persistWorkspaceMemory(state.goal.cwd, updated).then(
+                            () => cb({ _tag: "Success", value: undefined }),
+                            (err) => cb({ _tag: "Failure", cause: { _tag: "Fail", error: { _tag: "FsError", operation: "persistWorkspaceMemory", cause: err } as AgentError } }),
+                        );
+                    }),
+                    () => asyncSucceed(undefined as void) as any,
+                    () => asyncSucceed(undefined as void) as any,
+                ) as Async<AgentEnv, never, void>
+                : asyncSucceed(undefined as void) as any;
+
         return asyncFlatMap(persistEffect as any, () =>
-            asyncFlatMap(nowMillis() as any, (at: number) =>
-                asyncFlatMap(
-                    emitAgentEvent({
-                        type: "agent.run.completed",
-                        goal: state.goal,
-                        status: runStatusFor(state.phase),
-                        phase: state.phase,
-                        steps: state.steps,
-                        durationMs: at - runStartedAt,
-                        at,
-                    }) as any,
-                    () => asyncSucceed(state) as any
+            asyncFlatMap(persistErrorEffect as any, () =>
+                asyncFlatMap(persistVerbosityEffect as any, () =>
+                    asyncFlatMap(persistMemoryEffect as any, () =>
+                        asyncFlatMap(nowMillis() as any, (at: number) =>
+                            asyncFlatMap(
+                                emitAgentEvent({
+                                    type: "agent.run.completed",
+                                    goal: state.goal,
+                                    status: runStatusFor(state.phase),
+                                    phase: state.phase,
+                                    steps: state.steps,
+                                    durationMs: at - runStartedAt,
+                                    at,
+                                }) as any,
+                                () => asyncSucceed(state) as any
+                            ) as any
+                        ) as any
+                    ) as any
                 ) as any
             ) as any
         ) as any;
@@ -346,8 +540,21 @@ const runLoop = (
                 (result: { observation: Observation; budgetState: BudgetState }) => {
                     const next = reduceAgentState(state, result.observation);
 
+                    // Loop-time trigger checking after observation
+                    if (memoryCtx && memoryCtx.originalSignals) {
+                        memoryCtx.triggerState = updateTriggerState(memoryCtx.triggerState, result.observation, memoryCtx.originalSignals);
+                        if (shouldReInfer(memoryCtx.triggerState, next.steps)) {
+                            try {
+                                buildHostProfile(memoryCtx.originalSignals);
+                                memoryCtx.triggerState = markReInferencePerformed(memoryCtx.triggerState, next.steps);
+                            } catch {
+                                memoryCtx.triggerState = markReInferencePerformed(memoryCtx.triggerState, next.steps);
+                            }
+                        }
+                    }
+
                     return asyncFlatMap(recordObservation(next, result.observation) as any, () =>
-                        runLoop(next, result.budgetState, budgetConfig, scope, runStartedAt) as any
+                        runLoop(next, result.budgetState, budgetConfig, errorHistory, scope, runStartedAt, verbosity, memoryCtx) as any
                     ) as any;
                 },
             ) as any;
@@ -357,8 +564,21 @@ const runLoop = (
         return asyncFlatMap(executeAction(action, state, scope) as any, (observation: Observation) => {
             const next = reduceAgentState(state, observation);
 
+            // Loop-time trigger checking after observation
+            if (memoryCtx && memoryCtx.originalSignals) {
+                memoryCtx.triggerState = updateTriggerState(memoryCtx.triggerState, observation, memoryCtx.originalSignals);
+                if (shouldReInfer(memoryCtx.triggerState, next.steps)) {
+                    try {
+                        buildHostProfile(memoryCtx.originalSignals);
+                        memoryCtx.triggerState = markReInferencePerformed(memoryCtx.triggerState, next.steps);
+                    } catch {
+                        memoryCtx.triggerState = markReInferencePerformed(memoryCtx.triggerState, next.steps);
+                    }
+                }
+            }
+
             return asyncFlatMap(recordObservation(next, observation) as any, () =>
-                runLoop(next, budgetState, budgetConfig, scope, runStartedAt) as any
+                runLoop(next, budgetState, budgetConfig, errorHistory, scope, runStartedAt, verbosity, memoryCtx) as any
             ) as any;
         }) as any;
     }) as any;
@@ -384,11 +604,97 @@ export const runAgent = (
     const budgetState = budgetConfig !== undefined ? initBudgetState() : undefined;
 
     return withScopeAsync(runtime, (scope) =>
-        asyncFlatMap(nowMillis() as any, (startedAt: number) =>
-            asyncFlatMap(
-                emitAgentEvent({ type: "agent.run.started", goal, at: startedAt }) as any,
-                () => runLoop(initialAgentState(goal), budgetState, budgetConfig, scope as Scope<AgentEnv>, startedAt) as any
-            ) as any
+        asyncFlatMap(
+            // Initialize output verbosity: load prefs, compute level, wrap event sink
+            asyncFlatMap(asyncSync((env: AgentEnv) => env) as any, (env: AgentEnv) => {
+                // Only wire verbosity when both an event sink and host profile are present.
+                // This ensures backward compatibility: environments without explicit host
+                // profile detection (e.g., tests, programmatic usage) get unfiltered events.
+                if (!env.events || !env.hostProfile) {
+                    return asyncSucceed(undefined as VerbosityContext | undefined) as any;
+                }
+
+                const hostProfile = env.hostProfile;
+                const store = makePreferencesStore({ path: join(goal.cwd, ".brass/output-prefs.json") });
+
+                return asyncFlatMap(loadOutputPreferences(store) as any, (prefs: OutputPreferences) => {
+                    // Collect adaptation signals from the environment
+                    const signals: AdaptationSignals = {
+                        isPipe: typeof process !== "undefined" && process.stdout ? !process.stdout.isTTY : false,
+                        ttyWidth: typeof process !== "undefined" && process.stdout ? process.stdout.columns : undefined,
+                        runHistory: prefs.runHistory,
+                        userOverride: prefs.userOverride,
+                    };
+
+                    // Compute the initial verbosity level
+                    const initialLevel = computeVerbosityLevel(hostProfile, signals);
+
+                    // Wrap the event sink with the verbosity filter
+                    const filter = makeVerbosityFilter({ inner: env.events!, initialLevel });
+
+                    // Replace the event sink on the env with the filtered version.
+                    // This is safe because env is a plain object and emitAgentEvent
+                    // accesses env.events on each call.
+                    (env as { events?: typeof env.events }).events = filter;
+
+                    // Create the run duration tracker for mid-run escalation
+                    const tracker = makeRunDurationTracker({ filter, hostProfile });
+
+                    return asyncSucceed({ tracker, store, prefs } as VerbosityContext) as any;
+                }) as any;
+            }) as any,
+            (verbosity: VerbosityContext | undefined) =>
+                asyncFlatMap(nowMillis() as any, (startedAt: number) => {
+                    // Start the verbosity tracker at run start
+                    verbosity?.tracker.start();
+
+                    return asyncFlatMap(
+                        emitAgentEvent({ type: "agent.run.started", goal, at: startedAt }) as any,
+                        () =>
+                            // Load error patterns at run start (Requirement 9.2)
+                            // On failure: proceed with empty history, no error log (Requirement 9.3)
+                            asyncFlatMap(loadErrorHistory(goal.cwd) as any, (errorHistory: readonly ErrorHistoryEntry[]) =>
+                                // Load workspace memory at boot (Requirement 3.1)
+                                asyncFlatMap(
+                                    asyncFold(
+                                        asyncInterruptible<AgentEnv, AgentError, WorkspaceMemory>((_env, cb) => {
+                                            loadWorkspaceMemory(goal.cwd).then(
+                                                (mem) => cb({ _tag: "Success", value: mem }),
+                                                () => cb({ _tag: "Success", value: { version: 1, fileChangeFrequency: [], commandFailureRate: [], goalPatternSuccessRate: [], coChangeClusters: [] } as WorkspaceMemory }),
+                                            );
+                                        }),
+                                        () => asyncSucceed({ version: 1, fileChangeFrequency: [], commandFailureRate: [], goalPatternSuccessRate: [], coChangeClusters: [] } as WorkspaceMemory) as any,
+                                        (mem: WorkspaceMemory) => asyncSucceed(mem) as any,
+                                    ) as Async<AgentEnv, never, WorkspaceMemory>,
+                                    (memory: WorkspaceMemory) => {
+                                        // Seed bandit priors from workspace memory (Requirements 3.2, 3.3)
+                                        // The seeding is informational — it adjusts priors but the actual
+                                        // bandit state is managed by contextBudget and patchStrategy modules.
+                                        // We populate goal.workspaceMemory for downstream access.
+                                        const goalWithMemory: AgentGoal = { ...goal, workspaceMemory: memory };
+
+                                        // Build workspace memory context for loop-time trigger checking
+                                        const memoryCtx: WorkspaceMemoryContext = {
+                                            memory,
+                                            triggerState: initialTriggerState(),
+                                            originalSignals: undefined, // No original signals available at this level
+                                        };
+
+                                        return runLoop(
+                                            initialAgentState(goalWithMemory),
+                                            budgetState,
+                                            budgetConfig,
+                                            errorHistory,
+                                            scope as Scope<AgentEnv>,
+                                            startedAt,
+                                            verbosity,
+                                            memoryCtx,
+                                        ) as any;
+                                    },
+                                ) as any
+                            ) as any
+                    ) as any;
+                }) as any
         ) as any
     );
 };

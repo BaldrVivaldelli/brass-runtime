@@ -31,6 +31,10 @@ import { extractSignals } from "./patchStrategy/signalExtractor";
 import { strategyPromptFragment } from "./patchStrategy/promptStrategy";
 import type { PatchStrategy } from "./patchStrategy/types";
 import { sampleBeta } from "./contextBudget/banditEngine";
+import { classifyError, decideRecoveryAction, consecutiveCount } from "./errorRecovery";
+import type { ErrorHistory, RecoveryState } from "./errorRecovery";
+import { filterByIntensity, emptyHistory } from "./validationIntensity";
+import type { IntensityLevel, ValidationHistory } from "./validationIntensity";
 import type { AgentAction, AgentEnv, AgentError, AgentMode, AgentState, Observation } from "./types";
 
 const hasObservation = <T extends Observation["type"]>(state: AgentState, type: T): boolean =>
@@ -349,7 +353,10 @@ const nextValidationActionBeforePlanning = (state: AgentState): AgentAction | un
 
 const nextValidationActionAfterPatch = (state: AgentState): AgentAction | undefined => {
     const commands = discoverValidationCommands(state).validationCommands;
-    const next = nextUnrunValidationCommand(commands, observationsAfterPatch(state));
+    const intensityLevel: IntensityLevel = "full";
+    const history: ValidationHistory = emptyHistory();
+    const filtered = filterByIntensity(commands, intensityLevel, history);
+    const next = nextUnrunValidationCommand(filtered, observationsAfterPatch(state));
     return next ? { type: "shell.exec", command: next } : undefined;
 };
 
@@ -480,18 +487,88 @@ const initialPatchFlowAction = (state: AgentState, suppliedPatch: string): Agent
     return undefined;
 };
 
+/**
+ * Build an ErrorHistory from the agent's accumulated errors array.
+ * Each error in state.errors is mapped to an ErrorHistoryEntry.
+ * Entries are marked resolved: false since resolution tracking is handled externally.
+ */
+const buildErrorHistory = (state: AgentState): ErrorHistory => {
+    const entries = state.errors.map((error) => {
+        const classified = classifyError(error);
+        return {
+            category: classified.category,
+            subcategory: classified.subcategory,
+            timestamp: Date.now(),
+            resolved: false,
+        } as const;
+    });
+    return { entries };
+};
+
+/**
+ * Build a RecoveryState from the current agent state and error history.
+ * Derives consecutiveCount, category, subcategory, and repairBudgetRemaining.
+ */
+const buildRecoveryState = (state: AgentState, error: ReturnType<typeof classifyError>, history: ErrorHistory): RecoveryState => {
+    const summary = patchQualitySummary(state);
+    return {
+        consecutiveCount: consecutiveCount(history.entries, error.category),
+        category: error.category,
+        subcategory: error.subcategory,
+        repairBudgetRemaining: summary.repairsRemaining,
+    };
+};
+
+/**
+ * Map a RecoveryAction from the error recovery engine to an AgentAction.
+ * - retry → llm.complete with purpose "patch" and the refined prompt from buildPatchRepairPrompt
+ * - wait → no-op; the next iteration will retry (backoff is informational)
+ * - skip → returns undefined to signal "proceed with normal decision logic"
+ * - escalate → agent.finish with the escalation reason
+ * - terminate → agent.finish with the summary
+ */
+const mapRecoveryToAction = (
+    state: AgentState,
+    recovery: ReturnType<typeof decideRecoveryAction>,
+): AgentAction | undefined => {
+    switch (recovery.type) {
+        case "retry":
+            return repairAction(state, recovery.errorContext);
+        case "wait":
+            // Wait is a no-op in the synchronous agent loop; the next iteration will retry.
+            // Return undefined to let the decision loop continue (same as skip behavior).
+            return undefined;
+        case "skip":
+            // Skip means proceed with normal flow — return undefined to fall through.
+            return undefined;
+        case "escalate":
+            return { type: "agent.finish", summary: recovery.reason };
+        case "terminate":
+            return { type: "agent.finish", summary: recovery.summary };
+    }
+};
+
 export const decideNextAction = (state: AgentState): Async<AgentEnv, AgentError, AgentAction> => {
     const latest = state.observations.at(-1);
 
     if (latest?.type === "agent.error") {
-        if (shouldRequestRepairAfterPatchError(state)) {
-            if (state.goal.llmAvailable === false) {
+        const error = latest.error;
+        const classified = classifyError(error);
+        const history = buildErrorHistory(state);
+        const recoveryState = buildRecoveryState(state, classified, history);
+        const recovery = decideRecoveryAction(classified, recoveryState, history);
+        const action = mapRecoveryToAction(state, recovery);
+
+        if (action) {
+            // For retry actions, check if LLM is available
+            if (action.type === "llm.complete" && state.goal.llmAvailable === false) {
                 return asyncSucceed({ type: "agent.finish", summary: buildErrorSummary(state) }) as any;
             }
-            return asyncSucceed(repairAction(state, "previous patch failed to apply")) as any;
+            return asyncSucceed(action) as any;
         }
 
-        return asyncSucceed({ type: "agent.finish", summary: buildErrorSummary(state) }) as any;
+        // If action is undefined (skip or wait), fall through to normal decision logic below.
+        // This preserves the "skip" semantics: proceed to next action.
     }
 
     if (!hasObservation(state, "fs.fileRead")) {
