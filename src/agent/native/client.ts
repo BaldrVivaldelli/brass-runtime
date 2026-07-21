@@ -416,8 +416,15 @@ function clampPriority(value: number): number {
 
 function defaultNonce(): string {
   const cryptoObject = globalThis.crypto;
-  if (cryptoObject?.randomUUID) return cryptoObject.randomUUID();
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  if (!cryptoObject?.getRandomValues) {
+    throw new NativeServiceError(
+      "INVALID_CONFIG",
+      "native service requires Web Crypto to generate secure nonces",
+    );
+  }
+  const bytes = new Uint8Array(16);
+  cryptoObject.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 function abortError(): DOMException {

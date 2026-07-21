@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { delimiter, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { packageUrl } from "./release-package-url.mjs";
 
 const root = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const outputDirectory = resolve(root, process.env.BRASS_RELEASE_OUTPUT_DIR ?? "artifacts/release");
@@ -47,7 +48,7 @@ const spdxPackages = inventory.map((item) => ({
   externalRefs: [{
     referenceCategory: "PACKAGE-MANAGER",
     referenceType: item.ecosystem === "npm" ? "purl" : "purl",
-    referenceLocator: purl(item),
+    referenceLocator: packageUrl(item),
   }],
   comment: item.development ? "Development dependency; not shipped in the npm runtime package." : undefined,
 }));
@@ -172,11 +173,6 @@ function comparePackage(left, right) {
 
 function spdxId(item) {
   return `SPDXRef-${item.ecosystem}-${item.name}-${item.version}`.replace(/[^A-Za-z0-9.-]/gu, "-");
-}
-
-function purl(item) {
-  const name = item.name.startsWith("@") ? item.name.replace("/", "%2F") : item.name;
-  return `pkg:${item.ecosystem}/${name}@${item.version}`;
 }
 
 function writeJson(path, value) {

@@ -440,6 +440,24 @@ describe("native service client and read-only pilot", () => {
       transportFactory: () => new FakeNativeTransport(),
     })).toThrow(NativeServiceError);
   });
+
+  it("generates distinct cryptographic session IDs and protocol nonces by default", async () => {
+    const transport = new FakeNativeTransport();
+    const client = new NativeServiceClient({
+      workspaceId: "workspace",
+      clientBuild: "test",
+      transportFactory: () => transport,
+    });
+
+    await client.connect();
+
+    const hello = transport.requests[0];
+    expect(hello.sessionId).toMatch(/^[0-9a-f]{32}$/u);
+    expect(hello.nonce).toMatch(/^[0-9a-f]{32}$/u);
+    expect(hello.sessionId).not.toBe(hello.nonce);
+
+    await client.shutdown();
+  });
 });
 
 function nonceSequence(): () => string {

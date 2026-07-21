@@ -63,6 +63,9 @@
 
 ### Security
 
+- Addressed CodeQL review findings by generating native-service session IDs and
+  protocol nonces exclusively with Web Crypto and by applying complete,
+  segment-aware percent encoding to package URLs in release SBOMs.
 - Pinned patched transitive tooling versions with package overrides:
   `brace-expansion@5.0.7`, `vite@8.1.5`, and `esbuild@0.28.1`.
   This closes the brace-expansion denial-of-service advisories, the Vite
