@@ -61,6 +61,17 @@
   uploads. The editor-specific native binary remains separate from the generic
   npm runtime package and retains immediate TypeScript reversal.
 
+### Security
+
+- Pinned patched transitive tooling versions with package overrides:
+  `brace-expansion@5.0.7`, `vite@8.1.5`, and `esbuild@0.28.1`.
+  This closes the brace-expansion denial-of-service advisories, the Vite
+  Windows path/UNC advisories, and the esbuild Windows development-server file
+  disclosure advisory while upstream `tsup@8.5.1` still declares esbuild 0.27.
+- A clean `npm ci`, full and production-only `npm audit`, Vitest suite, tsup
+  ESM/CJS/DTS build, and CJS validation all pass with zero known npm
+  vulnerabilities.
+
 ### Validation
 
 - `npm run release:check` passes, including Rust fmt/Clippy/tests, a real WASM
