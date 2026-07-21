@@ -109,6 +109,26 @@ const results = await run(queue.offerBatch(items));
 const batch = await run(queue.takeBatch(50));
 ```
 
+### Bounded queue strategy contract
+
+| Strategy | Full-queue `offer` | Retained order | Producer waits |
+| --- | --- | --- | --- |
+| `backpressure` | Suspends until a take admits the value; a cancelled offer is removed | FIFO | Yes |
+| `dropping` | Returns `false` and keeps the existing values | FIFO for accepted values | No |
+| `sliding` | Evicts the oldest value, accepts the newest, and returns `true` | FIFO after eviction | No |
+
+All strategies hand a value directly to an already-waiting taker. `shutdown()`
+is idempotent, fails suspended and future takes with `QueueClosed`, resolves
+suspended offers with `false`, clears retained values, and leaves no waiters.
+`offerBatch` never suspends: a full backpressure queue returns `false` for each
+value that cannot be admitted.
+
+`queue.stats()` returns a frozen point-in-time snapshot with occupancy and high
+water marks, offered/accepted/dropped/slid totals, waiting producer/consumer
+counts, cancellation counts, cumulative/max wait durations, and values cleared
+by shutdown. The optional `now` clock exists for deterministic tests; use a
+monotonic source in production when overriding it.
+
 ## Performance tips
 
 1. **Use `andThen` for composition** — triggers automatic fusion

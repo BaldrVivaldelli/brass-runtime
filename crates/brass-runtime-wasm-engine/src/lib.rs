@@ -1,4 +1,12 @@
-use js_sys::{Array, Uint32Array};
+use brass_engine_core::{
+    decode_patch_nodes_words, decode_program_words, validate_node_references, EngineHandshake,
+    FiberRegistry as CoreFiberRegistry, GenerationalSlab, Node, Program, SchedulerStateMachine,
+    TimerWheel as CoreTimerWheel, ABI_VERSION, EVENT_WORDS, MAX_EVENT_BATCH, MAX_LANES,
+    MAX_LANE_CAPACITY, MAX_PATCH_WORDS, MAX_PROGRAM_NODES, MAX_PROGRAM_WORDS, MAX_TIMER_BUCKETS,
+    NONE_U32, OP_ASYNC, OP_FAIL, OP_FLAT_MAP, OP_FOLD, OP_FORK, OP_HOST_ACTION, OP_SUCCEED,
+    OP_SYNC,
+};
+use js_sys::{Array, Error as JsError, Uint32Array};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use wasm_bindgen::prelude::*;
@@ -60,27 +68,6 @@ pub enum OpcodeNode {
     },
 }
 
-#[derive(Debug, Clone)]
-struct Program {
-    root: NodeId,
-    nodes: Vec<Node>,
-}
-
-#[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Node {
-    tag: u32,
-    a: u32,
-    b: u32,
-    c: u32,
-}
-
-impl Node {
-    const fn new(tag: u32, a: u32, b: u32, c: u32) -> Node {
-        Node { tag, a, b, c }
-    }
-}
-
 impl From<OpcodeNode> for Node {
     fn from(node: OpcodeNode) -> Node {
         match node {
@@ -111,11 +98,15 @@ impl From<OpcodeNode> for Node {
     }
 }
 
-fn json_program_to_program(json: JsonProgram) -> Program {
-    Program {
-        root: json.root,
-        nodes: json.nodes.into_iter().map(Node::from).collect(),
+fn json_program_to_program(json: JsonProgram) -> Result<Program, String> {
+    if json.version != ABI_VERSION {
+        return Err(format!(
+            "unsupported JSON program ABI version {}; this engine supports {}",
+            json.version, ABI_VERSION
+        ));
     }
+    Program::new(json.root, json.nodes.into_iter().map(Node::from).collect())
+        .map_err(|error| error.to_string())
 }
 
 #[derive(Debug, Clone)]
@@ -206,19 +197,6 @@ pub enum Event {
     },
 }
 
-const ABI_VERSION: u32 = 1;
-const NONE_U32: u32 = u32::MAX;
-const EVENT_WORDS: usize = 5;
-
-const OP_SUCCEED: u32 = 0;
-const OP_FAIL: u32 = 1;
-const OP_SYNC: u32 = 2;
-const OP_ASYNC: u32 = 3;
-const OP_FLAT_MAP: u32 = 4;
-const OP_FOLD: u32 = 5;
-const OP_FORK: u32 = 6;
-const OP_HOST_ACTION: u32 = 7;
-
 const EV_CONTINUE: u32 = 0;
 const EV_DONE: u32 = 1;
 const EV_FAILED: u32 = 2;
@@ -230,61 +208,6 @@ const EV_INVOKE_FOLD_FAILURE: u32 = 7;
 const EV_INVOKE_FOLD_SUCCESS: u32 = 8;
 const EV_INVOKE_FORK: u32 = 9;
 const EV_INVOKE_HOST_ACTION: u32 = 10;
-
-fn decode_program_words(words: &[u32]) -> Result<Program, String> {
-    if words.len() < 3 {
-        return Err(String::from(
-            "binary program must contain version, root and node count",
-        ));
-    }
-    if words[0] != ABI_VERSION {
-        return Err(format!(
-            "unsupported binary program ABI version {}",
-            words[0]
-        ));
-    }
-    let root = words[1];
-    let count = words[2] as usize;
-    let nodes = decode_nodes_body(&words[3..], count)?;
-    Ok(Program { root, nodes })
-}
-
-fn decode_patch_nodes_words(words: &[u32]) -> Result<Vec<Node>, String> {
-    if words.is_empty() {
-        return Ok(Vec::new());
-    }
-    let count = words[0] as usize;
-    decode_nodes_body(&words[1..], count)
-}
-
-fn decode_nodes_body(words: &[u32], count: usize) -> Result<Vec<Node>, String> {
-    let expected = count
-        .checked_mul(4)
-        .ok_or_else(|| String::from("node count overflow"))?;
-    if words.len() < expected {
-        return Err(format!(
-            "binary node buffer too short: expected {}, got {}",
-            expected,
-            words.len()
-        ));
-    }
-    let mut nodes = Vec::with_capacity(count);
-    for idx in 0..count {
-        let base = idx * 4;
-        let tag = words[base];
-        let a = words[base + 1];
-        let b = words[base + 2];
-        let c = words[base + 3];
-        match tag {
-            OP_SUCCEED | OP_FAIL | OP_SYNC | OP_ASYNC | OP_FLAT_MAP | OP_FOLD | OP_FORK
-            | OP_HOST_ACTION => {
-                nodes.push(Node::new(tag, a, b, c));
-            }
-            _ => return Err(format!("unknown binary opcode tag {} at node {}", tag, idx)),
-        }
-    }
-    Ok(nodes)
-}
 
 fn encode_event_words(event: &Event) -> [u32; EVENT_WORDS] {
     match event {
@@ -412,6 +335,11 @@ const VM_METRIC_COUNT: usize = 24;
 const RING_STATUS_OK: u32 = 0;
 const RING_STATUS_GREW: u32 = 1 << 0;
 const RING_STATUS_DROPPED: u32 = 1 << 1;
+const MAX_WASM_COLLECTION_ITEMS: usize = 1_048_576;
+const MAX_HTTP_KEYS: usize = 4_096;
+const MAX_RETRY_STATES: usize = 1_048_576;
+const MAX_JSON_PROGRAM_BYTES: usize = 64 * 1024 * 1024;
+const MAX_JSON_PATCH_BYTES: usize = 64 * 1024 * 1024;
 
 #[wasm_bindgen]
 pub struct BrassWasmRingBuffer {
@@ -426,17 +354,24 @@ pub struct BrassWasmRingBuffer {
 #[wasm_bindgen]
 impl BrassWasmRingBuffer {
     #[wasm_bindgen(constructor)]
-    pub fn new(initial_capacity: usize, max_capacity: usize) -> BrassWasmRingBuffer {
+    pub fn new(
+        initial_capacity: usize,
+        max_capacity: usize,
+    ) -> Result<BrassWasmRingBuffer, JsValue> {
+        if initial_capacity > MAX_WASM_COLLECTION_ITEMS || max_capacity > MAX_WASM_COLLECTION_ITEMS
+        {
+            return Err(js_error("ring buffer capacity exceeds the engine limit"));
+        }
         let init_pow = next_pow2(initial_capacity.max(2));
         let max_pow = next_pow2(max_capacity.max(init_pow));
-        BrassWasmRingBuffer {
+        Ok(BrassWasmRingBuffer {
             buf: vec![JsValue::UNDEFINED; init_pow],
             occupied: vec![false; init_pow],
             head: 0,
             tail: 0,
             len: 0,
             max_cap: max_pow,
-        }
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -548,15 +483,18 @@ pub struct BrassWasmChunkBuffer {
 #[wasm_bindgen]
 impl BrassWasmChunkBuffer {
     #[wasm_bindgen(constructor)]
-    pub fn new(max_chunk_size: usize) -> BrassWasmChunkBuffer {
+    pub fn new(max_chunk_size: usize) -> Result<BrassWasmChunkBuffer, JsValue> {
+        if max_chunk_size > MAX_WASM_COLLECTION_ITEMS {
+            return Err(js_error("chunk buffer capacity exceeds the engine limit"));
+        }
         let size = max_chunk_size.max(1);
-        BrassWasmChunkBuffer {
+        Ok(BrassWasmChunkBuffer {
             values: Vec::with_capacity(size),
             max_chunk_size: size,
             emitted_chunks: 0,
             emitted_items: 0,
             flushes: 0,
-        }
+        })
     }
 
     pub fn len(&self) -> usize {
@@ -598,15 +536,17 @@ impl BrassWasmChunkBuffer {
         self.values.clear();
     }
 
-    pub fn stats_json(&self) -> String {
-        serde_json::to_string(&ChunkBufferStats {
-            len: self.values.len(),
-            max_chunk_size: self.max_chunk_size,
-            emitted_chunks: self.emitted_chunks,
-            emitted_items: self.emitted_items,
-            flushes: self.flushes,
-        })
-        .expect("chunk buffer stats json")
+    pub fn stats_json(&self) -> Result<String, JsValue> {
+        encode_json(
+            &ChunkBufferStats {
+                len: self.values.len(),
+                max_chunk_size: self.max_chunk_size,
+                emitted_chunks: self.emitted_chunks,
+                emitted_items: self.emitted_items,
+                flushes: self.flushes,
+            },
+            "chunk-buffer stats",
+        )
     }
 }
 
@@ -730,8 +670,8 @@ impl LaneState {
     }
 }
 
-#[wasm_bindgen]
-pub struct BrassWasmSchedulerStateMachine {
+#[allow(dead_code)]
+struct LegacySchedulerStateMachine {
     lanes: Vec<LaneState>,
     lane_index: HashMap<String, LaneId>,
     rr_index: usize,
@@ -753,10 +693,9 @@ pub struct BrassWasmSchedulerStateMachine {
     lane_intern_misses: u64,
 }
 
-#[wasm_bindgen]
-impl BrassWasmSchedulerStateMachine {
-    #[wasm_bindgen(constructor)]
-    pub fn new(
+#[allow(dead_code)]
+impl LegacySchedulerStateMachine {
+    fn new(
         _initial_capacity: usize,
         max_capacity: usize,
         flush_budget: usize,
@@ -764,8 +703,8 @@ impl BrassWasmSchedulerStateMachine {
         lane_capacity: usize,
         lane_budget: usize,
         max_lanes: usize,
-    ) -> BrassWasmSchedulerStateMachine {
-        BrassWasmSchedulerStateMachine {
+    ) -> LegacySchedulerStateMachine {
+        LegacySchedulerStateMachine {
             lanes: Vec::new(),
             lane_index: HashMap::new(),
             rr_index: 0,
@@ -802,6 +741,9 @@ impl BrassWasmSchedulerStateMachine {
 
     pub fn len(&self) -> usize {
         self.total_len
+    }
+    pub fn is_empty(&self) -> bool {
+        self.total_len == 0
     }
     pub fn capacity(&self) -> usize {
         self.lanes.iter().map(LaneState::capacity).sum()
@@ -979,7 +921,7 @@ impl BrassWasmSchedulerStateMachine {
             lane_intern_misses: self.lane_intern_misses,
             lanes: self.lanes.iter().map(LaneState::stats).collect(),
         })
-        .expect("scheduler stats json")
+        .unwrap_or_else(|_| "{}".to_owned())
     }
 
     fn next_policy(&self) -> u32 {
@@ -1057,6 +999,146 @@ impl BrassWasmSchedulerStateMachine {
     }
 }
 
+/// Thin WASM binding around the host-independent scheduler in
+/// `brass-engine-core`. JavaScript conversion stays here; queueing/fairness
+/// state does not.
+#[wasm_bindgen]
+pub struct BrassWasmSchedulerStateMachine {
+    inner: SchedulerStateMachine,
+}
+
+#[wasm_bindgen]
+impl BrassWasmSchedulerStateMachine {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        initial_capacity: usize,
+        max_capacity: usize,
+        flush_budget: usize,
+        micro_threshold: usize,
+        lane_capacity: usize,
+        lane_budget: usize,
+        max_lanes: usize,
+    ) -> Result<BrassWasmSchedulerStateMachine, JsValue> {
+        if initial_capacity > MAX_LANE_CAPACITY
+            || max_capacity > MAX_LANE_CAPACITY
+            || lane_capacity > MAX_LANE_CAPACITY
+            || max_lanes > MAX_LANES
+            || flush_budget > MAX_EVENT_BATCH as usize
+            || lane_budget > MAX_EVENT_BATCH as usize
+        {
+            return Err(js_error(
+                "scheduler configuration exceeds the engine limits",
+            ));
+        }
+        Ok(BrassWasmSchedulerStateMachine {
+            inner: SchedulerStateMachine::new(
+                max_capacity,
+                flush_budget,
+                micro_threshold,
+                lane_capacity,
+                lane_budget,
+                max_lanes,
+            ),
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+    pub fn is_flushing(&self) -> bool {
+        self.inner.is_flushing()
+    }
+    pub fn is_scheduled(&self) -> bool {
+        self.inner.is_scheduled()
+    }
+    pub fn intern_lane(&mut self, key: &str) -> LaneId {
+        self.inner.intern_lane(key)
+    }
+    pub fn enqueue(&mut self, task_ref: u32, tag: &str) -> u32 {
+        self.inner.enqueue(task_ref, tag)
+    }
+
+    pub fn enqueue_batch(
+        &mut self,
+        task_refs: &[u32],
+        tags: Array,
+    ) -> Result<Uint32Array, JsValue> {
+        if task_refs.len() > MAX_EVENT_BATCH as usize {
+            return Err(js_error("scheduler batch exceeds the engine event limit"));
+        }
+        let out = Uint32Array::new_with_length(task_refs.len() as u32);
+        for (index, task_ref) in task_refs.iter().copied().enumerate() {
+            let tag = tags
+                .get(index as u32)
+                .as_string()
+                .unwrap_or_else(|| "anonymous".to_owned());
+            out.set_index(index as u32, self.inner.enqueue(task_ref, &tag));
+        }
+        Ok(out)
+    }
+
+    pub fn enqueue_lane(&mut self, task_ref: u32, lane_id: LaneId) -> u32 {
+        self.inner.enqueue_lane(task_ref, lane_id)
+    }
+    pub fn begin_flush(&mut self) -> usize {
+        self.inner.begin_flush()
+    }
+    pub fn shift(&mut self) -> u32 {
+        self.inner.shift().unwrap_or(0)
+    }
+    pub fn end_flush(&mut self, ran: usize) -> u32 {
+        self.inner.end_flush(ran)
+    }
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+    pub fn lane_len(&self, lane_id: LaneId) -> usize {
+        self.inner.lane_len(lane_id)
+    }
+    pub fn metric_u64(&self, id: u32) -> f64 {
+        self.inner.metric(id) as f64
+    }
+
+    pub fn stats_json(&self) -> Result<String, JsValue> {
+        let stats = self.inner.stats();
+        encode_json(
+            &SchedulerStats {
+                phase: stats.phase.as_str(),
+                len: stats.len,
+                capacity: stats.capacity,
+                scheduled_flushes: stats.scheduled_flushes,
+                completed_flushes: stats.completed_flushes,
+                enqueued_tasks: stats.enqueued_tasks,
+                executed_tasks: stats.executed_tasks,
+                dropped_tasks: stats.dropped_tasks,
+                yielded_by_budget: stats.yielded_by_budget,
+                lane_intern_hits: stats.lane_intern_hits,
+                lane_intern_misses: stats.lane_intern_misses,
+                lanes: stats
+                    .lanes
+                    .into_iter()
+                    .map(|lane| LaneStats {
+                        id: lane.id,
+                        key: lane.key,
+                        len: lane.len,
+                        capacity: lane.capacity,
+                        enqueued_tasks: lane.enqueued_tasks,
+                        executed_tasks: lane.executed_tasks,
+                        dropped_tasks: lane.dropped_tasks,
+                    })
+                    .collect(),
+            },
+            "scheduler stats",
+        )
+    }
+}
+
 #[wasm_bindgen]
 pub struct BrassWasmFiberReadyQueue {
     inner: BrassWasmSchedulerStateMachine,
@@ -1071,8 +1153,8 @@ impl BrassWasmFiberReadyQueue {
         lane_capacity: usize,
         lane_budget: usize,
         max_lanes: usize,
-    ) -> BrassWasmFiberReadyQueue {
-        BrassWasmFiberReadyQueue {
+    ) -> Result<BrassWasmFiberReadyQueue, JsValue> {
+        Ok(BrassWasmFiberReadyQueue {
             inner: BrassWasmSchedulerStateMachine::new(
                 lane_capacity.max(2),
                 lane_capacity.max(2),
@@ -1081,8 +1163,8 @@ impl BrassWasmFiberReadyQueue {
                 lane_capacity,
                 lane_budget,
                 max_lanes,
-            ),
-        }
+            )?,
+        })
     }
 
     pub fn intern_lane(&mut self, key: &str) -> LaneId {
@@ -1106,13 +1188,16 @@ impl BrassWasmFiberReadyQueue {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+    pub fn is_empty(&self) -> bool {
+        self.inner.len() == 0
+    }
     pub fn clear(&mut self) {
         self.inner.clear();
     }
     pub fn metric_u64(&self, id: u32) -> f64 {
         self.inner.metric_u64(id)
     }
-    pub fn stats_json(&self) -> String {
+    pub fn stats_json(&self) -> Result<String, JsValue> {
         self.inner.stats_json()
     }
 }
@@ -1162,10 +1247,7 @@ fn infer_lane(tag: &str) -> String {
             }
         }
     }
-    let first = tag
-        .split(|ch| ch == '.' || ch == '#' || ch == '/')
-        .next()
-        .unwrap_or(tag);
+    let first = tag.split(['.', '#', '/']).next().unwrap_or(tag);
     sanitize_lane_key(first)
 }
 
@@ -1179,9 +1261,9 @@ const FIBER_STATE_INTERRUPTED: u32 = 5;
 #[derive(Debug, Clone, Copy)]
 struct FiberRegistryEntry {
     state: u32,
-    parent_id: u32,
-    scope_id: u32,
-    created_at_ms: f64,
+    _parent_id: u32,
+    _scope_id: u32,
+    _created_at_ms: f64,
     last_active_at_ms: f64,
     joiners: u32,
     wakeups: u32,
@@ -1205,8 +1287,8 @@ struct FiberRegistryStats {
     joins: u64,
 }
 
-#[wasm_bindgen]
-pub struct BrassWasmFiberRegistry {
+#[allow(dead_code)]
+struct LegacyFiberRegistry {
     entries: HashMap<FiberId, FiberRegistryEntry>,
     wake_queue: Vec<FiberId>,
     wake_head: usize,
@@ -1217,11 +1299,16 @@ pub struct BrassWasmFiberRegistry {
     joins: u64,
 }
 
-#[wasm_bindgen]
-impl BrassWasmFiberRegistry {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> BrassWasmFiberRegistry {
-        BrassWasmFiberRegistry {
+impl Default for LegacyFiberRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(dead_code)]
+impl LegacyFiberRegistry {
+    fn new() -> LegacyFiberRegistry {
+        LegacyFiberRegistry {
             entries: HashMap::new(),
             wake_queue: Vec::new(),
             wake_head: 0,
@@ -1245,9 +1332,9 @@ impl BrassWasmFiberRegistry {
             fiber_id,
             FiberRegistryEntry {
                 state: FIBER_STATE_RUNNING,
-                parent_id,
-                scope_id,
-                created_at_ms: now_ms,
+                _parent_id: parent_id,
+                _scope_id: scope_id,
+                _created_at_ms: now_ms,
                 last_active_at_ms: now_ms,
                 joiners: 0,
                 wakeups: 0,
@@ -1381,7 +1468,7 @@ impl BrassWasmFiberRegistry {
             duplicate_wakeups: self.duplicate_wakeups,
             joins: self.joins,
         })
-        .expect("fiber registry stats json")
+        .unwrap_or_else(|_| "{}".to_owned())
     }
 
     fn set_state(&mut self, fiber_id: FiberId, state: u32, now_ms: f64) -> bool {
@@ -1393,6 +1480,90 @@ impl BrassWasmFiberRegistry {
             }
             None => false,
         }
+    }
+}
+
+#[wasm_bindgen]
+pub struct BrassWasmFiberRegistry {
+    inner: CoreFiberRegistry,
+}
+
+impl Default for BrassWasmFiberRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[wasm_bindgen]
+impl BrassWasmFiberRegistry {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> BrassWasmFiberRegistry {
+        BrassWasmFiberRegistry {
+            inner: CoreFiberRegistry::new(),
+        }
+    }
+
+    pub fn register_fiber(
+        &mut self,
+        fiber_id: FiberId,
+        parent_id: u32,
+        scope_id: u32,
+        now_ms: f64,
+    ) -> bool {
+        self.inner
+            .register_with_context(fiber_id, parent_id, scope_id, now_ms)
+    }
+    pub fn mark_queued(&mut self, fiber_id: FiberId, now_ms: f64) -> bool {
+        self.inner.set_state(fiber_id, FIBER_STATE_QUEUED, now_ms)
+    }
+    pub fn mark_running(&mut self, fiber_id: FiberId, now_ms: f64) -> bool {
+        self.inner.set_state(fiber_id, FIBER_STATE_RUNNING, now_ms)
+    }
+    pub fn mark_suspended(&mut self, fiber_id: FiberId, now_ms: f64) -> bool {
+        self.inner
+            .set_state(fiber_id, FIBER_STATE_SUSPENDED, now_ms)
+    }
+    pub fn mark_done(&mut self, fiber_id: FiberId, state: u32, now_ms: f64) -> u32 {
+        self.inner.mark_done(fiber_id, state, now_ms)
+    }
+    pub fn drop_fiber(&mut self, fiber_id: FiberId) -> bool {
+        self.inner.drop_fiber(fiber_id)
+    }
+    pub fn add_joiner(&mut self, fiber_id: FiberId) -> u32 {
+        self.inner.add_joiner(fiber_id)
+    }
+    pub fn wake(&mut self, fiber_id: FiberId) -> bool {
+        self.inner.wake(fiber_id)
+    }
+    pub fn drain_wakeup(&mut self) -> FiberId {
+        self.inner.drain_wakeup().unwrap_or(0)
+    }
+    pub fn wake_queue_len(&self) -> usize {
+        self.inner.wake_queue_len()
+    }
+    pub fn state_of(&self, fiber_id: FiberId) -> u32 {
+        self.inner.state_of(fiber_id).unwrap_or(u32::MAX)
+    }
+    pub fn stats_json(&self) -> Result<String, JsValue> {
+        let stats = self.inner.stats();
+        encode_json(
+            &FiberRegistryStats {
+                live: stats.live,
+                queued: stats.queued,
+                running: stats.running,
+                suspended: stats.suspended,
+                done: stats.done,
+                failed: stats.failed,
+                interrupted: stats.interrupted,
+                wake_queue_len: stats.wake_queue_len,
+                registered: stats.registered,
+                completed: stats.completed,
+                wakeups: stats.wakeups,
+                duplicate_wakeups: stats.duplicate_wakeups,
+                joins: stats.joins,
+            },
+            "fiber-registry stats",
+        )
     }
 }
 
@@ -1413,13 +1584,15 @@ fn decode_fiber_id(fiber_id: FiberId) -> (usize, u32) {
     )
 }
 
-struct FiberSlot {
+#[allow(dead_code)]
+struct LegacyFiberSlot {
     generation: u32,
     vm: Option<FiberVm>,
 }
 
-struct FiberSlab {
-    slots: Vec<FiberSlot>,
+#[allow(dead_code)]
+struct LegacyFiberSlab {
+    slots: Vec<LegacyFiberSlot>,
     free: Vec<usize>,
     live: usize,
     allocated: u64,
@@ -1428,10 +1601,11 @@ struct FiberSlab {
     stale_reads: u64,
 }
 
-impl FiberSlab {
-    fn new() -> FiberSlab {
-        FiberSlab {
-            slots: vec![FiberSlot {
+#[allow(dead_code)]
+impl LegacyFiberSlab {
+    fn new() -> LegacyFiberSlab {
+        LegacyFiberSlab {
+            slots: vec![LegacyFiberSlot {
                 generation: 0,
                 vm: None,
             }],
@@ -1447,7 +1621,7 @@ impl FiberSlab {
     fn insert(&mut self, mut vm: FiberVm) -> FiberId {
         let index = self.free.pop().unwrap_or(self.slots.len());
         if index == self.slots.len() {
-            self.slots.push(FiberSlot {
+            self.slots.push(LegacyFiberSlot {
                 generation: 0,
                 vm: None,
             });
@@ -1510,6 +1684,47 @@ impl FiberSlab {
     }
 }
 
+struct FiberSlab {
+    inner: GenerationalSlab<FiberVm>,
+}
+
+impl FiberSlab {
+    fn new() -> Self {
+        Self {
+            inner: GenerationalSlab::new(),
+        }
+    }
+
+    fn insert(&mut self, vm: FiberVm) -> FiberId {
+        let Some(id) = self.inner.insert(vm) else {
+            return 0;
+        };
+        if let Some(inserted) = self.inner.get_mut(id) {
+            inserted.id = id;
+        }
+        id
+    }
+
+    fn get_mut(&mut self, fiber_id: FiberId) -> Option<&mut FiberVm> {
+        self.inner.get_mut(fiber_id)
+    }
+
+    fn remove(&mut self, fiber_id: FiberId) -> bool {
+        self.inner.remove(fiber_id)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &FiberVm> {
+        self.inner.iter()
+    }
+
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+    fn stats(&self) -> brass_engine_core::SlabStats {
+        self.inner.stats()
+    }
+}
+
 #[wasm_bindgen]
 pub struct BrassWasmVm {
     fibers: FiberSlab,
@@ -1531,6 +1746,25 @@ pub struct BrassWasmVm {
     zero_copy_programs: u64,
     zero_copy_patches: u64,
     zero_copy_event_batches: u64,
+}
+
+impl Default for BrassWasmVm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn js_error(message: impl AsRef<str>) -> JsValue {
+    JsError::new(message.as_ref()).into()
+}
+
+fn encode_json<T: Serialize>(value: &T, context: &str) -> Result<String, JsValue> {
+    serde_json::to_string(value)
+        .map_err(|error| js_error(format!("could not encode {context}: {error}")))
+}
+
+fn bounded_event_budget(budget: u32) -> u32 {
+    budget.clamp(1, MAX_EVENT_BATCH)
 }
 
 #[wasm_bindgen]
@@ -1564,59 +1798,115 @@ impl BrassWasmVm {
         wasm_bindgen::memory()
     }
 
-    pub fn prepare_program_words(&mut self, word_len: usize) -> u32 {
+    pub fn abi_version(&self) -> u32 {
+        EngineHandshake::default().abi_version
+    }
+
+    pub fn min_compatible_abi_version(&self) -> u32 {
+        EngineHandshake::default().min_compatible_abi_version
+    }
+
+    pub fn engine_version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_owned()
+    }
+
+    pub fn capabilities(&self) -> u32 {
+        EngineHandshake::default().capabilities
+    }
+
+    pub fn max_program_words(&self) -> u32 {
+        EngineHandshake::default().max_program_words
+    }
+
+    pub fn max_patch_words(&self) -> u32 {
+        EngineHandshake::default().max_patch_words
+    }
+
+    pub fn max_event_batch(&self) -> u32 {
+        EngineHandshake::default().max_event_batch
+    }
+
+    pub fn prepare_program_words(&mut self, word_len: usize) -> Result<u32, JsValue> {
+        if word_len > MAX_PROGRAM_WORDS {
+            return Err(js_error(format!(
+                "program buffer exceeds the {MAX_PROGRAM_WORDS}-word ABI limit"
+            )));
+        }
         self.program_scratch.clear();
         self.program_scratch.resize(word_len, 0);
-        self.program_scratch.as_mut_ptr() as u32
+        Ok(self.program_scratch.as_mut_ptr() as u32)
     }
 
-    pub fn prepare_patch_words(&mut self, word_len: usize) -> u32 {
-        self.prepare_program_words(word_len)
+    pub fn prepare_patch_words(&mut self, word_len: usize) -> Result<u32, JsValue> {
+        if word_len > MAX_PATCH_WORDS {
+            return Err(js_error(format!(
+                "patch buffer exceeds the {MAX_PATCH_WORDS}-word ABI limit"
+            )));
+        }
+        self.program_scratch.clear();
+        self.program_scratch.resize(word_len, 0);
+        Ok(self.program_scratch.as_mut_ptr() as u32)
     }
 
-    pub fn create_fiber_from_program_words(&mut self, word_len: usize) -> FiberId {
-        let len = word_len.min(self.program_scratch.len());
-        let program = decode_program_words(&self.program_scratch[..len])
-            .unwrap_or_else(|err| panic!("invalid zero-copy brass program: {}", err));
+    pub fn create_fiber_from_program_words(&mut self, word_len: usize) -> Result<FiberId, JsValue> {
+        if word_len != self.program_scratch.len() {
+            return Err(js_error(format!(
+                "zero-copy program length mismatch: prepared {}, requested {word_len}",
+                self.program_scratch.len()
+            )));
+        }
+        let program = decode_program_words(&self.program_scratch)
+            .map_err(|error| js_error(format!("invalid zero-copy Brass program: {error}")))?;
         self.zero_copy_programs += 1;
         self.insert_program(program)
     }
 
-    pub fn create_fiber(&mut self, program_json: &str) -> FiberId {
+    pub fn create_fiber(&mut self, program_json: &str) -> Result<FiberId, JsValue> {
+        if program_json.len() > MAX_JSON_PROGRAM_BYTES {
+            return Err(js_error("JSON program exceeds the ABI input limit"));
+        }
         let program_json: JsonProgram = serde_json::from_str(program_json)
-            .unwrap_or_else(|err| panic!("invalid brass program: {}", err));
+            .map_err(|error| js_error(format!("invalid Brass JSON program: {error}")))?;
+        let program = json_program_to_program(program_json)
+            .map_err(|error| js_error(format!("invalid Brass JSON program: {error}")))?;
         self.json_programs += 1;
-        self.insert_program(json_program_to_program(program_json))
+        self.insert_program(program)
     }
 
-    pub fn create_fiber_bin(&mut self, program_words: &[u32]) -> FiberId {
+    pub fn create_fiber_bin(&mut self, program_words: &[u32]) -> Result<FiberId, JsValue> {
         let program = decode_program_words(program_words)
-            .unwrap_or_else(|err| panic!("invalid binary brass program: {}", err));
+            .map_err(|error| js_error(format!("invalid binary Brass program: {error}")))?;
         self.binary_programs += 1;
         self.insert_program(program)
     }
 
-    fn insert_program(&mut self, program: Program) -> FiberId {
+    fn insert_program(&mut self, program: Program) -> Result<FiberId, JsValue> {
         self.started += 1;
-        self.fibers.insert(FiberVm {
+        let fiber_id = self.fibers.insert(FiberVm {
             id: 0,
             current: Some(program.root),
             program,
             stack: Vec::new(),
             status: FiberStatus::Running,
             last_event: None,
-        })
+        });
+        if fiber_id == 0 {
+            self.started = self.started.saturating_sub(1);
+            Err(js_error("fiber slab reached its bounded capacity"))
+        } else {
+            Ok(fiber_id)
+        }
     }
 
-    pub fn poll(&mut self, fiber_id: FiberId) -> String {
+    pub fn poll(&mut self, fiber_id: FiberId) -> Result<String, JsValue> {
         let event = self.poll_event(fiber_id);
         self.account_event(&event);
         self.account_boundary(1);
-        serde_json::to_string(&event).expect("event json")
+        encode_json(&event, "fiber event")
     }
 
     pub fn drive_batch_ptr(&mut self, fiber_id: FiberId, budget: u32) -> u32 {
-        self.drive_sequence_to_scratch(fiber_id, None, budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, None, bounded_event_budget(budget));
         self.zero_copy_event_batches += 1;
         self.event_scratch.as_ptr() as u32
     }
@@ -1626,7 +1916,7 @@ impl BrassWasmVm {
     }
 
     pub fn drive_batch_bin(&mut self, fiber_id: FiberId, budget: u32) -> Uint32Array {
-        self.drive_sequence_to_scratch(fiber_id, None, budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, None, bounded_event_budget(budget));
         event_batch_to_array(&self.event_scratch)
     }
 
@@ -1634,16 +1924,20 @@ impl BrassWasmVm {
         self.drive_batch_bin(fiber_id, 1)
     }
 
-    pub fn provide_value(&mut self, fiber_id: FiberId, value_ref: RefId) -> String {
+    pub fn provide_value(
+        &mut self,
+        fiber_id: FiberId,
+        value_ref: RefId,
+    ) -> Result<String, JsValue> {
         let event = self.provide_value_event(fiber_id, value_ref);
         self.account_event(&event);
         self.account_boundary(1);
-        serde_json::to_string(&event).expect("event json")
+        encode_json(&event, "fiber event")
     }
 
     pub fn provide_value_ptr(&mut self, fiber_id: FiberId, value_ref: RefId, budget: u32) -> u32 {
         let event = self.provide_value_event(fiber_id, value_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         self.zero_copy_event_batches += 1;
         self.event_scratch.as_ptr() as u32
     }
@@ -1655,20 +1949,24 @@ impl BrassWasmVm {
         budget: u32,
     ) -> Uint32Array {
         let event = self.provide_value_event(fiber_id, value_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         event_batch_to_array(&self.event_scratch)
     }
 
-    pub fn provide_error(&mut self, fiber_id: FiberId, error_ref: RefId) -> String {
+    pub fn provide_error(
+        &mut self,
+        fiber_id: FiberId,
+        error_ref: RefId,
+    ) -> Result<String, JsValue> {
         let event = self.provide_error_event(fiber_id, error_ref);
         self.account_event(&event);
         self.account_boundary(1);
-        serde_json::to_string(&event).expect("event json")
+        encode_json(&event, "fiber event")
     }
 
     pub fn provide_error_ptr(&mut self, fiber_id: FiberId, error_ref: RefId, budget: u32) -> u32 {
         let event = self.provide_error_event(fiber_id, error_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         self.zero_copy_event_batches += 1;
         self.event_scratch.as_ptr() as u32
     }
@@ -1680,19 +1978,27 @@ impl BrassWasmVm {
         budget: u32,
     ) -> Uint32Array {
         let event = self.provide_error_event(fiber_id, error_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         event_batch_to_array(&self.event_scratch)
     }
 
-    pub fn provide_effect(&mut self, fiber_id: FiberId, root: NodeId, nodes_json: &str) -> String {
+    pub fn provide_effect(
+        &mut self,
+        fiber_id: FiberId,
+        root: NodeId,
+        nodes_json: &str,
+    ) -> Result<String, JsValue> {
+        if nodes_json.len() > MAX_JSON_PATCH_BYTES {
+            return Err(js_error("JSON patch exceeds the ABI input limit"));
+        }
         self.json_patches += 1;
         let json_nodes: Vec<OpcodeNode> = serde_json::from_str(nodes_json)
-            .unwrap_or_else(|err| panic!("invalid brass nodes: {}", err));
+            .map_err(|error| js_error(format!("invalid Brass JSON patch: {error}")))?;
         let nodes = json_nodes.into_iter().map(Node::from).collect();
-        let event = self.provide_effect_event(fiber_id, root, nodes);
+        let event = self.provide_effect_event(fiber_id, root, nodes)?;
         self.account_event(&event);
         self.account_boundary(1);
-        serde_json::to_string(&event).expect("event json")
+        encode_json(&event, "Brass event")
     }
 
     pub fn provide_effect_from_words(
@@ -1701,15 +2007,20 @@ impl BrassWasmVm {
         root: NodeId,
         word_len: usize,
         budget: u32,
-    ) -> u32 {
-        let len = word_len.min(self.program_scratch.len());
-        let nodes = decode_patch_nodes_words(&self.program_scratch[..len])
-            .unwrap_or_else(|err| panic!("invalid zero-copy brass patch: {}", err));
+    ) -> Result<u32, JsValue> {
+        if word_len != self.program_scratch.len() {
+            return Err(js_error(format!(
+                "zero-copy patch length mismatch: prepared {}, requested {word_len}",
+                self.program_scratch.len()
+            )));
+        }
+        let nodes = decode_patch_nodes_words(&self.program_scratch)
+            .map_err(|error| js_error(format!("invalid zero-copy Brass patch: {error}")))?;
         self.zero_copy_patches += 1;
-        let event = self.provide_effect_event(fiber_id, root, nodes);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        let event = self.provide_effect_event(fiber_id, root, nodes)?;
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         self.zero_copy_event_batches += 1;
-        self.event_scratch.as_ptr() as u32
+        Ok(self.event_scratch.as_ptr() as u32)
     }
 
     pub fn provide_effect_bin(
@@ -1718,25 +2029,25 @@ impl BrassWasmVm {
         root: NodeId,
         nodes_words: &[u32],
         budget: u32,
-    ) -> Uint32Array {
+    ) -> Result<Uint32Array, JsValue> {
         let nodes = decode_patch_nodes_words(nodes_words)
-            .unwrap_or_else(|err| panic!("invalid binary brass patch: {}", err));
+            .map_err(|error| js_error(format!("invalid binary Brass patch: {error}")))?;
         self.binary_patches += 1;
-        let event = self.provide_effect_event(fiber_id, root, nodes);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
-        event_batch_to_array(&self.event_scratch)
+        let event = self.provide_effect_event(fiber_id, root, nodes)?;
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
+        Ok(event_batch_to_array(&self.event_scratch))
     }
 
-    pub fn interrupt(&mut self, fiber_id: FiberId, reason_ref: RefId) -> String {
+    pub fn interrupt(&mut self, fiber_id: FiberId, reason_ref: RefId) -> Result<String, JsValue> {
         let event = self.interrupt_event(fiber_id, reason_ref);
         self.account_event(&event);
         self.account_boundary(1);
-        serde_json::to_string(&event).expect("event json")
+        encode_json(&event, "fiber event")
     }
 
     pub fn interrupt_ptr(&mut self, fiber_id: FiberId, reason_ref: RefId, budget: u32) -> u32 {
         let event = self.interrupt_event(fiber_id, reason_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         self.zero_copy_event_batches += 1;
         self.event_scratch.as_ptr() as u32
     }
@@ -1748,12 +2059,18 @@ impl BrassWasmVm {
         budget: u32,
     ) -> Uint32Array {
         let event = self.interrupt_event(fiber_id, reason_ref);
-        self.drive_sequence_to_scratch(fiber_id, Some(event), budget.max(1));
+        self.drive_sequence_to_scratch(fiber_id, Some(event), bounded_event_budget(budget));
         event_batch_to_array(&self.event_scratch)
     }
 
-    pub fn drop_fiber(&mut self, fiber_id: FiberId) {
-        self.fibers.remove(fiber_id);
+    pub fn drop_fiber(&mut self, fiber_id: FiberId) -> bool {
+        self.fibers.remove(fiber_id)
+    }
+
+    /// Release every VM-owned fiber and scratch allocation while keeping the
+    /// JavaScript wrapper reusable. Host references remain owned by TypeScript.
+    pub fn reset(&mut self) {
+        *self = Self::new();
     }
 
     fn poll_event(&mut self, fiber_id: FiberId) -> Event {
@@ -1803,19 +2120,42 @@ impl BrassWasmVm {
         }
     }
 
-    fn provide_effect_event(&mut self, fiber_id: FiberId, root: NodeId, nodes: Vec<Node>) -> Event {
+    fn provide_effect_event(
+        &mut self,
+        fiber_id: FiberId,
+        root: NodeId,
+        nodes: Vec<Node>,
+    ) -> Result<Event, JsValue> {
         match self.fibers.get_mut(fiber_id) {
             Some(fiber) => {
+                let total_node_count = fiber
+                    .program
+                    .nodes
+                    .len()
+                    .checked_add(nodes.len())
+                    .ok_or_else(|| js_error("patch node count overflow"))?;
+                if total_node_count > MAX_PROGRAM_NODES {
+                    return Err(js_error(format!(
+                        "patched program exceeds the {MAX_PROGRAM_NODES}-node ABI limit"
+                    )));
+                }
+                if root as usize >= total_node_count {
+                    return Err(js_error(format!(
+                        "patch root {root} is outside {total_node_count} total nodes"
+                    )));
+                }
+                validate_node_references(&nodes, total_node_count)
+                    .map_err(|error| js_error(format!("invalid Brass patch: {error}")))?;
                 fiber.status = FiberStatus::Running;
                 fiber.last_event = None;
                 fiber.program.nodes.extend(nodes);
                 fiber.current = Some(root);
-                step_fiber(fiber)
+                Ok(step_fiber(fiber))
             }
-            None => Event::Failed {
+            None => Ok(Event::Failed {
                 fiber_id,
                 error_ref: 0,
-            },
+            }),
         }
     }
 
@@ -1899,11 +2239,11 @@ impl BrassWasmVm {
             VM_METRIC_ZERO_COPY_PROGRAMS => self.zero_copy_programs as f64,
             VM_METRIC_ZERO_COPY_PATCHES => self.zero_copy_patches as f64,
             VM_METRIC_ZERO_COPY_EVENT_BATCHES => self.zero_copy_event_batches as f64,
-            VM_METRIC_FIBER_SLAB_LIVE => self.fibers.live as f64,
-            VM_METRIC_FIBER_SLAB_CAPACITY => self.fibers.capacity() as f64,
-            VM_METRIC_FIBER_SLAB_REUSED => self.fibers.reused as f64,
-            VM_METRIC_FIBER_SLAB_RELEASED => self.fibers.released as f64,
-            VM_METRIC_FIBER_SLAB_STALE_READS => self.fibers.stale_reads as f64,
+            VM_METRIC_FIBER_SLAB_LIVE => self.fibers.stats().live as f64,
+            VM_METRIC_FIBER_SLAB_CAPACITY => self.fibers.stats().capacity as f64,
+            VM_METRIC_FIBER_SLAB_REUSED => self.fibers.stats().reused as f64,
+            VM_METRIC_FIBER_SLAB_RELEASED => self.fibers.stats().released as f64,
+            VM_METRIC_FIBER_SLAB_STALE_READS => self.fibers.stats().stale_reads as f64,
             _ => 0.0,
         }
     }
@@ -1920,7 +2260,7 @@ impl BrassWasmVm {
         self.metrics_scratch.len()
     }
 
-    pub fn stats_json(&self) -> String {
+    pub fn stats_json(&self) -> Result<String, JsValue> {
         let mut running = 0;
         let mut suspended = 0;
         for fiber in self.fibers.iter() {
@@ -1930,37 +2270,39 @@ impl BrassWasmVm {
                 _ => {}
             }
         }
-        serde_json::to_string(&VmStats {
-            started: self.started,
-            live: self.fibers.len(),
-            running,
-            suspended,
-            completed: self.completed,
-            failed: self.failed,
-            interrupted: self.interrupted,
-            boundary_calls: self.boundary_calls,
-            batches_emitted: self.batches_emitted,
-            events_emitted: self.events_emitted,
-            events_per_boundary_call: if self.boundary_calls == 0 {
-                0.0
-            } else {
-                self.events_emitted as f64 / self.boundary_calls as f64
+        encode_json(
+            &VmStats {
+                started: self.started,
+                live: self.fibers.len(),
+                running,
+                suspended,
+                completed: self.completed,
+                failed: self.failed,
+                interrupted: self.interrupted,
+                boundary_calls: self.boundary_calls,
+                batches_emitted: self.batches_emitted,
+                events_emitted: self.events_emitted,
+                events_per_boundary_call: if self.boundary_calls == 0 {
+                    0.0
+                } else {
+                    self.events_emitted as f64 / self.boundary_calls as f64
+                },
+                max_events_per_boundary_call: self.max_events_per_boundary_call,
+                binary_programs: self.binary_programs,
+                json_programs: self.json_programs,
+                binary_patches: self.binary_patches,
+                json_patches: self.json_patches,
+                zero_copy_programs: self.zero_copy_programs,
+                zero_copy_patches: self.zero_copy_patches,
+                zero_copy_event_batches: self.zero_copy_event_batches,
+                fiber_slab_live: self.fibers.stats().live,
+                fiber_slab_capacity: self.fibers.stats().capacity,
+                fiber_slab_reused: self.fibers.stats().reused,
+                fiber_slab_released: self.fibers.stats().released,
+                fiber_slab_stale_reads: self.fibers.stats().stale_reads,
             },
-            max_events_per_boundary_call: self.max_events_per_boundary_call,
-            binary_programs: self.binary_programs,
-            json_programs: self.json_programs,
-            binary_patches: self.binary_patches,
-            json_patches: self.json_patches,
-            zero_copy_programs: self.zero_copy_programs,
-            zero_copy_patches: self.zero_copy_patches,
-            zero_copy_event_batches: self.zero_copy_event_batches,
-            fiber_slab_live: self.fibers.live,
-            fiber_slab_capacity: self.fibers.capacity(),
-            fiber_slab_reused: self.fibers.reused,
-            fiber_slab_released: self.fibers.released,
-            fiber_slab_stale_reads: self.fibers.stale_reads,
-        })
-        .expect("stats json")
+            "VM stats",
+        )
     }
 
     fn account_boundary(&mut self, event_count: usize) {
@@ -2131,8 +2473,6 @@ fn mark_failed(fiber: &mut FiberVm, error_ref: RefId) -> Event {
     event
 }
 
-const TIMER_EVENT_WORDS: usize = 5;
-
 #[derive(Clone, Copy)]
 struct TimerEntry {
     id: TimerId,
@@ -2142,8 +2482,8 @@ struct TimerEntry {
     canceled: bool,
 }
 
-#[wasm_bindgen]
-pub struct BrassWasmTimerWheel {
+#[allow(dead_code)]
+struct LegacyTimerWheel {
     tick_ms: u64,
     buckets: Vec<Vec<TimerEntry>>,
     next_timer_id: TimerId,
@@ -2155,12 +2495,11 @@ pub struct BrassWasmTimerWheel {
     metrics_scratch: Vec<f64>,
 }
 
-#[wasm_bindgen]
-impl BrassWasmTimerWheel {
-    #[wasm_bindgen(constructor)]
-    pub fn new(tick_ms: u64, bucket_count: usize) -> BrassWasmTimerWheel {
+#[allow(dead_code)]
+impl LegacyTimerWheel {
+    fn new(tick_ms: u64, bucket_count: usize) -> LegacyTimerWheel {
         let count = next_pow2(bucket_count.max(8));
-        BrassWasmTimerWheel {
+        LegacyTimerWheel {
             tick_ms: tick_ms.max(1),
             buckets: vec![Vec::new(); count],
             next_timer_id: 1,
@@ -2285,6 +2624,99 @@ impl BrassWasmTimerWheel {
     }
 }
 
+#[wasm_bindgen]
+pub struct BrassWasmTimerWheel {
+    inner: CoreTimerWheel,
+    expired_scratch: Vec<u32>,
+    metrics_scratch: Vec<f64>,
+}
+
+#[wasm_bindgen]
+impl BrassWasmTimerWheel {
+    #[wasm_bindgen(constructor)]
+    pub fn new(tick_ms: u64, bucket_count: usize) -> Result<BrassWasmTimerWheel, JsValue> {
+        if bucket_count > MAX_TIMER_BUCKETS {
+            return Err(js_error(
+                "timer wheel bucket count exceeds the engine limit",
+            ));
+        }
+        Ok(BrassWasmTimerWheel {
+            inner: CoreTimerWheel::new(tick_ms, bucket_count),
+            expired_scratch: Vec::new(),
+            metrics_scratch: Vec::new(),
+        })
+    }
+
+    pub fn memory(&self) -> JsValue {
+        wasm_bindgen::memory()
+    }
+
+    pub fn schedule_deadline(
+        &mut self,
+        subject_id: u32,
+        kind: u32,
+        deadline_ms: u64,
+    ) -> Result<TimerId, JsValue> {
+        self.inner
+            .schedule(subject_id, kind, deadline_ms)
+            .ok_or_else(|| js_error("timer wheel reached its bounded capacity"))
+    }
+
+    pub fn cancel(&mut self, timer_id: TimerId) -> bool {
+        self.inner.cancel(timer_id)
+    }
+
+    pub fn advance_time(&mut self, now_ms: u64) -> u32 {
+        let expired = self.inner.advance(now_ms);
+        self.expired_scratch.clear();
+        self.expired_scratch.reserve(1 + expired.len() * 5);
+        self.expired_scratch.push(expired.len() as u32);
+        for entry in expired {
+            self.expired_scratch.extend_from_slice(&[
+                entry.id,
+                entry.subject_id,
+                entry.kind,
+                (entry.deadline_ms & 0xffff_ffff) as u32,
+                (entry.deadline_ms >> 32) as u32,
+            ]);
+        }
+        self.expired_scratch.as_ptr() as u32
+    }
+
+    pub fn expired_len(&self) -> usize {
+        self.expired_scratch.len()
+    }
+
+    pub fn next_deadline_ms(&self) -> f64 {
+        self.inner
+            .next_deadline()
+            .map_or(-1.0, |value| value as f64)
+    }
+
+    pub fn metric_u64(&self, id: u32) -> f64 {
+        let stats = self.inner.stats();
+        match id {
+            0 => stats.live as f64,
+            1 => stats.scheduled as f64,
+            2 => stats.canceled as f64,
+            3 => stats.expired as f64,
+            4 => stats.buckets as f64,
+            _ => 0.0,
+        }
+    }
+
+    pub fn metrics_snapshot_ptr(&mut self) -> u32 {
+        self.metrics_scratch.clear();
+        let metrics = (0..5).map(|id| self.metric_u64(id)).collect();
+        self.metrics_scratch = metrics;
+        self.metrics_scratch.as_ptr() as u32
+    }
+
+    pub fn metrics_snapshot_len(&self) -> usize {
+        self.metrics_scratch.len()
+    }
+}
+
 const HTTP_PERMIT_RUN_NOW: u32 = 0;
 const HTTP_PERMIT_QUEUED: u32 = 1;
 const HTTP_PERMIT_REJECTED: u32 = 2;
@@ -2318,6 +2750,7 @@ pub struct BrassWasmHttpPermitPool {
     next_key_id: u32,
     next_permit_id: PermitId,
     last_permit_id: PermitId,
+    total_queued: usize,
     event_scratch: Vec<u32>,
     metrics_scratch: Vec<f64>,
 }
@@ -2329,8 +2762,13 @@ impl BrassWasmHttpPermitPool {
         concurrency: usize,
         max_queue: usize,
         queue_timeout_ms: u64,
-    ) -> BrassWasmHttpPermitPool {
-        BrassWasmHttpPermitPool {
+    ) -> Result<BrassWasmHttpPermitPool, JsValue> {
+        if concurrency > MAX_WASM_COLLECTION_ITEMS || max_queue > MAX_WASM_COLLECTION_ITEMS {
+            return Err(js_error(
+                "HTTP permit configuration exceeds the engine limits",
+            ));
+        }
+        Ok(BrassWasmHttpPermitPool {
             concurrency: concurrency.max(1),
             max_queue,
             queue_timeout_ms,
@@ -2339,9 +2777,10 @@ impl BrassWasmHttpPermitPool {
             next_key_id: 1,
             next_permit_id: 1,
             last_permit_id: 0,
+            total_queued: 0,
             event_scratch: Vec::new(),
             metrics_scratch: Vec::new(),
-        }
+        })
     }
 
     pub fn memory(&self) -> JsValue {
@@ -2349,9 +2788,15 @@ impl BrassWasmHttpPermitPool {
     }
 
     pub fn intern_key(&mut self, key: &str) -> u32 {
-        let clean = sanitize_lane_key(key);
+        let mut clean = sanitize_lane_key(key);
         if let Some(id) = self.keys.get(&clean) {
             return *id;
+        }
+        if self.keys.len() >= MAX_HTTP_KEYS.saturating_sub(1) {
+            clean = "overflow".to_owned();
+            if let Some(id) = self.keys.get(&clean) {
+                return *id;
+            }
         }
         let id = self.next_key_id;
         self.next_key_id = self.next_key_id.wrapping_add(1).max(1);
@@ -2377,27 +2822,36 @@ impl BrassWasmHttpPermitPool {
         let permit_id = self.next_permit_id;
         self.next_permit_id = self.next_permit_id.wrapping_add(1).max(1);
         self.last_permit_id = permit_id;
-        let state = self.states.entry(key_id).or_insert(HttpPermitState {
-            key_id,
-            running: 0,
-            queue: VecDeque::new(),
-            acquired: 0,
-            released: 0,
-            rejected: 0,
-            queued: 0,
-            queue_timeouts: 0,
-            cancelled: 0,
-        });
+        let bounded_key_id = if self.states.contains_key(&key_id) {
+            key_id
+        } else {
+            self.intern_key("overflow")
+        };
+        let state = self
+            .states
+            .entry(bounded_key_id)
+            .or_insert(HttpPermitState {
+                key_id: bounded_key_id,
+                running: 0,
+                queue: VecDeque::new(),
+                acquired: 0,
+                released: 0,
+                rejected: 0,
+                queued: 0,
+                queue_timeouts: 0,
+                cancelled: 0,
+            });
         if state.running < self.concurrency {
             state.running += 1;
             state.acquired += 1;
             return HTTP_PERMIT_RUN_NOW;
         }
-        if state.queue.len() >= self.max_queue {
+        if state.queue.len() >= self.max_queue || self.total_queued >= MAX_WASM_COLLECTION_ITEMS {
             state.rejected += 1;
             return HTTP_PERMIT_REJECTED;
         }
         state.queued += 1;
+        self.total_queued += 1;
         let deadline_ms = if self.queue_timeout_ms == 0 {
             u64::MAX
         } else {
@@ -2428,6 +2882,7 @@ impl BrassWasmHttpPermitPool {
             let before = state.queue.len();
             state.queue.retain(|waiter| waiter.permit_id != permit_id);
             if state.queue.len() != before {
+                self.total_queued = self.total_queued.saturating_sub(before - state.queue.len());
                 state.cancelled += 1;
                 return true;
             }
@@ -2443,6 +2898,7 @@ impl BrassWasmHttpPermitPool {
             let mut keep = VecDeque::new();
             while let Some(waiter) = state.queue.pop_front() {
                 if waiter.deadline_ms <= now_ms {
+                    self.total_queued = self.total_queued.saturating_sub(1);
                     state.queue_timeouts += 1;
                     self.event_scratch.push(waiter.subject_id);
                     self.event_scratch.push(waiter.permit_id);
@@ -2527,9 +2983,11 @@ impl BrassWasmHttpPermitPool {
                     break;
                 };
                 if waiter.deadline_ms <= now_ms {
+                    self.total_queued = self.total_queued.saturating_sub(1);
                     state.queue_timeouts += 1;
                     continue;
                 }
+                self.total_queued = self.total_queued.saturating_sub(1);
                 state.running += 1;
                 state.acquired += 1;
                 self.event_scratch.push(waiter.subject_id);
@@ -2564,6 +3022,12 @@ pub struct BrassWasmRetryPlanner {
     metrics_scratch: Vec<f64>,
 }
 
+impl Default for BrassWasmRetryPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl BrassWasmRetryPlanner {
     #[wasm_bindgen(constructor)]
@@ -2590,7 +3054,20 @@ impl BrassWasmRetryPlanner {
         max_delay_ms: f64,
         max_elapsed_ms: f64,
         seed: u64,
-    ) -> RetryId {
+    ) -> Result<RetryId, JsValue> {
+        if self.states.len() >= MAX_RETRY_STATES {
+            return Err(js_error("retry planner reached its bounded capacity"));
+        }
+        if max_retries > MAX_EVENT_BATCH
+            || !now_ms.is_finite()
+            || !base_delay_ms.is_finite()
+            || !max_delay_ms.is_finite()
+            || !max_elapsed_ms.is_finite()
+        {
+            return Err(js_error(
+                "retry planner received an invalid or unbounded configuration",
+            ));
+        }
         let id = self.next_retry_id;
         self.next_retry_id = self.next_retry_id.wrapping_add(1).max(1);
         self.states.insert(
@@ -2609,7 +3086,7 @@ impl BrassWasmRetryPlanner {
                 },
             },
         );
-        id
+        Ok(id)
     }
 
     pub fn next_delay_ms(
@@ -2622,6 +3099,10 @@ impl BrassWasmRetryPlanner {
         let Some(state) = self.states.get_mut(&retry_id) else {
             return -1.0;
         };
+        if !now_ms.is_finite() || !retry_after_ms.is_finite() {
+            self.exhausted += 1;
+            return -1.0;
+        }
         if !retryable || state.attempt >= state.max_retries {
             self.exhausted += 1;
             return -1.0;

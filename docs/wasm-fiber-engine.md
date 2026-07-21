@@ -7,10 +7,10 @@ Este repo mantiene la estructura original de `brass-runtime`: el package se publ
 Se agregó un engine interno experimental para mover el estado de suspensión de las fibras hacia un bridge WASM:
 
 - `src/core/runtime/engine/types.ts`: contrato `FiberEngine`.
-- `src/core/runtime/engine/JsFiberEngine.ts`: fallback JS que usa el `RuntimeFiber` actual.
+- `src/core/runtime/engine/JsFiberEngine.ts`: engine TypeScript y fallback controlado de `auto`.
 - `src/core/runtime/engine/WasmFiberEngine.ts`: engine experimental JS/WASM.
 - `src/core/runtime/engine/opcodes.ts`: representación interna del `Async` actual como plan/opcodes.
-- `src/core/runtime/engine/bridge/ReferenceWasmBridge.ts`: bridge de referencia, sin compilar Rust, útil para tests locales.
+- `src/core/runtime/engine/bridge/ReferenceWasmBridge.ts`: doble interno de referencia para tests; no es un modo público.
 - `src/core/runtime/engine/bridge/WasmPackFiberBridge.ts`: adapter para el output de `wasm-pack`.
 - `src/core/runtime/hostAction.ts`: efectos host declarativos HTTP/DB/Queue/custom.
 - `crates/brass-runtime-wasm-engine`: crate Rust/WASM.
@@ -24,14 +24,21 @@ El modo por defecto sigue siendo JS:
 const runtime = Runtime.make({});
 ```
 
-Modo experimental sin compilar Rust:
+Selección controlada para despliegues donde WASM es opcional:
 
 ```ts
 const runtime = new Runtime({
   env: {},
-  engine: "wasm-reference",
+  engine: "auto",
+  wasm: { boundaryDiagnostics: { sink } },
 });
 ```
+
+`auto` intenta el mismo bridge estricto una vez. Si carga, handshake o
+capacidades fallan, crea el engine TypeScript, marca `fallbackUsed`, expone un
+`fallbackCode` estable y emite un evento `runtime.boundary` sin mensaje, path ni
+payload sensible. `engine: "wasm"` nunca degrada y sigue fallando de forma
+explícita.
 
 Modo WASM real:
 
@@ -49,7 +56,7 @@ import { Runtime, fromHostAction } from "brass-runtime";
 
 const runtime = new Runtime({
   env: {},
-  engine: "wasm-reference",
+  engine: "wasm",
   hostExecutor: {
     async execute(action, ctx) {
       // Acá vive fetch/axios/db/queue real.
@@ -105,7 +112,9 @@ node --expose-gc ./node_modules/.bin/tsx src/core/runtime/bench/heap-per-suspend
 
 ## WASM fiber registry + wakeups
 
-The WASM engine now also owns a compact `BrassWasmFiberRegistry` used by the TS engine facade to track fiber lifecycle metadata and coalesce wakeups.
+The portable `brass-engine-core` owns the compact fiber-registry state machine;
+`BrassWasmFiberRegistry` is its thin JS/WASM binding used by the TS facade to
+track lifecycle metadata and coalesce wakeups.
 
 The public TypeScript `Runtime` API is unchanged. When `engine: "wasm"` is selected:
 

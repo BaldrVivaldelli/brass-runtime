@@ -2,6 +2,24 @@
 
 Practical recipes for the `brass-runtime/http` stack.
 
+## Choose an operational profile
+
+```ts
+import { makeDefaultHttpClient } from "brass-runtime/http";
+
+const editorHttp = makeDefaultHttpClient({ preset: "editor" });
+const serviceHttp = makeDefaultHttpClient({ preset: "service" });
+const proxyHttp = makeDefaultHttpClient({ preset: "highThroughputProxy" });
+
+console.log(editorHttp.profile, editorHttp.effectiveConfig());
+```
+
+Use `editor` for bounded interactive work, `service` for the standard
+production lifecycle stack, and `highThroughputProxy` only for a measured hot
+proxy path. `effectiveConfig()` shows the resolved limits and enabled policies
+without exposing request data. See [the compatibility contract](./http-middleware-contract.md)
+for exact order, request mutation, key derivation, and cancellation ownership.
+
 ## Typed API Client
 
 ```ts

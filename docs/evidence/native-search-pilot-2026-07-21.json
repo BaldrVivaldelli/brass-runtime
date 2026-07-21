@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-07-21T13:57:54.217Z",
+  "machine": {
+    "platform": "linux 6.6.87.2-microsoft-standard-WSL2",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 9 5900X 12-Core Processor",
+    "logicalCpus": 24,
+    "totalMemoryBytes": 16714465280,
+    "node": "v22.23.1",
+    "rustc": "rustc 1.94.0 (4a4ef493e 2026-03-02)"
+  },
+  "workload": {
+    "fixtureSha256": "9f8e9cfd68282732c67d5d3391c70e22a484a0b9c94443aefb7c04bee23b1acf",
+    "documents": 4000,
+    "queries": 200,
+    "warmupQueries": 20,
+    "cancellationTrials": 20,
+    "reindexMode": "full-replacement-v1"
+  },
+  "engines": {
+    "ts": {
+      "engine": "ts",
+      "initialIndexMs": 26.654,
+      "fullReindexMs": 17.6,
+      "queryLatencyMs": {
+        "p50": 13.688,
+        "p95": 20.794,
+        "p99": 25.524
+      },
+      "queryCpuMs": 3443.326,
+      "rssBytes": 144543744,
+      "heapUsedBytes": 13039168,
+      "resultDigest": "fc173ca79dbe6ec237e43be4df4afb6ff6783ec0bacf04811fac08f0678d4a07",
+      "errorCount": 0,
+      "cancellationLatencyMs": {
+        "p50": 0.009,
+        "p95": 0.047,
+        "p99": 0.091
+      },
+      "crossingCount": 0,
+      "crossingBytes": 0,
+      "unexpectedFallbacks": 0,
+      "idleCpuPercent": 0,
+      "startupMs": 0
+    },
+    "wasm": {
+      "status": "not-applicable",
+      "reason": "WASM v1 owns fiber coordination and has no indexing/search capability"
+    },
+    "rustNative": {
+      "engine": "rust-native",
+      "initialIndexMs": 61.545,
+      "fullReindexMs": 42.491,
+      "queryLatencyMs": {
+        "p50": 2.567,
+        "p95": 3.102,
+        "p99": 3.439
+      },
+      "queryCpuMs": 207.15,
+      "rssBytes": 154083328,
+      "heapUsedBytes": 13272896,
+      "resultDigest": "fc173ca79dbe6ec237e43be4df4afb6ff6783ec0bacf04811fac08f0678d4a07",
+      "errorCount": 0,
+      "cancellationLatencyMs": {
+        "p50": 0.25,
+        "p95": 0.426,
+        "p99": 0.637
+      },
+      "crossingCount": 506,
+      "crossingBytes": 21257579,
+      "unexpectedFallbacks": 0,
+      "idleCpuPercent": 0,
+      "startupMs": 4.673,
+      "serviceBuild": "0.1.0"
+    }
+  },
+  "comparison": {
+    "p95ImprovementPercent": 85.082,
+    "cpuImprovementPercent": 93.984,
+    "rssRatio": 1.066,
+    "heapRatio": 1.018,
+    "gates": {
+      "parity100Percent": true,
+      "zeroUnexpectedFallbacks": true,
+      "cancellationP95AtMost50Ms": true,
+      "rssAtMost110PercentOfTs": true,
+      "heapAtMost110PercentOfTs": true,
+      "latencyOrCpuAtLeast15PercentBetter": true
+    },
+    "promotionEligible": true,
+    "decision": "adopt-native-search"
+  }
+}

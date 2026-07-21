@@ -21,7 +21,8 @@ describe("schema-driven config validation", () => {
   };
 
   it("validates runtime options at construction", () => {
-    expect(() => new Runtime({ env: {}, engine: "auto" as any })).toThrow(ConfigValidationError);
+    expect(() => new Runtime({ env: {}, engine: "auto" })).not.toThrow();
+    expect(() => new Runtime({ env: {}, engine: "native" as any })).toThrow(ConfigValidationError);
     expect(() => new Runtime({ env: {}, lane: "" })).toThrow(ConfigValidationError);
   });
 

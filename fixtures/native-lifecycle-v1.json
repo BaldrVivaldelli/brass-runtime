@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "eventFiberId": 0,
+  "cases": [
+    {
+      "name": "succeed",
+      "programWords": [1, 0, 1, 0, 11, 0, 0],
+      "steps": [{ "op": "poll", "eventWords": [1, 0, 11, 0, 0] }],
+      "terminal": "done"
+    },
+    {
+      "name": "fail",
+      "programWords": [1, 0, 1, 1, 12, 0, 0],
+      "steps": [{ "op": "poll", "eventWords": [2, 0, 12, 0, 0] }],
+      "terminal": "failed"
+    },
+    {
+      "name": "sync-resume",
+      "programWords": [1, 0, 1, 2, 21, 0, 0],
+      "steps": [
+        { "op": "poll", "eventWords": [4, 0, 21, 0, 0] },
+        { "op": "provideValue", "ref": 22, "eventWords": [1, 0, 22, 0, 0] }
+      ],
+      "terminal": "done"
+    },
+    {
+      "name": "async-interrupt",
+      "programWords": [1, 0, 1, 3, 31, 0, 0],
+      "steps": [
+        { "op": "poll", "eventWords": [5, 0, 31, 0, 0] },
+        { "op": "interrupt", "ref": 32, "eventWords": [3, 0, 32, 0, 0] }
+      ],
+      "terminal": "interrupted"
+    },
+    {
+      "name": "flat-map-patch",
+      "programWords": [1, 1, 2, 0, 10, 0, 0, 4, 0, 20, 0],
+      "steps": [
+        { "op": "poll", "eventWords": [6, 0, 20, 10, 0] },
+        {
+          "op": "provideEffect",
+          "root": 2,
+          "nodes": [[0, 30, 0, 0]],
+          "eventWords": [1, 0, 30, 0, 0]
+        }
+      ],
+      "terminal": "done"
+    },
+    {
+      "name": "fold-failure-recovery",
+      "programWords": [1, 1, 2, 1, 40, 0, 0, 5, 0, 41, 42],
+      "steps": [
+        { "op": "poll", "eventWords": [7, 0, 41, 40, 0] },
+        {
+          "op": "provideEffect",
+          "root": 2,
+          "nodes": [[0, 43, 0, 0]],
+          "eventWords": [1, 0, 43, 0, 0]
+        }
+      ],
+      "terminal": "done"
+    },
+    {
+      "name": "fold-success-maps-to-failure",
+      "programWords": [1, 1, 2, 0, 50, 0, 0, 5, 0, 51, 52],
+      "steps": [
+        { "op": "poll", "eventWords": [8, 0, 52, 50, 0] },
+        {
+          "op": "provideEffect",
+          "root": 2,
+          "nodes": [[1, 53, 0, 0]],
+          "eventWords": [2, 0, 53, 0, 0]
+        }
+      ],
+      "terminal": "failed"
+    },
+    {
+      "name": "fork-with-scope",
+      "programWords": [1, 0, 1, 6, 61, 7, 0],
+      "steps": [
+        { "op": "poll", "eventWords": [9, 0, 61, 7, 0] },
+        { "op": "provideValue", "ref": 62, "eventWords": [1, 0, 62, 0, 0] }
+      ],
+      "terminal": "done"
+    },
+    {
+      "name": "host-action-error",
+      "programWords": [1, 0, 1, 7, 71, 72, 0],
+      "steps": [
+        { "op": "poll", "eventWords": [10, 0, 71, 72, 0] },
+        { "op": "provideError", "ref": 73, "eventWords": [2, 0, 73, 0, 0] }
+      ],
+      "terminal": "failed"
+    }
+  ],
+  "hostLifecycle": [
+    {
+      "name": "parent-child-interrupt-resume-finalizers",
+      "owner": "typescript",
+      "expectedFinalizerOrder": ["child", "parent"],
+      "expectedChildCancels": 1,
+      "expectedAsyncResumes": 1,
+      "expectedOrphans": 0
+    }
+  ]
+}

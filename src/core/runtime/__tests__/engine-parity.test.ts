@@ -136,9 +136,52 @@ describe("Runtime engine parity", () => {
     rt.shutdown();
   });
 
+  it("uses an explicit, observable TS fallback only in auto mode", async () => {
+    const events: unknown[] = [];
+    let now = 10;
+    const rt = new Runtime({
+      env: {},
+      engine: "auto",
+      wasm: {
+        modulePath: "/definitely-missing/brass-engine.wasm.js",
+        boundaryDiagnostics: {
+          sink: { emit: (event) => events.push(event) },
+          correlationId: () => "engine-selection",
+          now: () => now++,
+        },
+      },
+    });
+
+    await expect(rt.toPromise(asyncSucceed("fallback-ok"))).resolves.toBe("fallback-ok");
+    expect(rt.engineMode).toBe("auto");
+    expect(rt.stats()).toMatchObject({ engine: "ts", fallbackUsed: true });
+    expect(rt.diagnostics()).toMatchObject({
+      engine: "ts",
+      requestedEngine: "auto",
+      fallbackUsed: true,
+      fallbackCode: "WASM_UNAVAILABLE",
+    });
+    expect(events).toEqual([
+      expect.objectContaining({
+        version: 1,
+        boundary: "ts-wasm",
+        operation: "engine.initialize",
+        result: "fallback",
+        correlationId: "engine-selection",
+        errorCode: "WASM_UNAVAILABLE",
+      }),
+    ]);
+    expect(JSON.stringify(events)).not.toContain("definitely-missing");
+
+    expect(() => new Runtime({
+      env: {},
+      engine: "wasm",
+      wasm: { modulePath: "/definitely-missing/brass-engine.wasm.js" },
+    })).toThrow(/could not load/i);
+  });
+
   it("rejects unsupported engine modes at startup", () => {
-    expect(() => new Runtime({ env: {}, engine: "auto" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
-    expect(() => new Runtime({ env: {}, engine: "wasm-reference" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
-    expect(() => new Runtime({ env: {}, engine: "js" as any })).toThrow(/ts.*wasm|wasm.*ts/i);
+    expect(() => new Runtime({ env: {}, engine: "wasm-reference" as any })).toThrow(/ts.*wasm|wasm.*ts|enum/i);
+    expect(() => new Runtime({ env: {}, engine: "js" as any })).toThrow(/ts.*wasm|wasm.*ts|enum/i);
   });
 });

@@ -10,11 +10,9 @@ import {
     makeConfiguredPermissions,
     makeFakeLLM,
     makeGoogleGenerativeAILLM,
-    makeNodeFileSystem,
-    makeNodePatchService,
+    makeNodeAgentHost,
     discoverNodeWorkspaceRoot,
     makeOpenAICompatibleLLM,
-    NodeShell,
     observationStatus,
     runAgent,
     summarizeAgentAction,
@@ -1324,19 +1322,16 @@ const makeEventsSink = (parsed: ResolvedCliArgs, compactOptions: CompactOptions)
                 : undefined;
 
 const makeAgentEnv = (parsed: ResolvedCliArgs, events: AgentEventSink | undefined): AgentEnv => {
-    const shell = NodeShell;
     const llm = makeLLMFromEnvOptional(parsed.config.llm);
 
-    return {
-        shell,
-        fs: makeNodeFileSystem(shell),
-        patch: makeNodePatchService(shell),
+    return makeNodeAgentHost({
+        cwd: parsed.cwd,
         llm,
         permissions: makeConfiguredPermissions(parsed.config.permissions),
         approvals: makeApprovalServiceFromCli(parsed),
         ...(events ? { events } : {}),
         ...(parsed.config.tools ? { toolPolicies: parsed.config.tools } : {}),
-    };
+    });
 };
 
 const singleRunFromParsed = (parsed: ResolvedCliArgs): CliBatchRun => ({
@@ -1361,7 +1356,7 @@ const runCliAgent = async (
         ? await readPatchFile(run.cwd, run.patchFile)
         : undefined;
 
-    const rewardHistory = await loadRewardStore(run.cwd);
+    const rewardHistory = await loadRewardStore(env.persistence);
 
     const state = await runtime.toPromise(
         runAgent(runtime, {
@@ -1398,7 +1393,7 @@ const runCliAgent = async (
                 reward,
                 timestamp: Date.now(),
             };
-            await flushRewardStore(run.cwd, [...rewardHistory, newEntry]);
+            await flushRewardStore(env.persistence, [...rewardHistory, newEntry]);
         }
     } catch {
         // Non-fatal: reward store flush failure is acceptable

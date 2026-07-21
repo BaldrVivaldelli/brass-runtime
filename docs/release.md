@@ -10,12 +10,15 @@ npm run release:check
 
 `release:check` covers:
 
+- Pinned Rust formatting, Clippy, and native workspace tests.
+- A real WASM build from the pinned toolchain.
 - TypeScript API/type checks.
 - Full Vitest suite.
 - TS bundle build.
 - CJS compatibility validation.
 - Runtime profiler budget.
 - Runtime benchmark budget.
+- Versioned fork/suspend/resume/fairness/suspended-heap budget.
 - HTTP benchmark budget.
 - Observability benchmark budget.
 
@@ -39,6 +42,25 @@ npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-h
 
 - Confirm `npm pack --dry-run` includes only package files expected by
   `package.json`.
+- Build and package the promoted read-only editor-search companion, then
+  generate release provenance:
+
+```bash
+npm run native:build
+npm run native:package
+npm run release:artifacts
+```
+
+The last command emits an SPDX 2.3 SBOM, complete npm/Cargo license inventory,
+SHA-256 checksums, and a compact release manifest under `artifacts/release`.
+Generated artifacts are not committed. CI publishes native editor bundles for
+Linux, macOS, and Windows plus their per-platform manifests/checksums. The
+native binary remains separate from the generic npm runtime package because it
+is editor-specific. Its promotion result is `adopt-native-search`; the default
+`auto` selection retains the TS fallback and `ts` remains an immediate reversal.
+
+- Check `docs/native-compatibility-changelog.md` whenever ABI, IPC, boundary
+  event, host, or persistence contracts change.
 
 ## First-release scope
 

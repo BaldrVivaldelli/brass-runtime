@@ -144,6 +144,8 @@ export type DefaultPostJson = {
 };
 
 export type DefaultHttpClientPreset =
+  | "editor"
+  | "service"
   | "minimal"
   | "proxy"
   | "highThroughputProxy"
@@ -151,6 +153,46 @@ export type DefaultHttpClientPreset =
   | "default"
   | "production"
   | "bareMetal";
+
+export type HttpOperationalProfile = "editor" | "service" | "proxy" | "custom";
+
+export type DefaultHttpClientEffectiveConfig = {
+  readonly version: 1;
+  readonly profile: HttpOperationalProfile;
+  readonly preset: DefaultHttpClientPreset;
+  readonly timeoutMs: number | null;
+  readonly priority: {
+    readonly enabled: boolean;
+    readonly concurrency: number | null;
+    readonly queueTimeoutMs: number | null;
+  };
+  readonly retry: {
+    readonly enabled: boolean;
+    readonly maxRetries: number;
+    readonly baseDelayMs: number | null;
+    readonly maxDelayMs: number | null;
+    readonly maxElapsedMs: number | null;
+  };
+  readonly cache: {
+    readonly enabled: boolean;
+    readonly ttlSeconds: number | null;
+    readonly maxEntries: number | null;
+    readonly staleWhileRevalidate: boolean;
+  };
+  readonly adaptiveLimiter: {
+    readonly enabled: boolean;
+    readonly initialLimit: number | null;
+    readonly minLimit: number | null;
+    readonly maxLimit: number | null;
+    readonly maxQueue: number | null;
+    readonly queueTimeoutMs: number | null;
+  };
+  readonly observability: {
+    readonly lifecycleEvents: boolean;
+    readonly middlewareCount: number;
+    readonly policyPresetCount: number;
+  };
+};
 
 export type DefaultHttpClientFeatures = {
   readonly dedup: boolean;
@@ -167,6 +209,8 @@ export type DefaultHttpClientFeatures = {
 export type DefaultHttpClientConfig = LifecycleClientConfig & {
   /**
    * Preset used as the baseline before caller overrides are applied.
+   * - editor: bounded interactive profile with short retry/cache budgets.
+   * - service: explicit standard-service profile (same stable stack as production).
    * - minimal: wire client + timeout only.
    * - proxy: low-latency proxy/BFF path; wire client only, no lifecycle queue or Brass timeout by default.
    * - highThroughputProxy: explicit alias for the hot proxy path; pair with makeNodeHttpProxyClient on Node.
@@ -207,7 +251,10 @@ export type DefaultHttpClient = {
   readonly cancelAll: LifecycleClient["cancelAll"];
   readonly shutdown: LifecycleClient["shutdown"];
   readonly preset: DefaultHttpClientPreset;
+  readonly profile: HttpOperationalProfile;
   readonly features: DefaultHttpClientFeatures;
+  /** Frozen, redaction-safe view of the effective operational knobs. */
+  readonly effectiveConfig: () => DefaultHttpClientEffectiveConfig;
   readonly compression?: {
     readonly stats: () => CompressionStats;
   };
@@ -238,6 +285,29 @@ const BALANCED_PRESET_CONFIG: LifecycleClientConfig = {
 
 const DEFAULT_CACHEABLE_METHODS = new Set<HttpMethod>(["GET", "HEAD", "OPTIONS"]);
 
+const EDITOR_PRESET_CONFIG: LifecycleClientConfig = {
+  timeoutMs: 15_000,
+  dedup: {},
+  cache: {
+    ttlSeconds: 15,
+    maxEntries: 256,
+    staleWhileRevalidate: true,
+    cachePolicy: (req, res) => ({ cacheable: isDefaultCacheableResponse(req, res) }),
+  },
+  priority: {
+    concurrency: 8,
+    queueTimeoutMs: 5_000,
+  },
+  retry: {
+    maxRetries: 1,
+    baseDelayMs: 50,
+    maxDelayMs: 500,
+    maxElapsedMs: 1_500,
+    respectRetryAfter: true,
+  },
+  adaptiveLimiter: makeAdaptiveLimiterConfig("conservative"),
+};
+
 const DEFAULT_PRESET_CONFIG: LifecycleClientConfig = {
   ...BALANCED_PRESET_CONFIG,
   cache: {
@@ -261,6 +331,8 @@ const DEFAULT_PRESET_CONFIG: LifecycleClientConfig = {
 };
 
 const PRESET_CONFIGS: Record<DefaultHttpClientPreset, LifecycleClientConfig> = {
+  editor: EDITOR_PRESET_CONFIG,
+  service: DEFAULT_PRESET_CONFIG,
   minimal: MINIMAL_PRESET_CONFIG,
   proxy: PROXY_PRESET_CONFIG,
   highThroughputProxy: PROXY_PRESET_CONFIG,
@@ -337,6 +409,12 @@ export function makeDefaultHttpClient(
   }
 
   const features = featureSnapshot(lifecycleConfig, compressionResult !== undefined, middleware.length);
+  const effectiveConfig = effectiveConfigSnapshot(
+    preset,
+    lifecycleConfig,
+    middleware.length,
+    policyPresets ? Object.keys(policyPresets).length : 0,
+  );
   const hasMiddleware = compressionResult !== undefined ||
     middleware.length > 0 ||
     (policyPresets !== undefined && Object.keys(policyPresets).length > 0);
@@ -344,6 +422,7 @@ export function makeDefaultHttpClient(
   const useInlineDecode = !hasMiddleware && transport !== undefined;
   return buildDefaultClient(wire, {
     preset,
+    effectiveConfig,
     features,
     compressionStats: compressionResult?.stats,
     useInlineDecode,
@@ -437,7 +516,14 @@ function buildBareMetalBranch(
     middleware: middleware.length,
   });
 
-  return buildBareMetalDefaultClient(bareWire, { preset: "bareMetal", features });
+  return buildBareMetalDefaultClient(bareWire, {
+    preset: "bareMetal",
+    features,
+    effectiveConfig: effectiveConfigSnapshot("bareMetal", {
+      timeoutMs: config.timeoutMs,
+      onEvent: config.onEvent,
+    }, middleware.length, 0),
+  });
 }
 
 /**
@@ -452,6 +538,7 @@ function buildBareMetalDefaultClient(
   meta: {
     readonly preset: DefaultHttpClientPreset;
     readonly features: DefaultHttpClientFeatures;
+    readonly effectiveConfig: DefaultHttpClientEffectiveConfig;
   },
 ): DefaultHttpClient {
   const withPromise = <E, A>(eff: Async<unknown, E, A>): AsyncWithPromise<unknown, E, A> =>
@@ -505,6 +592,7 @@ function buildBareMetalDefaultClient(
         return buildBareMetalDefaultClient(newBare, {
           ...meta,
           features: { ...meta.features, middleware: meta.features.middleware + 1 },
+          effectiveConfig: incrementEffectiveMiddleware(meta.effectiveConfig),
         }).wire;
       },
       stats: () => ({
@@ -549,6 +637,7 @@ function buildBareMetalDefaultClient(
           ...meta.features,
           middleware: meta.features.middleware + 1,
         },
+        effectiveConfig: incrementEffectiveMiddleware(meta.effectiveConfig),
       }),
     wire: wireAsLifecycle,
     stats: () => wireAsLifecycle.stats(),
@@ -556,7 +645,9 @@ function buildBareMetalDefaultClient(
     cancelAll: wireAsLifecycle.cancelAll,
     shutdown: wireAsLifecycle.shutdown,
     preset: meta.preset,
+    profile: meta.effectiveConfig.profile,
     features: meta.features,
+    effectiveConfig: () => meta.effectiveConfig,
   };
 }
 
@@ -565,6 +656,7 @@ function buildDefaultClient(
   meta: {
     readonly preset: DefaultHttpClientPreset;
     readonly features: DefaultHttpClientFeatures;
+    readonly effectiveConfig: DefaultHttpClientEffectiveConfig;
     readonly compressionStats?: () => CompressionStats;
     readonly useInlineDecode?: boolean;
   },
@@ -633,6 +725,7 @@ function buildDefaultClient(
           ...meta.features,
           middleware: meta.features.middleware + 1,
         },
+        effectiveConfig: incrementEffectiveMiddleware(meta.effectiveConfig),
       }),
     wire,
     stats: () => wire.stats(),
@@ -640,7 +733,9 @@ function buildDefaultClient(
     cancelAll: wire.cancelAll,
     shutdown: wire.shutdown,
     preset: meta.preset,
+    profile: meta.effectiveConfig.profile,
     features: meta.features,
+    effectiveConfig: () => meta.effectiveConfig,
     ...(meta.compressionStats
       ? {
           compression: {
@@ -821,6 +916,80 @@ function featureSnapshot(
     adaptiveLimiter: isEnabled(config.adaptiveLimiter),
     compression,
     middleware,
+  });
+}
+
+function profileForPreset(preset: DefaultHttpClientPreset): HttpOperationalProfile {
+  if (preset === "editor") return "editor";
+  if (preset === "proxy" || preset === "highThroughputProxy") return "proxy";
+  if (preset === "service" || preset === "balanced" || preset === "default" || preset === "production") {
+    return "service";
+  }
+  return "custom";
+}
+
+function enabledLayer<T extends object>(value: T | false | undefined): T | undefined {
+  return value === false ? undefined : value;
+}
+
+function effectiveConfigSnapshot(
+  preset: DefaultHttpClientPreset,
+  config: LifecycleClientConfig,
+  middlewareCount: number,
+  policyPresetCount: number,
+): DefaultHttpClientEffectiveConfig {
+  const priority = enabledLayer(config.priority);
+  const retry = enabledLayer(config.retry);
+  const cache = enabledLayer(config.cache);
+  const limiter = enabledLayer(config.adaptiveLimiter);
+  return Object.freeze({
+    version: 1 as const,
+    profile: profileForPreset(preset),
+    preset,
+    timeoutMs: config.timeoutMs ?? null,
+    priority: Object.freeze({
+      enabled: priority !== undefined,
+      concurrency: priority?.concurrency ?? null,
+      queueTimeoutMs: priority?.queueTimeoutMs ?? null,
+    }),
+    retry: Object.freeze({
+      enabled: retry !== undefined,
+      maxRetries: retry?.maxRetries ?? 0,
+      baseDelayMs: retry?.baseDelayMs ?? null,
+      maxDelayMs: retry?.maxDelayMs ?? null,
+      maxElapsedMs: retry?.maxElapsedMs ?? null,
+    }),
+    cache: Object.freeze({
+      enabled: cache !== undefined,
+      ttlSeconds: cache?.ttlSeconds ?? null,
+      maxEntries: cache?.maxEntries ?? null,
+      staleWhileRevalidate: cache?.staleWhileRevalidate ?? false,
+    }),
+    adaptiveLimiter: Object.freeze({
+      enabled: limiter !== undefined,
+      initialLimit: limiter?.initialLimit ?? null,
+      minLimit: limiter?.minLimit ?? null,
+      maxLimit: limiter?.maxLimit ?? null,
+      maxQueue: limiter?.maxQueue ?? null,
+      queueTimeoutMs: limiter?.queueTimeoutMs ?? null,
+    }),
+    observability: Object.freeze({
+      lifecycleEvents: config.onEvent !== undefined,
+      middlewareCount,
+      policyPresetCount,
+    }),
+  });
+}
+
+function incrementEffectiveMiddleware(
+  config: DefaultHttpClientEffectiveConfig,
+): DefaultHttpClientEffectiveConfig {
+  return Object.freeze({
+    ...config,
+    observability: Object.freeze({
+      ...config.observability,
+      middlewareCount: config.observability.middlewareCount + 1,
+    }),
   });
 }
 

@@ -2,6 +2,7 @@ import { async } from "../../core/types/asyncEffect";
 import { Cause, Exit } from "../../core/types/effect";
 import { summarizeAgentAction } from "../core/events";
 import type { AgentError, ApprovalRequest, ApprovalResponse, ApprovalService } from "../core/types";
+import { approveApprovalRequest } from "../core/approvalCapability";
 
 type DynamicImport = (specifier: string) => Promise<any>;
 const dynamicImport = new Function("specifier", "return import(specifier)") as DynamicImport;
@@ -14,11 +15,11 @@ const answerToResponse = (answer: string, request: ApprovalRequest): ApprovalRes
 
     if (!normalized) {
         return request.defaultAnswer === "approve"
-            ? { type: "approved" }
+            ? approveApprovalRequest(request)
             : { type: "rejected", reason: "Rejected by default answer." };
     }
 
-    if (isYes(normalized)) return { type: "approved" };
+    if (isYes(normalized)) return approveApprovalRequest(request);
     if (isNo(normalized)) return { type: "rejected", reason: "Rejected by user." };
 
     return { type: "rejected", reason: `Unrecognized approval answer: ${answer}` };

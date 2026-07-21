@@ -223,6 +223,16 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
         return "Done";
     }
 
+    /** @internal Compact engine diagnostics; not part of the public Fiber interface. */
+    diagnosticRunState(): "queued" | "running" | "suspended" | "done" {
+        switch (this.runState) {
+            case RUN.QUEUED: return "queued";
+            case RUN.RUNNING: return "running";
+            case RUN.SUSPENDED: return "suspended";
+            case RUN.DONE: return "done";
+        }
+    }
+
     join(cb: (exit: Exit<E, A>) => void): void {
         if (this.result != null) cb(this.result);
         else this.joiners.push(cb);

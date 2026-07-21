@@ -3,7 +3,7 @@ export type EngineKind = "ts" | "wasm";
 export type EngineStats<T> = {
   engine: EngineKind;
   data: T;
-  fallbackUsed: false;
+  fallbackUsed: boolean;
 };
 
 export type EngineSelectionMode = EngineKind;

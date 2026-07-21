@@ -302,6 +302,13 @@ describe("WasmPackFiberBridge", () => {
       private readonly metricsPtr = 512;
       dropped: number[] = [];
 
+      abi_version() { return 1; }
+      min_compatible_abi_version() { return 1; }
+      engine_version() { return "0.2.0-test"; }
+      capabilities() { return 15; }
+      max_program_words() { return 4_194_307; }
+      max_patch_words() { return 4_194_305; }
+      max_event_batch() { return 65_536; }
       memory() { return { buffer: this.buffer }; }
       prepare_program_words() { return this.wordsPtr; }
       prepare_patch_words() { return this.wordsPtr; }
@@ -348,7 +355,13 @@ describe("WasmPackFiberBridge", () => {
 
     const vm = new FakeVm();
     resolveWasmModule.mockReturnValueOnce({ BrassWasmVm: class { constructor() { return vm; } } });
-    const bridge = new WasmPackFiberBridge();
+    const boundaryEvents: Array<Record<string, unknown>> = [];
+    let tick = 0;
+    const bridge = new WasmPackFiberBridge(undefined, {
+      sink: { emit: (event) => boundaryEvents.push(event) },
+      correlationId: () => "trace-test",
+      now: () => tick++,
+    });
 
     expect(bridge.supportsBinary).toBe(true);
     expect(bridge.supportsZeroCopy).toBe(true);
@@ -373,6 +386,21 @@ describe("WasmPackFiberBridge", () => {
         zeroCopyPatches: 1,
       },
     });
+    expect(boundaryEvents).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        version: 1,
+        type: "runtime.boundary",
+        boundary: "ts-wasm",
+        operation: "fiber.create",
+        correlationId: "trace-test",
+        requestBytes: 28,
+        responseBytes: 4,
+        result: "success",
+        allocations: 1,
+        liveFibers: 2,
+      }),
+      expect.objectContaining({ operation: "fiber.interrupt", subjectId: 5 }),
+    ]));
   });
 
   it("rejects modules missing strict hot-path exports and reports load failures", async () => {
@@ -403,6 +431,13 @@ describe("WasmPackFiberBridge", () => {
       readonly buffer = new ArrayBuffer(256);
       private readonly wordsPtr = 32;
 
+      abi_version() { return 1; }
+      min_compatible_abi_version() { return 1; }
+      engine_version() { return "0.2.0-test"; }
+      capabilities() { return 15; }
+      max_program_words() { return 4_194_307; }
+      max_patch_words() { return 4_194_305; }
+      max_event_batch() { return 65_536; }
       memory() { return { buffer: this.buffer }; }
       prepare_program_words() { return this.wordsPtr; }
       prepare_patch_words() { return this.wordsPtr; }
@@ -453,6 +488,12 @@ describe("WasmPackFiberBridge", () => {
     resolveWasmModule.mockReturnValueOnce({ BrassWasmVm: NullPointerVm });
     const nullPointer = new WasmPackFiberBridge();
     expect(() => nullPointer.createFiber({ version: 1, root: 0, nodes: [{ tag: "Succeed", valueRef: 1 }] })).toThrow(/null word pointer/);
+
+    class FutureAbiVm extends ZeroOnlyVm {
+      abi_version() { return 2; }
+    }
+    resolveWasmModule.mockReturnValueOnce({ BrassWasmVm: FutureAbiVm });
+    expect(() => new WasmPackFiberBridge()).toThrow(/newer than the supported ABI/);
   });
 });
 

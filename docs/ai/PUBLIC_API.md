@@ -79,7 +79,10 @@ that remain available from the root export for compatibility.
 
 Observability helpers include `RuntimeHooks`, `RuntimeEvent`,
 `RuntimeEventRecord`, `EventBus`, `makeRuntimeRecorder`, `consoleJsonLogger`,
-`RuntimeRegistry`, `dumpAllFibers`, and `InMemoryTracer`. Core also exposes
+`RuntimeRegistry`, `dumpAllFibers`, `InMemoryTracer`, the frozen versioned
+`RuntimeDiagnosticsSnapshot` returned by `runtime.diagnostics()`, and the payload-free
+versioned `RuntimeBoundaryEvent` contract for TS/WASM/IPC/native crossing
+telemetry. Core also exposes
 `Resource`, `makeResource`, `resourceAll`, `Schedule` constructors/combinators,
 `Schedule.driver` / `makeScheduleDriver`, runtime-clock-aware schedule runners,
 supervisor APIs, `makeRuntime` / `runPromise` / `runExit`, and Layer 2.0
@@ -115,6 +118,9 @@ Recommended API order:
   validation with typed validation errors.
 - `httpClientBuilder` / `makeHttpClientBuilder` for a discoverable builder
   API over the default client presets and lifecycle layers.
+- `makeDefaultHttpClient` operational profiles `editor`, `service`, and
+  `highThroughputProxy`; returned clients expose `profile` and a frozen,
+  redaction-safe `effectiveConfig()` snapshot of resolved limits and policies.
 - `adaptiveLimiterPresets` / `makeAdaptiveLimiterConfig` for documented
   `conservative`, `balanced`, and `aggressive` adaptive concurrency baselines.
 - `makeHttpClient` / `makeLifecycleClient` for cache, deduplication, priority
@@ -324,6 +330,14 @@ Source: `src/agent/index.ts`
 
 Primary categories:
 
+- host-independent `AgentHost` (`AgentEnv` compatibility alias), Node host and
+  versioned persistence adapters, workspace trust, secrets/diagnostics/
+  telemetry/lifecycle capability types
+- protocol-v1 native service types/client, deterministic TypeScript search
+  fallback, `NativeSearchPilot`, private Node process transport, and
+  `makeVsCodeNativeSearchPilot` extension-host composition
+- short-lived approval capabilities bound to workspace, goal, exact action
+  SHA-256, issue time, and expiry
 - agent state, reducer, decisions, events, config
 - project commands/profile/context discovery
 - patch quality, rollback safety, redaction, language, batch
@@ -344,6 +358,8 @@ Do not edit these directly during normal source changes:
 - `dist`
 - `coverage`
 - `wasm/pkg`
+- `native`
+- `artifacts/release`
 
 Regenerate them with build/test commands when the task requires generated
 artifacts.

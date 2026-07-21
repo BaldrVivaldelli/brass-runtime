@@ -1,4 +1,7 @@
 export * from "./core/types";
+export * from "./core/agentHost";
+export * from "./core/persistence";
+export * from "./core/approvalCapability";
 export * from "./core/state";
 export * from "./core/reducer";
 export * from "./core/decide";
@@ -16,6 +19,10 @@ export * from "./core/batch";
 export * from "./core/hostProfile";
 export * from "./core/hostSignals";
 export * from "./core/hostInference";
+export * from "./native/protocol";
+export * from "./native/eventStream";
+export * from "./native/client";
+export * from "./native/searchPilot";
 
 export * from "./tools/permissions";
 export * from "./tools/approvals";
@@ -34,3 +41,7 @@ export * from "./llm/googleGenerativeAI";
 export * from "./llm/fakeLLM";
 
 export * from "./node/nodeWorkspaceDiscovery";
+export * from "./node/nodeAgentHost";
+export * from "./node/nativeServiceProcess";
+export * from "./vscode/vscodeAgentHost";
+export * from "./vscode/nativeSearchPilot";

@@ -32,12 +32,24 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install pinned nightly for fuzz targets
+        if: matrix.node-version == 22
+        run: rustup toolchain install nightly-2026-07-01 --profile minimal
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - name: Install cargo-fuzz
+        if: matrix.node-version == 22
+        run: cargo install cargo-fuzz --version 0.13.1 --locked
 
       - run: npm ci
+      - run: npm run rust:check
+      - run: npm run native:build:debug
+      - if: matrix.node-version == 22
+        run: npm run rust:fuzz:check
       - run: npm run build:wasm
       - run: npm run build
       - run: npm test --if-present
@@ -61,12 +73,14 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run rust:check
+      - run: npm run native:build:debug
       - run: npm run build:wasm
       - run: npm run build
 
@@ -77,9 +91,38 @@ jobs:
           test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
           npm pack --dry-run
 
+  native-artifacts:
+    runs-on: ${{ matrix.os }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - run: npm run native:build
+      - run: npm run native:package
+      - run: npm run release:artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brass-native-service-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            native/
+            artifacts/release/
+          if-no-files-found: error
+
   release:
     runs-on: ubuntu-latest
-    needs: [test, node18-smoke]
+    needs: [test, node18-smoke, native-artifacts]
 
     steps:
       - uses: actions/checkout@v6
@@ -93,14 +136,17 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@1.94.0
 
       - name: Install wasm-pack
-        run: cargo install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run rust:check
       - run: npm run build
       - run: npm run build:wasm
+      - run: npm run native:build
+      - run: npm run native:package
       - run: rm -f wasm/pkg/.gitignore
       - name: Verify WASM files are packed
         run: |
@@ -111,7 +157,15 @@ jobs:
           cat pack.json
           tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine.js"
           tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine_bg.wasm"
-          
+
+      - run: npm run release:artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brass-release-metadata
+          path: artifacts/release/
+          if-no-files-found: error
+
       - name: Semantic Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

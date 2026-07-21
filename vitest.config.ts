@@ -19,7 +19,7 @@ const coverageThresholds = (() => {
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.pbt.test.ts"],
+    include: ["src/**/*.test.ts", "src/**/*.pbt.test.ts", "scripts/**/*.test.mjs"],
     exclude: ["node_modules/**", "dist/**", "coverage/**", "wasm/pkg/**"],
     testTimeout: 10_000,
     hookTimeout: 10_000,

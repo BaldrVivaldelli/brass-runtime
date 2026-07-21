@@ -1,0 +1,12 @@
+[workspace]
+members = [
+    "crates/brass-engine-core",
+    "crates/brass-native-service",
+    "crates/brass-runtime-wasm-engine",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+rust-version = "1.94"

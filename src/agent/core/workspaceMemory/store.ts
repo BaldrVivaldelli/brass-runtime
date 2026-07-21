@@ -1,7 +1,7 @@
 // src/agent/core/workspaceMemory/store.ts
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import type { AgentPersistence } from "../types";
+import { readAgentState, writeAgentState } from "../persistence";
 import type {
   WorkspaceMemory,
   FileChangeEntry,
@@ -111,15 +111,8 @@ export const parseWorkspaceMemory = (json: string): WorkspaceMemory => {
  * Reads WorkspaceMemory from disk.
  * Returns emptyWorkspaceMemory() if file is missing or unreadable.
  */
-export const loadWorkspaceMemory = async (cwd: string): Promise<WorkspaceMemory> => {
-  try {
-    const path = join(cwd, WORKSPACE_MEMORY_PATH);
-    const content = await readFile(path, "utf-8");
-    return parseWorkspaceMemory(content);
-  } catch {
-    return emptyWorkspaceMemory();
-  }
-};
+export const loadWorkspaceMemory = (persistence?: AgentPersistence): Promise<WorkspaceMemory> =>
+  readAgentState(persistence, "agent.workspace-memory.v1", parseWorkspaceMemory, emptyWorkspaceMemory);
 
 /**
  * Writes WorkspaceMemory to disk.
@@ -127,10 +120,11 @@ export const loadWorkspaceMemory = async (cwd: string): Promise<WorkspaceMemory>
  * Throws on write failure (caller handles).
  */
 export const persistWorkspaceMemory = async (
-  cwd: string,
+  persistence: AgentPersistence | undefined,
   memory: WorkspaceMemory,
-): Promise<void> => {
-  const path = join(cwd, WORKSPACE_MEMORY_PATH);
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, serializeWorkspaceMemory(memory), "utf-8");
-};
+): Promise<void> => writeAgentState(
+  persistence,
+  "agent.workspace-memory.v1",
+  serializeWorkspaceMemory(memory),
+  { maxBytes: 524_288 },
+);

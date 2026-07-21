@@ -10,6 +10,7 @@ import { DEFAULT_LEARNING_CONFIG, emptyApprovalHistory } from "../types";
 import type { ApprovalObservation, LearningConfig, ApprovalHistory } from "../types";
 import type { ApprovalRequest, ApprovalResponse, ApprovalService, AgentEnv, AgentError } from "../../types";
 import type { Async } from "../../../../core/types/asyncEffect";
+import { approveApprovalRequest, makeApprovalCapability } from "../../approvalCapability";
 
 // --- Generators ---
 
@@ -56,18 +57,27 @@ const makeTestEnv = (): AgentEnv => ({
   permissions: undefined as any,
 });
 
-const makeApprovalRequest = (actionType: string): ApprovalRequest => ({
-  action: { type: actionType as any },
-  state: { goal: {} as any, phase: "boot", observations: [], errors: [], steps: 0 },
-  reason: "test",
-  risk: "low",
-  defaultAnswer: "approve",
-});
+const makeApprovalRequest = (actionType: string): ApprovalRequest => {
+  const action = actionType === "shell.exec"
+    ? { type: "shell.exec" as const, command: ["npm", "test"] }
+    : actionType === "patch.apply"
+      ? { type: "patch.apply" as const, patch: "diff --git a/a b/a" }
+      : { type: "fs.readFile" as const, path: "README.md" };
+  const state = { goal: { id: "goal-test" } as any, phase: "boot" as const, observations: [], errors: [], steps: 0 };
+  return {
+    action,
+    state,
+    reason: "test",
+    risk: "low",
+    defaultAnswer: "approve",
+    capability: makeApprovalCapability({ action, workspaceId: "workspace-test", goalId: "goal-test", issuedAt: 1 }),
+  };
+};
 
-const makeUnderlying = (response: ApprovalResponse): ApprovalService => ({
-  request: (): Async<AgentEnv, AgentError, ApprovalResponse> => ({
+const makeUnderlying = (response: { readonly type: "approved" } | Extract<ApprovalResponse, { type: "rejected" }>): ApprovalService => ({
+  request: (request): Async<AgentEnv, AgentError, ApprovalResponse> => ({
     _tag: "Succeed",
-    value: response,
+    value: response.type === "approved" ? approveApprovalRequest(request) : response,
   } as any),
 });
 

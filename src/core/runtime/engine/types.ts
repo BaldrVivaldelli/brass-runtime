@@ -3,9 +3,11 @@ import type { Exit } from "../../types/effect";
 import type { Fiber } from "../fiber";
 import type { HostExecutor } from "../hostAction";
 import type { FiberId, NodeId, OpcodeNode, OpcodeProgram, RefId } from "./opcodes";
+import type { EngineAbiHandshake } from "./abiContract";
 
 export type FiberEngineKind = "ts" | "wasm";
-export type RuntimeEngineMode = FiberEngineKind;
+/** `auto` attempts the strict WASM engine once and emits a redacted fallback event before using TS. */
+export type RuntimeEngineMode = FiberEngineKind | "auto";
 
 export type FiberEngineStats = {
   readonly engine: string;
@@ -55,6 +57,7 @@ export type EngineEvent =
 
 export interface WasmBridge {
   readonly kind: "wasm";
+  readonly abi?: EngineAbiHandshake;
   readonly supportsBinary?: boolean;
   readonly supportsZeroCopy?: boolean;
   readonly supportsNoJsonMetrics?: boolean;
@@ -70,6 +73,7 @@ export interface WasmBridge {
   interrupt(fiberId: FiberId, reasonRef: RefId): EngineEvent;
   interruptBatch?(fiberId: FiberId, reasonRef: RefId, budget: number): readonly EngineEvent[];
   dropFiber(fiberId: FiberId): void;
+  reset?(): void;
   stats(): unknown;
 }
 

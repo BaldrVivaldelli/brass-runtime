@@ -1,7 +1,7 @@
 // src/agent/core/approvalLearning/store.ts
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import type { AgentPersistence } from "../types";
+import { readAgentState, writeAgentState } from "../persistence";
 import type { ApprovalHistory, ApprovalObservation, ActionTypeHistory } from "./types";
 import { emptyApprovalHistory } from "./types";
 
@@ -65,21 +65,17 @@ export const serializeApprovalHistory = (history: ApprovalHistory): string =>
  * File-based HistoryStore implementation.
  * Gracefully degrades: load returns empty on failure, save logs warning on failure.
  */
-export const makeFileHistoryStore = (cwd: string): HistoryStore => ({
-  load: async (): Promise<ApprovalHistory> => {
-    try {
-      const path = join(cwd, APPROVAL_HISTORY_PATH);
-      const content = await readFile(path, "utf-8");
-      return parseApprovalHistory(content);
-    } catch {
-      return emptyApprovalHistory();
-    }
-  },
+export const makePersistenceHistoryStore = (persistence?: AgentPersistence): HistoryStore => ({
+  load: (): Promise<ApprovalHistory> =>
+    readAgentState(persistence, "agent.approval-history.v1", parseApprovalHistory, emptyApprovalHistory),
   save: async (history: ApprovalHistory): Promise<void> => {
     try {
-      const path = join(cwd, APPROVAL_HISTORY_PATH);
-      await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, serializeApprovalHistory(history), "utf-8");
+      await writeAgentState(
+        persistence,
+        "agent.approval-history.v1",
+        serializeApprovalHistory(history),
+        { maxBytes: 262_144 },
+      );
     } catch (err: unknown) {
       console.warn(
         "[approvalLearning] Failed to persist history:",
@@ -88,6 +84,9 @@ export const makeFileHistoryStore = (cwd: string): HistoryStore => ({
     }
   },
 });
+
+/** @deprecated Use makePersistenceHistoryStore with an AgentHost persistence adapter. */
+export const makeFileHistoryStore = makePersistenceHistoryStore;
 
 /**
  * In-memory HistoryStore for testing.

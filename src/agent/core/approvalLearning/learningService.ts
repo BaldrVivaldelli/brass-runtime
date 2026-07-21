@@ -13,6 +13,7 @@ import { DEFAULT_LEARNING_CONFIG } from "./types";
 import { shouldAutoApprove } from "./confidence";
 import type { HistoryStore } from "./store";
 import { addObservation } from "./store";
+import { approveApprovalRequest } from "../approvalCapability";
 
 export type LearningApprovalServiceConfig = {
   readonly underlying: ApprovalService;
@@ -111,8 +112,8 @@ export const makeLearningApprovalService = async (
         _tag: "Async",
         register: (_env: AgentEnv, cb: (exit: { readonly _tag: "Success"; readonly value: ApprovalResponse }) => void) => {
           recordAndPersist(actionType, true).then(
-            () => cb({ _tag: "Success", value: { type: "approved" } }),
-            () => cb({ _tag: "Success", value: { type: "approved" } }), // persist failure is non-fatal
+            () => cb({ _tag: "Success", value: approveApprovalRequest(req) }),
+            () => cb({ _tag: "Success", value: approveApprovalRequest(req) }), // persist failure is non-fatal
           );
         },
       } as Async<AgentEnv, AgentError, ApprovalResponse>;

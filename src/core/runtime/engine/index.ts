@@ -5,6 +5,7 @@ export * from "./bridge/WasmPackFiberBridge";
 export * from "./bridge/WasmFiberRegistryBridge";
 export * from "./bridge/WasmFiberReadyQueueBridge";
 export * from "./binaryAbi";
+export * from "./abiContract";
 
 export type {
   EngineEvent,

@@ -1,6 +1,5 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
 import type { OutputPreferences, VerbosityLevel } from "./types";
+import type { AgentPersistence } from "../types";
 import { emptyOutputPreferences, MAX_RUN_HISTORY_ENTRIES } from "./types";
 
 const DEFAULT_STORE_PATH = ".brass/output-prefs.json";
@@ -14,6 +13,8 @@ export type PreferencesStoreOptions = {
         readonly writeFile: (path: string, content: string) => Promise<void>;
         readonly mkdir: (path: string) => Promise<void>;
     };
+    /** Preferred host-owned versioned persistence boundary. */
+    readonly persistence?: AgentPersistence;
 };
 
 export type PreferencesStore = {
@@ -32,10 +33,20 @@ export type PreferencesStore = {
  * All I/O failures are handled gracefully — never throws, never emits errors.
  */
 export const makePreferencesStore = (options?: PreferencesStoreOptions): PreferencesStore => {
-    const filePath = options?.path ?? join(process.cwd(), DEFAULT_STORE_PATH);
-    const fsRead = options?.fs?.readFile ?? ((p: string) => readFile(p, "utf-8"));
-    const fsWrite = options?.fs?.writeFile ?? ((p: string, c: string) => writeFile(p, c, "utf-8"));
-    const fsMkdir = options?.fs?.mkdir ?? ((p: string) => mkdir(p, { recursive: true }).then(() => {}));
+    const filePath = options?.path ?? DEFAULT_STORE_PATH;
+    const fsRead = options?.persistence
+        ? async () => options.persistence!.read("workspace", "agent.output-preferences.v1").then((value) => value ?? "")
+        : options?.fs?.readFile ?? (async () => { throw new Error("No AgentHost persistence adapter configured"); });
+    const fsWrite = options?.persistence
+        ? async (_path: string, content: string) => options.persistence!.write(
+            "workspace",
+            "agent.output-preferences.v1",
+            content,
+            { maxBytes: 65_536 },
+        )
+        : options?.fs?.writeFile ?? (async () => { throw new Error("No AgentHost persistence adapter configured"); });
+    const fsMkdir = options?.fs?.mkdir ?? (async () => undefined);
+    const parentPath = filePath.includes("/") ? filePath.slice(0, filePath.lastIndexOf("/")) : ".";
 
     const load = async (): Promise<OutputPreferences> => {
         try {
@@ -73,7 +84,7 @@ export const makePreferencesStore = (options?: PreferencesStoreOptions): Prefere
 
     const save = async (prefs: OutputPreferences): Promise<void> => {
         try {
-            await fsMkdir(dirname(filePath));
+            await fsMkdir(parentPath);
             await fsWrite(filePath, JSON.stringify(prefs, null, 2));
         } catch {
             // Silently swallow write errors

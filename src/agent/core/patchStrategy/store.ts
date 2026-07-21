@@ -1,44 +1,35 @@
 // src/agent/core/patchStrategy/store.ts
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import type { AgentPersistence } from "../types";
+import { readAgentState, writeAgentState } from "../persistence";
 import type { RewardEntry, StoredRewardData } from "./types";
 
-const STORE_PATH = ".brass/patch-strategy.json";
+const STORE_KEY = "agent.patch-strategy.v1" as const;
+
+export const parseRewardStore = (raw: string): readonly RewardEntry[] => {
+    try {
+        const data: unknown = JSON.parse(raw);
+        if (
+            typeof data !== "object" || data === null ||
+            (data as Record<string, unknown>).version !== 1
+        ) return [];
+        const stored = data as StoredRewardData;
+        return Array.isArray(stored.entries) ? stored.entries : [];
+    } catch {
+        return [];
+    }
+};
+
+export const serializeRewardStore = (entries: readonly RewardEntry[]): string =>
+    JSON.stringify({ version: 1, entries } satisfies StoredRewardData, null, 2);
 
 /**
  * Load reward history from .brass/patch-strategy.json.
  * Returns empty array on missing file, parse error, or invalid schema.
  * Performs exactly one file read.
  */
-export const loadRewardStore = async (cwd: string): Promise<readonly RewardEntry[]> => {
-    try {
-        const filePath = join(cwd, STORE_PATH);
-        const raw = await readFile(filePath, "utf-8");
-        const data: unknown = JSON.parse(raw);
-
-        // Validate schema version
-        if (
-            typeof data !== "object" ||
-            data === null ||
-            !("version" in data) ||
-            (data as Record<string, unknown>).version !== 1
-        ) {
-            return [];
-        }
-
-        const stored = data as StoredRewardData;
-
-        if (!Array.isArray(stored.entries)) {
-            return [];
-        }
-
-        return stored.entries;
-    } catch (err: unknown) {
-        // ENOENT or parse error → return empty
-        return [];
-    }
-};
+export const loadRewardStore = (persistence?: AgentPersistence): Promise<readonly RewardEntry[]> =>
+    readAgentState(persistence, STORE_KEY, parseRewardStore, () => []);
 
 /**
  * Flush reward history to .brass/patch-strategy.json.
@@ -46,19 +37,11 @@ export const loadRewardStore = async (cwd: string): Promise<readonly RewardEntry
  * On write failure, logs a warning and does not throw.
  */
 export const flushRewardStore = async (
-    cwd: string,
+    persistence: AgentPersistence | undefined,
     entries: readonly RewardEntry[],
 ): Promise<void> => {
     try {
-        const filePath = join(cwd, STORE_PATH);
-        const data: StoredRewardData = {
-            version: 1,
-            entries,
-        };
-
-        // Ensure directory exists
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, JSON.stringify(data, null, 2), "utf-8");
+        await writeAgentState(persistence, STORE_KEY, serializeRewardStore(entries), { maxBytes: 262_144 });
     } catch (err: unknown) {
         console.warn(
             "[patchStrategy] Failed to flush reward store:",

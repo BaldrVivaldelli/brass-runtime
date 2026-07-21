@@ -6,10 +6,12 @@ import type {
     AgentError,
     AgentState,
     AgentToolPolicyConfig,
+    ApprovalRequest,
     ApprovalResponse,
     Observation,
     PermissionDecision,
 } from "../core/types";
+import { makeApprovalCapability, sha256Hex, validateApprovalCapability } from "../core/approvalCapability";
 import { emitAgentEvent, nowMillis } from "../core/events";
 import { actionToEffect } from "./actionToEffect";
 import { service } from "./env";
@@ -107,20 +109,39 @@ const requestApproval = (
 ): Async<AgentEnv, AgentError, void> => {
     const defaultAnswer = decision.defaultAnswer ?? "reject";
 
-    return asyncFlatMap(nowMillis() as any, (at: number) =>
-        asyncFlatMap(
-            emitAgentEvent({
-                type: "agent.approval.requested",
+    return asyncFlatMap(
+        asyncSync((env: AgentEnv) => env.workspace?.id ?? sha256Hex(state.goal.cwd).slice(0, 24)) as any,
+        (workspaceId: string) => asyncFlatMap(nowMillis() as any, (at: number) => {
+            const capability = makeApprovalCapability({
                 action,
-                step: state.steps + 1,
-                phase: state.phase,
+                workspaceId,
+                goalId: state.goal.id,
+                issuedAt: at,
+            });
+            const request: ApprovalRequest = {
+                action,
+                state,
                 reason: decision.reason,
                 risk: decision.risk,
                 defaultAnswer,
-                at,
-            }) as any,
-            () =>
-                asyncFlatMap(service("approvals") as any, (approvals: AgentEnv["approvals"]) => {
+                capability,
+            };
+
+            return asyncFlatMap(
+                emitAgentEvent({
+                    type: "agent.approval.requested",
+                    action,
+                    step: state.steps + 1,
+                    phase: state.phase,
+                    reason: decision.reason,
+                    risk: decision.risk,
+                    defaultAnswer,
+                    capabilityId: capability.capabilityId,
+                    operationHash: capability.operationHash,
+                    expiresAt: capability.expiresAt,
+                    at,
+                }) as any,
+                () => asyncFlatMap(service("approvals") as any, (approvals: AgentEnv["approvals"]) => {
                     if (!approvals) {
                         const reason = "No approval service configured.";
                         return asyncFlatMap(emitApprovalResolved(action, state, false, reason) as any, () =>
@@ -129,15 +150,16 @@ const requestApproval = (
                     }
 
                     return asyncFlatMap(
-                        approvals.request({
-                            action,
-                            state,
-                            reason: decision.reason,
-                            risk: decision.risk,
-                            defaultAnswer,
-                        }) as any,
-                        (response: ApprovalResponse) => {
+                        approvals.request(request) as any,
+                        (response: ApprovalResponse) => asyncFlatMap(nowMillis() as any, (resolvedAt: number) => {
                             if (response.type === "approved") {
+                                const validation = validateApprovalCapability(response, request, resolvedAt);
+                                if (!validation.valid) {
+                                    return asyncFlatMap(
+                                        emitApprovalResolved(action, state, false, validation.reason) as any,
+                                        () => asyncFail(rejected(action, validation.reason)) as any,
+                                    ) as any;
+                                }
                                 return asyncFlatMap(emitApprovalResolved(action, state, true, undefined) as any, () =>
                                     asyncSucceed(undefined) as any
                                 ) as any;
@@ -147,10 +169,11 @@ const requestApproval = (
                             return asyncFlatMap(emitApprovalResolved(action, state, false, reason) as any, () =>
                                 asyncFail(rejected(action, reason)) as any
                             ) as any;
-                        }
+                        }) as any,
                     ) as any;
-                }) as any
-        ) as any
+                }) as any,
+            ) as any;
+        }) as any,
     ) as any;
 };
 

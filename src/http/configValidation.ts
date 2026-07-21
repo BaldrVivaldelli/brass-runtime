@@ -216,7 +216,7 @@ const defaultClientConfig = Schema.object({
   retry: retryConfig.optional(),
   prewarm: prewarmConfig.optional(),
   onEvent: fn.optional(),
-  preset: Schema.enum(["minimal", "proxy", "highThroughputProxy", "balanced", "default", "production"] as const).optional(),
+  preset: Schema.enum(["editor", "service", "minimal", "proxy", "highThroughputProxy", "balanced", "default", "production", "bareMetal"] as const).optional(),
   compression: compressionConfig.optional(),
   middleware: Schema.array(fn).optional(),
   policyPresets: policyPresetsConfig.optional(),
