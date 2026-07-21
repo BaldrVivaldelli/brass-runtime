@@ -13,6 +13,7 @@ import type { EngineStats } from "./engineStats";
 import { runtimeCapabilities } from "./capabilities";
 import { Schema, parseConfig } from "../../schema";
 import { runtimeClockFromEnv } from "./clock";
+import { emitRuntimeBoundaryEvent } from "./boundaryDiagnostics";
 
 // fallback hooks (no-op)
 export const NoopHooks: RuntimeHooks = {
@@ -20,19 +21,31 @@ export const NoopHooks: RuntimeHooks = {
 };
 
 function normalizeRuntimeEngineMode(value: unknown): RuntimeEngineMode {
-    if (value === "ts" || value === "wasm") return value;
-    throw new Error(`brass-runtime engine must be either 'ts' or 'wasm' in strict mode; received '${String(value)}'`);
+    if (value === "ts" || value === "wasm" || value === "auto") return value;
+    throw new Error(`brass-runtime engine must be 'ts', 'wasm', or 'auto'; received '${String(value)}'`);
 }
 
 function unreachableEngine(value: never): never {
     throw new Error(`brass-runtime unsupported engine '${String(value)}'`);
 }
 
+function classifyWasmFallback(error: unknown): RuntimeEngineFallbackCode {
+    const name = error instanceof Error ? error.name : "";
+    const message = error instanceof Error ? error.message : String(error);
+    if (name === "EngineAbiCompatibilityError" || /ABI|capabilit|handshake|newer/i.test(message)) {
+        return "WASM_INCOMPATIBLE_ABI";
+    }
+    if (/not available|could not load|cannot find|module resolution|wasm module/i.test(message)) {
+        return "WASM_UNAVAILABLE";
+    }
+    return "WASM_INITIALIZATION_FAILED";
+}
+
 const runtimeOptionsSchema = Schema.object({
     env: Schema.any(),
     lane: Schema.string({ minLength: 1 }).optional(),
     inferLane: Schema.boolean().optional(),
-    engine: Schema.enum(["ts", "wasm"] as const).optional(),
+    engine: Schema.enum(["ts", "wasm", "auto"] as const).optional(),
 }, { unknownKeys: "passthrough" });
 
 /**
@@ -50,11 +63,11 @@ export type RuntimeOptions<R> = {
     /**
      * Selects the fiber interpreter used by fork().
      *
-     * Strict mode only accepts:
+     * Modes:
      * - ts: TypeScript RuntimeFiber interpreter.
-     * - wasm: wasm-pack backed interpreter from wasm/pkg.
-     *
-     * There is no auto mode and no TS fallback when wasm is requested.
+     * - wasm: strict wasm-pack interpreter; initialization errors are thrown.
+     * - auto: attempt strict WASM once, then use TS with a redacted boundary
+     *   diagnostic when loading or ABI negotiation fails.
      */
     engine?: RuntimeEngineMode;
     /** Executor used by HostAction opcodes when running on the WASM engine. */
@@ -62,6 +75,46 @@ export type RuntimeOptions<R> = {
     /** Optional low-level WASM bridge options, mostly for tests and local experiments. */
     wasm?: WasmFiberEngineOptions;
 };
+
+export type RuntimeDiagnosticsSnapshot = {
+    readonly version: 1;
+    readonly engine: "ts" | "wasm";
+    readonly requestedEngine: RuntimeEngineMode;
+    readonly fallbackUsed: boolean;
+    readonly fallbackCode?: RuntimeEngineFallbackCode;
+    readonly capturedAt: number;
+    readonly fibers: {
+        readonly live: number;
+        readonly running: number;
+        readonly suspended: number;
+        readonly queued: number;
+        readonly completed: number;
+        readonly failed: number;
+        readonly interrupted: number;
+        readonly pendingHostEffects: number;
+    };
+    readonly scopes: {
+        readonly total: number;
+        readonly pending: number;
+        readonly pendingFinalizers: number;
+        readonly lastFinalizerDurationMs: number;
+        readonly maxFinalizerDurationMs: number;
+    };
+    readonly scheduler: {
+        readonly phase: string;
+        readonly queued: number;
+        readonly lanes: readonly {
+            readonly key: string;
+            readonly queued: number;
+            readonly capacity: number;
+        }[];
+    };
+};
+
+export type RuntimeEngineFallbackCode =
+    | "WASM_UNAVAILABLE"
+    | "WASM_INCOMPATIBLE_ABI"
+    | "WASM_INITIALIZATION_FAILED";
 
 export class Runtime<R> {
     readonly env: R;
@@ -72,12 +125,20 @@ export class Runtime<R> {
     readonly wasmOptions?: WasmFiberEngineOptions;
     readonly fiberEngine: FiberEngine<R>;
     readonly fallbackUsed: boolean;
+    readonly fallbackCode?: RuntimeEngineFallbackCode;
     readonly forkPolicy;
     readonly lane?: string;
     readonly inferLane: boolean;
 
     // opcional: registry para observabilidad
     registry?: RuntimeRegistry;
+    private readonly scopeDiagnostics = {
+        total: 0,
+        pending: 0,
+        pendingFinalizers: 0,
+        lastFinalizerDurationMs: 0,
+        maxFinalizerDurationMs: 0,
+    };
 
     constructor(args: RuntimeOptions<R>) {
         parseConfig("RuntimeOptions", runtimeOptionsSchema, args);
@@ -91,8 +152,10 @@ export class Runtime<R> {
         this.engineMode = normalizeRuntimeEngineMode(args.engine ?? "ts");
         this.wasmOptions = args.wasm;
         this.forkPolicy = makeForkPolicy(this.env as any, this.hooks);
-        this.fiberEngine = this.makeFiberEngine(this.engineMode, args.wasm);
-        this.fallbackUsed = false;
+        const selected = this.makeFiberEngine(this.engineMode, args.wasm);
+        this.fiberEngine = selected.engine;
+        this.fallbackUsed = selected.fallbackUsed;
+        this.fallbackCode = selected.fallbackCode;
         // Pre-compute static fast-path eligibility. The remaining check
         // (getCurrentFiber()) is dynamic and must happen per-call.
         this.staticFastPathOk =
@@ -104,15 +167,71 @@ export class Runtime<R> {
 
     private readonly staticFastPathOk: boolean;
 
-    private makeFiberEngine(mode: RuntimeEngineMode, wasm?: WasmFiberEngineOptions): FiberEngine<R> {
-        if (mode === "ts") return new JsFiberEngine(this as any);
-        if (mode === "wasm") return new WasmFiberEngine(this as any, wasm);
+    private makeFiberEngine(
+        mode: RuntimeEngineMode,
+        wasm?: WasmFiberEngineOptions,
+    ): { engine: FiberEngine<R>; fallbackUsed: boolean; fallbackCode?: RuntimeEngineFallbackCode } {
+        if (mode === "ts") return { engine: new JsFiberEngine(this as any), fallbackUsed: false };
+        if (mode === "wasm") return { engine: new WasmFiberEngine(this as any, wasm), fallbackUsed: false };
+        if (mode === "auto") {
+            const startedAt = wasm?.boundaryDiagnostics?.now?.() ?? Date.now();
+            try {
+                return { engine: new WasmFiberEngine(this as any, wasm), fallbackUsed: false };
+            } catch (error) {
+                const fallbackCode = classifyWasmFallback(error);
+                const endedAt = wasm?.boundaryDiagnostics?.now?.() ?? Date.now();
+                emitRuntimeBoundaryEvent(wasm?.boundaryDiagnostics?.sink, {
+                    version: 1,
+                    type: "runtime.boundary",
+                    boundary: "ts-wasm",
+                    operation: "engine.initialize",
+                    at: startedAt,
+                    durationMs: Math.max(0, endedAt - startedAt),
+                    requestBytes: 0,
+                    responseBytes: 0,
+                    result: "fallback",
+                    correlationId: wasm?.boundaryDiagnostics?.correlationId?.(),
+                    errorCode: fallbackCode,
+                });
+                return {
+                    engine: new JsFiberEngine(this as any),
+                    fallbackUsed: true,
+                    fallbackCode,
+                };
+            }
+        }
         return unreachableEngine(mode);
     }
 
     /** Returns true when the runtime has real hooks (not the no-op singleton). */
     hasActiveHooks(): boolean {
         return this.hooks !== NoopHooks;
+    }
+
+    /** @internal Lightweight scope counters used without enabling runtime hooks. */
+    recordScopeOpened(): void {
+        this.scopeDiagnostics.total += 1;
+        this.scopeDiagnostics.pending += 1;
+    }
+
+    /** @internal */
+    recordScopeFinalizerAdded(): void {
+        this.scopeDiagnostics.pendingFinalizers += 1;
+    }
+
+    /** @internal */
+    recordScopeFinalizerFinished(): void {
+        this.scopeDiagnostics.pendingFinalizers = Math.max(0, this.scopeDiagnostics.pendingFinalizers - 1);
+    }
+
+    /** @internal */
+    recordScopeClosed(finalizerDurationMs: number): void {
+        this.scopeDiagnostics.pending = Math.max(0, this.scopeDiagnostics.pending - 1);
+        this.scopeDiagnostics.lastFinalizerDurationMs = finalizerDurationMs;
+        this.scopeDiagnostics.maxFinalizerDurationMs = Math.max(
+            this.scopeDiagnostics.maxFinalizerDurationMs,
+            finalizerDurationMs,
+        );
     }
 
     /** Deriva un runtime con env extendido (estilo provide/locally) */
@@ -193,7 +312,57 @@ export class Runtime<R> {
 
     stats(): EngineStats<ReturnType<FiberEngine<R>["stats"]>> {
         const data = this.fiberEngine.stats();
-        return { engine: this.fiberEngine.kind, fallbackUsed: false, data };
+        return { engine: this.fiberEngine.kind, fallbackUsed: this.fallbackUsed, data };
+    }
+
+    /** Explicit, allocation-bounded diagnostic snapshot; no hooks are enabled by calling it. */
+    diagnostics(): RuntimeDiagnosticsSnapshot {
+        const engine = this.fiberEngine.stats();
+        const scheduler = this.scheduler.stats() as any;
+        const schedulerData = scheduler?.data ?? {};
+        const registry = this.registry ?? (this.hooks instanceof RuntimeRegistry ? this.hooks : undefined);
+        const fibers = registry ? [...registry.fibers.values()] : [];
+        const liveFromRegistry = fibers.filter((fiber) => fiber.runState !== "Done");
+        const suspendedFromRegistry = liveFromRegistry.filter((fiber) => fiber.runState === "Suspended").length;
+        const runningFromRegistry = liveFromRegistry.filter((fiber) => fiber.runState === "Running").length;
+        const lanes = Array.isArray(schedulerData.lanes)
+            ? schedulerData.lanes.slice(0, 128).map((lane: any) => Object.freeze({
+                key: String(lane.key),
+                queued: Number(lane.len ?? 0),
+                capacity: Number(lane.capacity ?? 0),
+            }))
+            : [];
+
+        return Object.freeze({
+            version: 1 as const,
+            engine: this.fiberEngine.kind,
+            requestedEngine: this.engineMode,
+            fallbackUsed: this.fallbackUsed,
+            ...(this.fallbackCode === undefined ? {} : { fallbackCode: this.fallbackCode }),
+            capturedAt: Date.now(),
+            fibers: Object.freeze({
+                live: registry ? liveFromRegistry.length : engine.runningFibers + engine.suspendedFibers + engine.queuedFibers,
+                running: registry ? runningFromRegistry : engine.runningFibers,
+                suspended: registry ? suspendedFromRegistry : engine.suspendedFibers,
+                queued: Number(schedulerData.len ?? engine.queuedFibers),
+                completed: engine.completedFibers,
+                failed: engine.failedFibers,
+                interrupted: engine.interruptedFibers,
+                pendingHostEffects: engine.pendingHostEffects,
+            }),
+            scopes: Object.freeze({
+                total: this.scopeDiagnostics.total,
+                pending: this.scopeDiagnostics.pending,
+                pendingFinalizers: this.scopeDiagnostics.pendingFinalizers,
+                lastFinalizerDurationMs: this.scopeDiagnostics.lastFinalizerDurationMs,
+                maxFinalizerDurationMs: this.scopeDiagnostics.maxFinalizerDurationMs,
+            }),
+            scheduler: Object.freeze({
+                phase: String(schedulerData.phase ?? "unknown"),
+                queued: Number(schedulerData.len ?? 0),
+                lanes: Object.freeze(lanes),
+            }),
+        });
     }
 
     capabilities() {

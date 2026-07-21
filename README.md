@@ -36,8 +36,9 @@ and explicit flush/shutdown.
 retention reports, observability overhead, CLI/JSON output, and actionable
 recommendations.
 
-**Optional engine and tools** — Rust/WASM-backed state machines plus the
-experimental Brass Agent CLI/VS Code workflow.
+**Optional engine and tools** — Rust/WASM-backed state machines, the
+experimental Brass Agent CLI/VS Code workflow, and a versioned read-only Rust
+index/search pilot with TypeScript fallback.
 
 ---
 
@@ -641,7 +642,9 @@ Optional Rust/WASM-backed components for strict execution:
 npm run build:wasm  # requires wasm-pack
 ```
 
-The WASM engine never silently falls back to TypeScript — if you request WASM and it's unavailable, it fails explicitly.
+`engine: "wasm"` never falls back. `engine: "auto"` is the explicit opt-in to a
+TypeScript fallback and emits a redacted `runtime.boundary` event plus stable
+diagnostic code when WASM cannot initialize.
 
 ---
 
@@ -658,6 +661,14 @@ brass-agent --preset inspect   # run inspection
 
 Docs: [Install](./docs/agent-install-and-configure.md) · [CLI](./docs/agent-cli.md) · [Project intelligence](./docs/agent-project-intelligence.md) · [VS Code](./docs/agent-vscode-install.md)
 
+The fork-oriented native search backend uses private authenticated IPC,
+rechecks workspace trust in TypeScript, and owns no filesystem/write/secret
+capability. The editor composition defaults to native-first `auto` with a
+deterministic TypeScript fallback after two final-worktree runs passed every
+promotion gate:
+[protocol](./docs/native-service-protocol.md) ·
+[adoption decision](./docs/native-search-pilot-decision.md).
+
 ---
 
 ## Testing
@@ -670,6 +681,8 @@ npm run release:check # full release gate: types, tests, build, CJS, perf budget
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
 npm run benchmark:runtime        # Runtime Performance Track
 npm run benchmark:runtime:budget # Runtime Performance Track regression budget
+npm run benchmark:runtime:primitives:budget # versioned fork/suspend/heap/fairness gates
+npm run benchmark:native:pilot   # isolated TS vs native search promotion report
 npm run perf:runtime:ab          # Runtime A/B Performance Lab
 npm run perf:runtime:soak        # Runtime-only soak profile
 npm run perf:runtime:budget      # Runtime profiler budget
@@ -683,6 +696,7 @@ npm run benchmark:http:soak
 npm run benchmark:observability
 npm run benchmark:observability:budget
 npm run smoke:observability:collector # requires local OTEL collector
+npm run release:artifacts        # SPDX SBOM, licenses, and SHA-256 checksums
 ```
 
 Property-based tests use `fast-check` with 100+ iterations per property. Each HTTP middleware has dedicated property tests verifying correctness invariants.
@@ -704,6 +718,9 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Streams guide](./docs/guides/streams.md)
 - [Testing guide](./docs/guides/testing.md)
 - [WASM engine](./docs/wasm-fiber-engine.md)
+- [Native service protocol](./docs/native-service-protocol.md)
+- [Native compatibility changelog](./docs/native-compatibility-changelog.md)
+- [Native adoption decision](./docs/native-search-pilot-decision.md)
 
 ---
 

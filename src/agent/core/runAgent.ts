@@ -30,10 +30,8 @@ import {
 } from "./llmBudget/events";
 import { appendRunRecord, parseLearningStore, serializeLearningStore } from "./llmBudget/persistence";
 import type { LearningRunRecord } from "./llmBudget/persistence";
-import { loadErrorPatterns, flushErrorPatterns } from "./errorRecovery/store";
+import { parseErrorPatterns, serializeErrorPatterns } from "./errorRecovery/store";
 import type { ErrorHistoryEntry } from "./errorRecovery/types";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { dirname, join } from "node:path";
 import {
     computeVerbosityLevel,
     makeVerbosityFilter,
@@ -44,8 +42,8 @@ import type { AdaptationSignals, OutputPreferences } from "./outputVerbosity";
 import type { RunDurationTrackerInstance } from "./outputVerbosity/tracker";
 import type { PreferencesStore } from "./outputVerbosity/store";
 import {
-    loadWorkspaceMemory,
-    persistWorkspaceMemory,
+    parseWorkspaceMemory,
+    serializeWorkspaceMemory,
     seedContextBanditPriors,
     seedPatchStrategyPriors,
     recordFileChanges,
@@ -174,13 +172,15 @@ const extractReadFiles = (state: AgentState): readonly string[] =>
  * On any failure (missing file, parse error, permission denied): returns empty array, no error log.
  * Uses asyncInterruptible to bridge the Promise into the effect system.
  */
-const loadErrorHistory = (
-    cwd: string,
-): Async<AgentEnv, never, readonly ErrorHistoryEntry[]> =>
+const loadErrorHistory = (): Async<AgentEnv, never, readonly ErrorHistoryEntry[]> =>
     asyncFold(
-        asyncInterruptible<AgentEnv, AgentError, readonly ErrorHistoryEntry[]>((_env, cb) => {
-            loadErrorPatterns(cwd).then(
-                (entries) => cb({ _tag: "Success", value: entries }),
+        asyncInterruptible<AgentEnv, AgentError, readonly ErrorHistoryEntry[]>((env, cb) => {
+            if (!env.persistence) {
+                cb({ _tag: "Success", value: [] });
+                return;
+            }
+            env.persistence.read("workspace", "agent.error-patterns.v1").then(
+                (value) => cb({ _tag: "Success", value: parseErrorPatterns(value ?? "") }),
                 () => cb({ _tag: "Success", value: [] as readonly ErrorHistoryEntry[] }),
             );
         }),
@@ -195,12 +195,19 @@ const loadErrorHistory = (
  * On any failure: logs a warning, does not throw, never affects the result (Requirement 9.4).
  */
 const persistErrorHistory = (
-    cwd: string,
     entries: readonly ErrorHistoryEntry[],
 ): Async<AgentEnv, never, void> =>
     asyncFold(
-        asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
-            flushErrorPatterns(cwd, entries).then(
+        asyncInterruptible<AgentEnv, AgentError, void>((env, cb) => {
+            if (!env.persistence) {
+                cb({ _tag: "Success", value: undefined });
+                return;
+            }
+            env.persistence.write(
+                "workspace",
+                "agent.error-patterns.v1",
+                serializeErrorPatterns(entries),
+            ).then(
                 () => cb({ _tag: "Success", value: undefined }),
                 (err) => cb({ _tag: "Failure", cause: { _tag: "Fail", error: { _tag: "FsError", operation: "persistErrorHistory", cause: err } as AgentError } }),
             );
@@ -211,11 +218,8 @@ const persistErrorHistory = (
         () => asyncSucceed(undefined as void) as any,
     ) as Async<AgentEnv, never, void>;
 
-/** Path for the learning store file relative to cwd. */
-const LEARNING_STORE_PATH = ".brass/llm-budget.json";
-
 /**
- * Persists a learning record to `.brass/llm-budget.json` on run completion.
+ * Persists a learning record through the host-owned versioned state store.
  * Reads existing file, appends the record, and writes back.
  * Creates the file with empty structure if it doesn't exist.
  * Never throws — catches all errors and logs a warning.
@@ -225,9 +229,11 @@ const persistLearningRecord = (
     budgetState: BudgetState,
 ): Async<AgentEnv, never, void> =>
     asyncFold(
-        asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
-            const filePath = `${state.goal.cwd}/${LEARNING_STORE_PATH}`;
-
+        asyncInterruptible<AgentEnv, AgentError, void>((env, cb) => {
+            if (!env.persistence) {
+                cb({ _tag: "Success", value: undefined });
+                return;
+            }
             const run = async () => {
                 // Build the learning record from the final budget state
                 const lastCall = budgetState.calls[budgetState.calls.length - 1];
@@ -248,21 +254,14 @@ const persistLearningRecord = (
                 };
 
                 // Read existing file (returns empty string on missing file)
-                let existingJson = "";
-                try {
-                    existingJson = await readFile(filePath, "utf8");
-                } catch {
-                    // File doesn't exist — will create with empty structure
-                }
+                const existingJson = await env.persistence!.read("workspace", "agent.llm-budget.v1") ?? "";
 
                 // Parse, append, serialize
                 const store = parseLearningStore(existingJson);
                 const updated = appendRunRecord(store, record);
                 const serialized = serializeLearningStore(updated);
 
-                // Ensure directory exists and write
-                await mkdir(dirname(filePath), { recursive: true });
-                await writeFile(filePath, serialized, "utf8");
+                await env.persistence!.write("workspace", "agent.llm-budget.v1", serialized);
             };
 
             run().then(
@@ -449,7 +448,7 @@ const runLoop = (
 
         // Persist error history on completion (both success and error paths)
         const persistErrorEffect: Async<AgentEnv, never, void> =
-            persistErrorHistory(state.goal.cwd, errorHistory);
+            persistErrorHistory(errorHistory);
 
         // Stop tracker and persist output preferences on run complete
         const persistVerbosityEffect: Async<AgentEnv, never, void> =
@@ -465,7 +464,7 @@ const runLoop = (
         const persistMemoryEffect: Async<AgentEnv, never, void> =
             memoryCtx !== undefined
                 ? asyncFold(
-                    asyncInterruptible<AgentEnv, AgentError, void>((_env, cb) => {
+                    asyncInterruptible<AgentEnv, AgentError, void>((env, cb) => {
                         const now = Date.now();
                         // Extract modified files from patch.applied observations
                         const modifiedFiles = state.observations
@@ -498,7 +497,15 @@ const runLoop = (
                             updated = recordCoChanges(updated, patchGroups, now);
                         }
 
-                        persistWorkspaceMemory(state.goal.cwd, updated).then(
+                        if (!env.persistence) {
+                            cb({ _tag: "Success", value: undefined });
+                            return;
+                        }
+                        env.persistence.write(
+                            "workspace",
+                            "agent.workspace-memory.v1",
+                            serializeWorkspaceMemory(updated),
+                        ).then(
                             () => cb({ _tag: "Success", value: undefined }),
                             (err) => cb({ _tag: "Failure", cause: { _tag: "Fail", error: { _tag: "FsError", operation: "persistWorkspaceMemory", cause: err } as AgentError } }),
                         );
@@ -615,13 +622,15 @@ export const runAgent = (
                 }
 
                 const hostProfile = env.hostProfile;
-                const store = makePreferencesStore({ path: join(goal.cwd, ".brass/output-prefs.json") });
+                const store = makePreferencesStore({
+                    persistence: env.persistence,
+                });
 
                 return asyncFlatMap(loadOutputPreferences(store) as any, (prefs: OutputPreferences) => {
                     // Collect adaptation signals from the environment
                     const signals: AdaptationSignals = {
-                        isPipe: typeof process !== "undefined" && process.stdout ? !process.stdout.isTTY : false,
-                        ttyWidth: typeof process !== "undefined" && process.stdout ? process.stdout.columns : undefined,
+                        isPipe: env.terminal ? !env.terminal.isInteractive : false,
+                        ttyWidth: env.terminal?.columns,
                         runHistory: prefs.runHistory,
                         userOverride: prefs.userOverride,
                     };
@@ -653,13 +662,17 @@ export const runAgent = (
                         () =>
                             // Load error patterns at run start (Requirement 9.2)
                             // On failure: proceed with empty history, no error log (Requirement 9.3)
-                            asyncFlatMap(loadErrorHistory(goal.cwd) as any, (errorHistory: readonly ErrorHistoryEntry[]) =>
+                            asyncFlatMap(loadErrorHistory() as any, (errorHistory: readonly ErrorHistoryEntry[]) =>
                                 // Load workspace memory at boot (Requirement 3.1)
                                 asyncFlatMap(
                                     asyncFold(
-                                        asyncInterruptible<AgentEnv, AgentError, WorkspaceMemory>((_env, cb) => {
-                                            loadWorkspaceMemory(goal.cwd).then(
-                                                (mem) => cb({ _tag: "Success", value: mem }),
+                                        asyncInterruptible<AgentEnv, AgentError, WorkspaceMemory>((env, cb) => {
+                                            if (!env.persistence) {
+                                                cb({ _tag: "Success", value: parseWorkspaceMemory("") });
+                                                return;
+                                            }
+                                            env.persistence.read("workspace", "agent.workspace-memory.v1").then(
+                                                (value) => cb({ _tag: "Success", value: parseWorkspaceMemory(value ?? "") }),
                                                 () => cb({ _tag: "Success", value: { version: 1, fileChangeFrequency: [], commandFailureRate: [], goalPatternSuccessRate: [], coChangeClusters: [] } as WorkspaceMemory }),
                                             );
                                         }),

@@ -1,18 +1,30 @@
 import type { EngineEvent, WasmBridge } from "../types";
 import type { FiberId, NodeId, OpcodeNode, OpcodeProgram, RefId } from "../opcodes";
 import { decodeEventBatch, encodeOpcodeNodes, encodeOpcodeProgram } from "../binaryAbi";
+import {
+  assertAbiWordLimit,
+  negotiateEngineAbi,
+  type EngineAbiHandshake,
+  type EngineAbiProvider,
+} from "../abiContract";
 import { resolveWasmModule, wasmModuleResolutionErrors } from "../../wasmModule";
+import {
+  emitRuntimeBoundaryEvent,
+  type RuntimeBoundaryDiagnosticsOptions,
+  type RuntimeBoundaryResult,
+} from "../../boundaryDiagnostics";
 
 type WasmMemoryLike = { readonly buffer: ArrayBufferLike };
 
-type WasmVm = {
+type WasmVm = EngineAbiProvider & {
   create_fiber(programJson: string): number;
   poll(fiberId: number): string;
   provide_value(fiberId: number, valueRef: number): string;
   provide_error(fiberId: number, errorRef: number): string;
   provide_effect(fiberId: number, root: number, nodesJson: string): string;
   interrupt(fiberId: number, reasonRef: number): string;
-  drop_fiber(fiberId: number): void;
+  drop_fiber(fiberId: number): boolean;
+  reset?(): void;
   stats_json(): string;
 
   create_fiber_bin?: (programWords: Uint32Array) => number;
@@ -74,7 +86,9 @@ export class WasmPackFiberBridge implements WasmBridge {
   readonly supportsBinary: boolean;
   readonly supportsZeroCopy: boolean;
   readonly supportsNoJsonMetrics: boolean;
+  readonly abi: EngineAbiHandshake;
   private readonly vm: WasmVm;
+  private readonly boundaryDiagnostics: RuntimeBoundaryDiagnosticsOptions;
 
   private jsonEventCalls = 0;
   private binaryEventCalls = 0;
@@ -88,9 +102,10 @@ export class WasmPackFiberBridge implements WasmBridge {
   private binaryPatches = 0;
   private zeroCopyPatches = 0;
 
-  constructor(modulePath?: string) {
+  constructor(modulePath?: string, boundaryDiagnostics: RuntimeBoundaryDiagnosticsOptions = {}) {
     const mod = loadWasmModule(modulePath) as WasmVmModule;
     this.vm = new mod.BrassWasmVm();
+    this.boundaryDiagnostics = boundaryDiagnostics;
     this.supportsBinary = typeof this.vm.create_fiber_bin === "function" &&
       typeof this.vm.drive_batch_bin === "function" &&
       typeof this.vm.provide_value_bin === "function" &&
@@ -112,13 +127,17 @@ export class WasmPackFiberBridge implements WasmBridge {
       typeof this.vm.memory === "function";
 
     this.assertStrictWasmHotPath();
+    this.abi = negotiateEngineAbi(this.vm);
   }
 
   createFiber(program: OpcodeProgram): FiberId {
     const words = encodeOpcodeProgram(program);
-    this.writeWords(this.vm.prepare_program_words!(words.length), words);
-    this.zeroCopyPrograms += 1;
-    return this.vm.create_fiber_from_program_words!(words.length);
+    assertAbiWordLimit("program", words.length, this.abi);
+    return this.crossBoundary("fiber.create", words.byteLength, undefined, () => {
+      this.writeWords(this.vm.prepare_program_words!(words.length), words);
+      this.zeroCopyPrograms += 1;
+      return this.vm.create_fiber_from_program_words!(words.length);
+    }, () => 4);
   }
 
   poll(fiberId: FiberId): EngineEvent {
@@ -126,7 +145,8 @@ export class WasmPackFiberBridge implements WasmBridge {
   }
 
   driveBatch(fiberId: FiberId, budget: number): readonly EngineEvent[] {
-    return this.decodeZeroCopy(this.vm.drive_batch_ptr!(fiberId, budget));
+    return this.crossBoundary("fiber.drive", 8, fiberId, () =>
+      this.decodeZeroCopy(this.vm.drive_batch_ptr!(fiberId, budget)), (events) => events.length * 20);
   }
 
   provideValue(fiberId: FiberId, valueRef: RefId): EngineEvent {
@@ -134,7 +154,8 @@ export class WasmPackFiberBridge implements WasmBridge {
   }
 
   provideValueBatch(fiberId: FiberId, valueRef: RefId, budget: number): readonly EngineEvent[] {
-    return this.decodeZeroCopy(this.vm.provide_value_ptr!(fiberId, valueRef, budget));
+    return this.crossBoundary("fiber.provide-value", 12, fiberId, () =>
+      this.decodeZeroCopy(this.vm.provide_value_ptr!(fiberId, valueRef, budget)), (events) => events.length * 20);
   }
 
   provideError(fiberId: FiberId, errorRef: RefId): EngineEvent {
@@ -142,7 +163,8 @@ export class WasmPackFiberBridge implements WasmBridge {
   }
 
   provideErrorBatch(fiberId: FiberId, errorRef: RefId, budget: number): readonly EngineEvent[] {
-    return this.decodeZeroCopy(this.vm.provide_error_ptr!(fiberId, errorRef, budget));
+    return this.crossBoundary("fiber.provide-error", 12, fiberId, () =>
+      this.decodeZeroCopy(this.vm.provide_error_ptr!(fiberId, errorRef, budget)), (events) => events.length * 20);
   }
 
   provideEffect(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[]): EngineEvent {
@@ -151,9 +173,12 @@ export class WasmPackFiberBridge implements WasmBridge {
 
   provideEffectBatch(fiberId: FiberId, root: NodeId, nodes: OpcodeNode[], budget: number): readonly EngineEvent[] {
     const words = encodeOpcodeNodes(nodes);
-    this.writeWords(this.vm.prepare_patch_words!(words.length), words);
-    this.zeroCopyPatches += 1;
-    return this.decodeZeroCopy(this.vm.provide_effect_from_words!(fiberId, root, words.length, budget));
+    assertAbiWordLimit("patch", words.length, this.abi);
+    return this.crossBoundary("fiber.provide-effect", words.byteLength + 12, fiberId, () => {
+      this.writeWords(this.vm.prepare_patch_words!(words.length), words);
+      this.zeroCopyPatches += 1;
+      return this.decodeZeroCopy(this.vm.provide_effect_from_words!(fiberId, root, words.length, budget));
+    }, (events) => events.length * 20);
   }
 
   interrupt(fiberId: FiberId, reasonRef: RefId): EngineEvent {
@@ -161,11 +186,16 @@ export class WasmPackFiberBridge implements WasmBridge {
   }
 
   interruptBatch(fiberId: FiberId, reasonRef: RefId, budget: number): readonly EngineEvent[] {
-    return this.decodeZeroCopy(this.vm.interrupt_ptr!(fiberId, reasonRef, budget));
+    return this.crossBoundary("fiber.interrupt", 12, fiberId, () =>
+      this.decodeZeroCopy(this.vm.interrupt_ptr!(fiberId, reasonRef, budget)), (events) => events.length * 20);
   }
 
   dropFiber(fiberId: FiberId): void {
-    this.vm.drop_fiber(fiberId);
+    this.crossBoundary("fiber.drop", 4, fiberId, () => this.vm.drop_fiber(fiberId), () => 0);
+  }
+
+  reset(): void {
+    this.crossBoundary("engine.reset", 0, undefined, () => this.vm.reset?.(), () => 0);
   }
 
   stats(): unknown {
@@ -174,6 +204,7 @@ export class WasmPackFiberBridge implements WasmBridge {
     return {
       ...wasmStats,
       bridge: {
+        abi: this.abi,
         supportsBinary: this.supportsBinary,
         supportsZeroCopy: this.supportsZeroCopy,
         supportsNoJsonMetrics: this.supportsNoJsonMetrics,
@@ -197,6 +228,13 @@ export class WasmPackFiberBridge implements WasmBridge {
   private assertStrictWasmHotPath(): void {
     const missing: string[] = [];
     const required = [
+      "abi_version",
+      "min_compatible_abi_version",
+      "engine_version",
+      "capabilities",
+      "max_program_words",
+      "max_patch_words",
+      "max_event_batch",
       "memory",
       "prepare_program_words",
       "prepare_patch_words",
@@ -221,6 +259,62 @@ export class WasmPackFiberBridge implements WasmBridge {
         "Run `npm run build:wasm` from the phase-4+ Rust sources and make sure wasm/pkg is current.",
         `Missing WASM exports: ${missing.join(", ")}`,
       ].join("\n"));
+    }
+  }
+
+  private crossBoundary<T>(
+    operation: string,
+    requestBytes: number,
+    subjectId: number | undefined,
+    run: () => T,
+    responseBytes: (value: T) => number,
+  ): T {
+    const sink = this.boundaryDiagnostics.sink;
+    if (!sink) return run();
+    const now = this.boundaryDiagnostics.now ?? (() =>
+      typeof performance !== "undefined" ? performance.now() : Date.now());
+    const startedAt = now();
+    const correlationId = this.boundaryDiagnostics.correlationId?.();
+    let result: RuntimeBoundaryResult = "success";
+    let errorCode: string | undefined;
+    try {
+      const value = run();
+      const metrics = this.boundaryMetricFields();
+      emitRuntimeBoundaryEvent(sink, {
+        version: 1,
+        type: "runtime.boundary",
+        boundary: "ts-wasm",
+        operation,
+        at: startedAt,
+        durationMs: Math.max(0, now() - startedAt),
+        requestBytes,
+        responseBytes: responseBytes(value),
+        result,
+        ...(correlationId ? { correlationId } : {}),
+        ...(subjectId !== undefined ? { subjectId } : {}),
+        ...metrics,
+      });
+      return value;
+    } catch (error) {
+      result = "error";
+      errorCode = error instanceof Error ? error.name : "UnknownBoundaryError";
+      const metrics = this.boundaryMetricFields();
+      emitRuntimeBoundaryEvent(sink, {
+        version: 1,
+        type: "runtime.boundary",
+        boundary: "ts-wasm",
+        operation,
+        at: startedAt,
+        durationMs: Math.max(0, now() - startedAt),
+        requestBytes,
+        responseBytes: 0,
+        result,
+        errorCode,
+        ...(correlationId ? { correlationId } : {}),
+        ...(subjectId !== undefined ? { subjectId } : {}),
+        ...metrics,
+      });
+      throw error;
     }
   }
 
@@ -264,6 +358,18 @@ export class WasmPackFiberBridge implements WasmBridge {
       out[VM_METRIC_NAMES[i]] = view[i];
     }
     return out;
+  }
+
+  private boundaryMetricFields(): { readonly allocations?: number; readonly liveFibers?: number } {
+    try {
+      const metrics = this.readMetricsSnapshot();
+      return {
+        ...(Number.isFinite(metrics.started) ? { allocations: metrics.started } : {}),
+        ...(Number.isFinite(metrics.live) ? { liveFibers: metrics.live } : {}),
+      };
+    } catch {
+      return {};
+    }
   }
 }
 

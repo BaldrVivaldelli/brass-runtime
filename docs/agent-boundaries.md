@@ -32,6 +32,7 @@ Goal
   -> PermissionService
   -> ApprovalService when permission decision is ask
   -> ToolPolicy
+  -> short-lived operation-bound approval capability
   -> AgentAction interpreted as Async
   -> Observation
   -> reducer
@@ -41,10 +42,12 @@ Goal
 Rules:
 
 1. The planner produces `AgentAction` values.
-2. Every `AgentAction` is interpreted into `Async<AgentEnv, AgentError, Observation>`.
-3. All external work goes through capabilities in `AgentEnv`.
+2. Every `AgentAction` is interpreted into `Async<AgentHost, AgentError, Observation>`.
+3. All external work goes through capabilities in `AgentHost`; `AgentEnv` is
+   retained as its compatibility alias.
 4. All tool execution goes through permissions first.
-5. Approval-required actions must be approved before tool execution.
+5. Approval-required actions need a live capability bound to workspace, goal,
+   action type, and the SHA-256 of the exact operation before tool execution.
 6. All tool execution goes through timeout/retry policy.
 7. No detached background work by default.
 8. Every async tool that touches external work must be cancellable.
@@ -67,10 +70,13 @@ src/agent/cli Node config loader
 Rules:
 
 1. Config loading must not move into `src/core`.
-2. Config is resolved before constructing `AgentEnv`.
+2. Config is resolved before constructing `AgentHost`.
 3. Config may tune permissions, approvals, LLM provider/model, and tool policies.
 4. Config must not store secrets; adapters should read API keys from environment variables.
 5. Config must not bypass the `AgentAction -> PermissionService -> ApprovalService -> ToolPolicy -> Async -> Observation` pipeline.
+
+See `docs/agent-host.md` for Node/VS Code adapter, workspace-trust,
+persistence, secret, telemetry, and lifecycle requirements.
 
 ## Runtime invariants the agent relies on
 

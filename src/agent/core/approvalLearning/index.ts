@@ -8,6 +8,7 @@ export {
   parseApprovalHistory,
   serializeApprovalHistory,
   makeFileHistoryStore,
+  makePersistenceHistoryStore,
   makeInMemoryHistoryStore,
   addObservation,
 } from "./store";

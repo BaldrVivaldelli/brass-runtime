@@ -20,6 +20,63 @@ describe("makeDefaultHttpClient", () => {
     vi.unstubAllGlobals();
   });
 
+  it("exposes the three operational profiles and their effective redaction-safe config", () => {
+    vi.stubGlobal("fetch", vi.fn());
+
+    const editor = makeDefaultHttpClient({ preset: "editor" });
+    const service = makeDefaultHttpClient({
+      preset: "service",
+      priority: { concurrency: 40 },
+      onEvent: () => undefined,
+      middleware: [(next) => next],
+      policyPresets: { read: { priority: 2 } },
+    });
+    const proxy = makeDefaultHttpClient({ preset: "highThroughputProxy" });
+
+    expect(editor.profile).toBe("editor");
+    expect(editor.effectiveConfig()).toMatchObject({
+      version: 1,
+      profile: "editor",
+      preset: "editor",
+      timeoutMs: 15_000,
+      priority: { enabled: true, concurrency: 8, queueTimeoutMs: 5_000 },
+      retry: { enabled: true, maxRetries: 1, maxElapsedMs: 1_500 },
+      cache: { enabled: true, ttlSeconds: 15, maxEntries: 256 },
+      adaptiveLimiter: { enabled: true, initialLimit: 8, minLimit: 2, maxLimit: 64 },
+      observability: { lifecycleEvents: false, middlewareCount: 0, policyPresetCount: 0 },
+    });
+
+    expect(service.profile).toBe("service");
+    expect(service.effectiveConfig()).toMatchObject({
+      profile: "service",
+      priority: { concurrency: 40 },
+      retry: { maxRetries: 3 },
+      cache: { enabled: true, ttlSeconds: 60 },
+      observability: { lifecycleEvents: true, middlewareCount: 1, policyPresetCount: 1 },
+    });
+    expect(Object.isFrozen(service.effectiveConfig())).toBe(true);
+    expect(Object.isFrozen(service.effectiveConfig().retry)).toBe(true);
+
+    expect(proxy.profile).toBe("proxy");
+    expect(proxy.effectiveConfig()).toMatchObject({
+      profile: "proxy",
+      timeoutMs: null,
+      priority: { enabled: false },
+      retry: { enabled: false, maxRetries: 0 },
+      cache: { enabled: false },
+      adaptiveLimiter: { enabled: false },
+    });
+  });
+
+  it("updates the effective middleware count on immutable with composition", () => {
+    vi.stubGlobal("fetch", vi.fn());
+    const base = makeDefaultHttpClient({ preset: "editor" });
+    const wrapped = base.with((next) => next);
+
+    expect(base.effectiveConfig().observability.middlewareCount).toBe(0);
+    expect(wrapped.effectiveConfig().observability.middlewareCount).toBe(1);
+  });
+
   it("creates a batteries-included client with JSON helpers and default features", async () => {
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ ok: true }), {

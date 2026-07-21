@@ -153,7 +153,7 @@ describe("JsFiberEngine", () => {
     expect(engine.stats()).toEqual({
       engine: "ts",
       startedFibers: 1,
-      runningFibers: 0,
+      runningFibers: 1,
       suspendedFibers: 0,
       queuedFibers: 0,
       completedFibers: 0,

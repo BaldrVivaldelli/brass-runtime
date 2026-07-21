@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "description": "Versioned ceilings for fork, suspend/resume, suspended heap, and lane fairness. They are regression budgets, not native-promotion claims.",
+  "latency": [
+    { "match": "RuntimePrimitive v1 fork/complete ts", "maxPerUnitUs": 100 },
+    { "match": "RuntimePrimitive v1 fork/complete wasm", "maxPerUnitUs": 140 },
+    { "match": "RuntimePrimitive v1 suspend/resume ts", "maxPerUnitUs": 140 },
+    { "match": "RuntimePrimitive v1 suspend/resume wasm", "maxPerUnitUs": 180 },
+    { "match": "RuntimePrimitive v1 lane fairness ts", "maxPerUnitUs": 30, "maxConsecutive": 2 },
+    { "match": "RuntimePrimitive v1 lane fairness wasm", "maxPerUnitUs": 45, "maxConsecutive": 2 }
+  ],
+  "heap": [
+    { "match": "heap per suspended fiber ts closure", "maxHeapPerFiberBytes": 8192, "maxRssPerFiberBytes": 16384 },
+    { "match": "heap per suspended fiber wasm host-action", "maxHeapPerFiberBytes": 12288, "maxRssPerFiberBytes": 24576 }
+  ]
+}

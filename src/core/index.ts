@@ -5,6 +5,7 @@ export * from "./types/cancel";
 
 export * from "./runtime/combinators";
 export * from "./runtime/dx";
+export * from "./runtime/boundaryDiagnostics";
 export {
   bracket,
   ensuring,

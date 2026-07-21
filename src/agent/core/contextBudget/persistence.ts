@@ -1,6 +1,5 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
-
+import type { AgentPersistence } from "../types";
+import { readAgentState, writeAgentState } from "../persistence";
 import type { BanditState, ArmStats, AttributionLogEntry } from "./types";
 import { emptyBanditState } from "./types";
 
@@ -32,25 +31,22 @@ export const serializeBanditState = (state: BanditState): string =>
  * Returns empty state if file is missing or contains invalid JSON.
  * Never throws — always returns a valid BanditState.
  */
-export const readBanditState = async (cwd: string): Promise<BanditState> => {
-    try {
-        const path = join(cwd, BANDIT_STATE_PATH);
-        const content = await readFile(path, "utf8");
-        return parseBanditState(content);
-    } catch {
-        return emptyBanditState();
-    }
-};
+export const readBanditState = (persistence?: AgentPersistence): Promise<BanditState> =>
+    readAgentState(persistence, "agent.context-budget.v1", parseBanditState, emptyBanditState);
 
 /**
  * Serializes and writes BanditState to disk.
  * Creates .brass/ directory if it doesn't exist.
  */
-export const writeBanditState = async (cwd: string, state: BanditState): Promise<void> => {
-    const path = join(cwd, BANDIT_STATE_PATH);
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(path, serializeBanditState(state), "utf8");
-};
+export const writeBanditState = (
+    persistence: AgentPersistence | undefined,
+    state: BanditState,
+): Promise<void> => writeAgentState(
+    persistence,
+    "agent.context-budget.v1",
+    serializeBanditState(state),
+    { maxBytes: 524_288 },
+);
 
 // --- Validation helpers ---
 

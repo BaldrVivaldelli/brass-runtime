@@ -28,6 +28,8 @@ export type ScopeInfo = {
     ownerFiberId?: number;
     openAt: number;
     closedAt?: number;
+    finalizerCount?: number;
+    finalizerDurationMs?: number;
     finalizers: Array<{ id: number; label?: string; status: "added" | "running" | "done" }>;
 };
 
@@ -109,7 +111,27 @@ export class RuntimeRegistry implements RuntimeHooks {
 
             case "scope.close": {
                 const s = this.scopes.get(rec.scopeId);
-                if (s) s.closedAt = rec.wallTs;
+                if (s) {
+                    s.closedAt = rec.wallTs;
+                    s.finalizerCount = rec.finalizerCount;
+                    s.finalizerDurationMs = rec.finalizerDurationMs;
+                }
+                break;
+            }
+
+            case "scope.finalizer.add": {
+                const scope = this.scopes.get(rec.scopeId);
+                if (scope) {
+                    scope.finalizers.push({ id: rec.finalizerId, label: rec.label, status: "added" });
+                }
+                break;
+            }
+
+            case "scope.finalizer.start":
+            case "scope.finalizer.end": {
+                const scope = this.scopes.get(rec.scopeId);
+                const finalizer = scope?.finalizers.find((entry) => entry.id === rec.finalizerId);
+                if (finalizer) finalizer.status = rec.type === "scope.finalizer.start" ? "running" : "done";
                 break;
             }
         }

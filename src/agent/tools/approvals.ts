@@ -1,12 +1,13 @@
 import { asyncSucceed } from "../../core/types/asyncEffect";
-import type { ApprovalService } from "../core/types";
+import type { AgentPersistence, ApprovalService } from "../core/types";
+import { approveApprovalRequest } from "../core/approvalCapability";
 import type { LearningConfig } from "../core/approvalLearning/types";
 import type { HistoryStore } from "../core/approvalLearning/store";
 import { makeFileHistoryStore } from "../core/approvalLearning/store";
 import { makeLearningApprovalService } from "../core/approvalLearning/learningService";
 
 export const autoApproveApprovals: ApprovalService = {
-    request: () => asyncSucceed({ type: "approved" }) as any,
+    request: (request) => asyncSucceed(approveApprovalRequest(request)) as any,
 };
 
 export const makeAutoDenyApprovals = (reason = "Approval denied by non-interactive policy."): ApprovalService => ({
@@ -24,13 +25,14 @@ export const withApprovalLearning = async (
     underlying: ApprovalService,
     options: {
         readonly cwd: string;
+        readonly persistence?: AgentPersistence;
         readonly config?: Partial<LearningConfig>;
         readonly store?: HistoryStore;
     },
 ): Promise<ApprovalService> => {
     if (!options.config) return underlying;
 
-    const store = options.store ?? makeFileHistoryStore(options.cwd);
+    const store = options.store ?? makeFileHistoryStore(options.persistence);
     return makeLearningApprovalService({
         underlying,
         store,

@@ -11,6 +11,9 @@ This is the compact map for understanding `brass-runtime` quickly.
 - `src/perf/cli.ts` -> CLI binary `brass-perf`.
 - `src/agent/index.ts` -> subpath export `brass-runtime/agent`.
 - `src/agent/cli/main.ts` -> CLI binary `brass-agent`.
+- `src/agent/native` -> protocol-v1 client and deterministic search pilot.
+- `src/agent/node/nativeServiceProcess.ts` -> private child-process transport.
+- `crates/brass-native-service` -> promoted read-only Rust editor-search service.
 - `tsup.config.ts` -> CJS, ESM, and JS bundle entries.
 - `package.json` -> scripts, exports, package files, CLI bin.
 
@@ -52,6 +55,7 @@ Tests:
 Docs:
 
 - `docs/ARCHITECTURE.md`
+- `docs/runtime-diagnostics.md`
 - `docs/cancellation.md`
 - `docs/observability.md`
 - `docs/guides/testing.md`
@@ -232,8 +236,11 @@ Paths:
 - `src/agent/cli`
 - `src/agent/core`
 - `src/agent/node`
+- `src/agent/native`
+- `src/agent/vscode`
 - `src/agent/tools`
 - `src/agent/llm`
+- `crates/brass-native-service`
 - `extensions/vscode-brass-agent`
 
 Purpose:
@@ -243,6 +250,8 @@ Purpose:
 
 Read first:
 
+- `src/agent/core/agentHost.ts`
+- `src/agent/core/approvalCapability.ts`
 - `src/agent/core/runAgent.ts`
 - `src/agent/core/contextDiscovery.ts`
 - `src/agent/core/projectCommands.ts`
@@ -251,6 +260,7 @@ Read first:
 
 Docs:
 
+- `docs/agent-host.md`
 - `docs/agent-boundaries.md`
 - `docs/agent-project-intelligence.md`
 - `docs/agent-context-discovery.md`
@@ -261,6 +271,7 @@ Docs:
 
 Paths:
 
+- `crates/brass-engine-core`
 - `crates/brass-runtime-wasm-engine`
 - `src/core/runtime/engine/WasmFiberEngine.ts`
 - `src/core/runtime/wasmModule.ts`
@@ -270,11 +281,16 @@ Paths:
 
 Purpose:
 
+- Keep ABI validation and future portable engine state independent of host,
+  I/O, permissions, JavaScript, and `wasm-bindgen`.
 - Provide strict WASM-backed state machines/engine pieces.
 - Do not silently fall back to TypeScript when a caller requests WASM.
 
 Docs:
 
+- `docs/native-engine-boundary.md`
+- `docs/wasm-engine-abi.md`
+- `docs/native-performance-gates.md`
 - `docs/wasm-fiber-engine.md`
 - `docs/wasm-scheduler-state-machine.md`
 - `docs/wasm-bounded-queues.md`

@@ -15,6 +15,7 @@ import {
   type FiberReadyQueueOptions,
 } from "./bridge/WasmFiberReadyQueueBridge";
 import { makeWasmTimerWheel, type WasmTimerWheelBridge, type TimerEvent } from "./bridge/WasmTimerWheelBridge";
+import type { RuntimeBoundaryDiagnosticsOptions } from "../boundaryDiagnostics";
 
 type WasmFiberState<R, E = unknown, A = unknown> = {
   readonly fiberId: FiberId;
@@ -38,6 +39,7 @@ export type WasmFiberEngineOptions = {
   readonly bridge?: WasmBridge;
   readonly modulePath?: string;
   readonly readyQueue?: Omit<FiberReadyQueueOptions, "engine">;
+  readonly boundaryDiagnostics?: RuntimeBoundaryDiagnosticsOptions;
 };
 
 const DEFAULT_BUDGET = 4096;
@@ -66,7 +68,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     private readonly runtime: WasmEngineRuntime<R> & any,
     options: WasmFiberEngineOptions = {},
   ) {
-    this.bridge = options.bridge ?? new WasmPackFiberBridge(options.modulePath);
+    this.bridge = options.bridge ?? new WasmPackFiberBridge(options.modulePath, options.boundaryDiagnostics);
     if (this.bridge.kind !== "wasm") {
       throw new Error("brass-runtime strict mode requires a real WASM bridge; wasm-reference/TS fallback bridges are not allowed");
     }
@@ -162,6 +164,9 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     }
     this.readyQueue.clear();
     this.timerWheel?.dispose();
+    this.pendingResumes.clear();
+    this.states.clear();
+    this.bridge.reset?.();
   }
 
   private scheduleWakeup(fiberId: FiberId): void {
@@ -267,7 +272,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
 
     let budget = DEFAULT_BUDGET;
     const events: EngineEvent[] = initialEvents ? [...initialEvents] : [];
-    state.status = "running";
+    this.markRunning(state, "drive");
     state.handle.setEngineStatus("running");
 
     while (!state.completed && budget-- > 0) {
@@ -426,16 +431,19 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
         return;
       }
 
-      if (typeof canceler === "function") {
-        cancelCleanup = () => {
-          if (done) return;
-          done = true;
-          state.pendingCleanups.delete(cleanup);
-          if (cancelCleanup) state.pendingCleanups.delete(cancelCleanup);
-          cancelCleanup = undefined;
+      cancelCleanup = () => {
+        if (done) return;
+        done = true;
+        state.pendingCleanups.delete(cleanup);
+        if (cancelCleanup) state.pendingCleanups.delete(cancelCleanup);
+        cancelCleanup = undefined;
+        this.pendingHostEffects = Math.max(0, this.pendingHostEffects - 1);
+        if (typeof canceler === "function") {
           try { canceler(); } catch { /* ignore */ }
-        };
-        state.pendingCleanups.add(cancelCleanup);
+        }
+      };
+      state.pendingCleanups.add(cancelCleanup);
+      if (typeof canceler === "function") {
         state.handle.addFinalizer(() => cancelCleanup?.());
       }
     } catch (error) {
@@ -542,7 +550,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     if (state.completed) return;
     state.completed = true;
     const interrupted = Cause.isInterruptedOnly(cause);
-    state.status = interrupted ? "interrupted" : "failed";
+    this.markTerminal(state, interrupted ? "interrupted" : "failed");
     this.fiberRegistry?.markDone(state.fiberId, interrupted ? "interrupted" : "failed");
     if (interrupted) {
       this.interruptedFibers += 1;
@@ -591,6 +599,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
 
   private markSuspended(state: WasmFiberState<R, any, any>, reason: string): void {
     if (state.status !== "suspended") {
+      this.runningFibers = Math.max(0, this.runningFibers - 1);
       this.suspendedFibers += 1;
       state.status = "suspended";
       this.fiberRegistry?.markSuspended(state.fiberId);
@@ -602,6 +611,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private markRunning(state: WasmFiberState<R, any, any>, _reason: string): void {
     if (state.status === "suspended") {
       this.suspendedFibers = Math.max(0, this.suspendedFibers - 1);
+      this.runningFibers += 1;
       state.status = "running";
       this.fiberRegistry?.markRunning(state.fiberId);
       state.handle.setEngineStatus("running");
@@ -612,7 +622,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private completeSuccess(state: WasmFiberState<R, any, any>, value: unknown): void {
     if (state.completed) return;
     state.completed = true;
-    state.status = "done";
+    this.markTerminal(state, "done");
     this.fiberRegistry?.markDone(state.fiberId, "done");
     this.completedFibers += 1;
     this.cleanupState(state);
@@ -622,7 +632,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private completeFailure(state: WasmFiberState<R, any, any>, error: unknown): void {
     if (state.completed) return;
     state.completed = true;
-    state.status = "failed";
+    this.markTerminal(state, "failed");
     this.fiberRegistry?.markDone(state.fiberId, "failed");
     this.failedFibers += 1;
     this.cleanupState(state);
@@ -632,7 +642,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private completeDie(state: WasmFiberState<R, any, any>, defect: unknown): void {
     if (state.completed) return;
     state.completed = true;
-    state.status = "failed";
+    this.markTerminal(state, "failed");
     this.fiberRegistry?.markDone(state.fiberId, "failed");
     this.failedFibers += 1;
     this.cleanupState(state);
@@ -642,7 +652,7 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   private completeInterrupted(state: WasmFiberState<R, any, any>): void {
     if (state.completed) return;
     state.completed = true;
-    state.status = "interrupted";
+    this.markTerminal(state, "interrupted");
     this.fiberRegistry?.markDone(state.fiberId, "interrupted");
     this.interruptedFibers += 1;
     this.cleanupState(state);
@@ -650,8 +660,6 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
   }
 
   private cleanupState(state: WasmFiberState<R, any, any>): void {
-    this.runningFibers = Math.max(0, this.runningFibers - 1);
-    if (state.status === "suspended") this.suspendedFibers = Math.max(0, this.suspendedFibers - 1);
     this.timerWheel?.cancel(state.deadlineTimerId);
     state.deadlineTimerId = undefined;
     for (const cleanup of Array.from(state.pendingCleanups)) cleanup();
@@ -661,5 +669,17 @@ export class WasmFiberEngine<R> implements FiberEngine<R> {
     this.fiberRegistry?.dropFiber(state.fiberId);
     state.registry.clear();
     this.states.delete(state.fiberId);
+  }
+
+  private markTerminal(
+    state: WasmFiberState<R, any, any>,
+    status: "done" | "failed" | "interrupted",
+  ): void {
+    if (state.status === "suspended") {
+      this.suspendedFibers = Math.max(0, this.suspendedFibers - 1);
+    } else if (state.status === "running") {
+      this.runningFibers = Math.max(0, this.runningFibers - 1);
+    }
+    state.status = status;
   }
 }

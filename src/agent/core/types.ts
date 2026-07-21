@@ -156,6 +156,9 @@ export type AgentEvent =
         readonly reason: string;
         readonly risk: ApprovalRisk;
         readonly defaultAnswer: ApprovalDefaultAnswer;
+        readonly capabilityId?: string;
+        readonly operationHash?: string;
+        readonly expiresAt?: number;
         readonly at: number;
     }
     | {
@@ -287,16 +290,29 @@ export type ApprovalRisk = "low" | "medium" | "high";
 
 export type ApprovalDefaultAnswer = "approve" | "reject";
 
+export type ApprovalCapability = {
+    readonly version: 1;
+    readonly capabilityId: string;
+    readonly workspaceId: string;
+    readonly goalId: string;
+    readonly actionType: AgentActionType;
+    readonly operationHash: string;
+    readonly issuedAt: number;
+    readonly expiresAt: number;
+};
+
 export type ApprovalRequest = {
     readonly action: AgentAction;
     readonly state: AgentState;
     readonly reason: string;
     readonly risk: ApprovalRisk;
     readonly defaultAnswer: ApprovalDefaultAnswer;
+    /** Exact short-lived capability the host may grant for this operation. */
+    readonly capability: ApprovalCapability;
 };
 
 export type ApprovalResponse =
-    | { readonly type: "approved" }
+    | { readonly type: "approved"; readonly capability: ApprovalCapability }
     | { readonly type: "rejected"; readonly reason?: string };
 
 export type ApprovalService = {
@@ -317,7 +333,102 @@ export type PermissionService = {
     readonly check: (action: AgentAction, state: AgentState) => Async<AgentEnv, AgentError, PermissionDecision>;
 };
 
-export type AgentEnv = {
+export type AgentHostKind = "node" | "vscode" | "test" | "custom";
+
+export type AgentWorkspace = {
+    /** Stable, non-path identifier used for correlation and state partitioning. */
+    readonly id: string;
+    readonly root: string;
+    readonly trusted: boolean;
+};
+
+export type AgentPersistenceScope = "session" | "workspace";
+
+export type AgentPersistenceKey =
+    | "agent.error-patterns.v1"
+    | "agent.llm-budget.v1"
+    | "agent.output-preferences.v1"
+    | "agent.workspace-memory.v1"
+    | "agent.patch-strategy.v1"
+    | "agent.context-budget.v1"
+    | "agent.validation-intensity.v1"
+    | "agent.approval-history.v1";
+
+export type AgentPersistenceWriteOptions = {
+    /** Hard payload cap checked before persistence. */
+    readonly maxBytes?: number;
+    /** Optional expiry used by hosts that retain ephemeral session data. */
+    readonly expiresAt?: number;
+};
+
+/** Promise is intentional here: persistence is a host/interop boundary. */
+export type AgentPersistence = {
+    readonly version: 1;
+    readonly read: (scope: AgentPersistenceScope, key: AgentPersistenceKey) => Promise<string | undefined>;
+    readonly write: (
+        scope: AgentPersistenceScope,
+        key: AgentPersistenceKey,
+        value: string,
+        options?: AgentPersistenceWriteOptions,
+    ) => Promise<void>;
+    readonly remove: (scope: AgentPersistenceScope, key: AgentPersistenceKey) => Promise<void>;
+};
+
+/** Promise is intentional here: secret stores are owned by the host. */
+export type AgentSecretStore = {
+    readonly get: (key: string) => Promise<string | undefined>;
+    readonly set: (key: string, value: string) => Promise<void>;
+    readonly delete: (key: string) => Promise<void>;
+};
+
+export type AgentDiagnostic = {
+    readonly severity: "debug" | "info" | "warning" | "error";
+    readonly code: string;
+    readonly message: string;
+    readonly at: number;
+    readonly correlationId?: string;
+    readonly data?: Readonly<Record<string, string | number | boolean>>;
+};
+
+export type AgentDiagnostics = {
+    readonly publish: (diagnostic: AgentDiagnostic) => void;
+};
+
+export type AgentTelemetryEvent = {
+    readonly version: 1;
+    readonly name: string;
+    readonly at: number;
+    readonly correlationId?: string;
+    /** Must contain only redacted, bounded scalar fields. */
+    readonly attributes?: Readonly<Record<string, string | number | boolean>>;
+};
+
+export type AgentTelemetry = {
+    readonly emit: (event: AgentTelemetryEvent) => void;
+};
+
+export type AgentLifecycle = {
+    readonly signal: AbortSignal;
+    readonly isShuttingDown: () => boolean;
+    readonly onShutdown: (listener: () => void) => () => void;
+    readonly shutdown: () => void;
+};
+
+export type AgentTerminal = {
+    readonly isInteractive: boolean;
+    readonly columns?: number;
+};
+
+/**
+ * Host-independent capability contract for the agent core.
+ *
+ * Node, VS Code, and tests construct this object. The core consumes only these
+ * capabilities and must not import `vscode` or assume direct host authority.
+ */
+export type AgentHost = {
+    readonly contractVersion?: 1;
+    readonly kind?: AgentHostKind;
+    readonly workspace?: AgentWorkspace;
     readonly fs: FileSystem;
     readonly shell: Shell;
     readonly llm: LLM | undefined;
@@ -327,4 +438,13 @@ export type AgentEnv = {
     readonly events?: AgentEventSink;
     readonly toolPolicies?: AgentToolPolicyConfig;
     readonly hostProfile?: HostProfile;
+    readonly persistence?: AgentPersistence;
+    readonly secrets?: AgentSecretStore;
+    readonly diagnostics?: AgentDiagnostics;
+    readonly telemetry?: AgentTelemetry;
+    readonly lifecycle?: AgentLifecycle;
+    readonly terminal?: AgentTerminal;
 };
+
+/** Compatibility name retained for existing programmatic consumers. */
+export type AgentEnv = AgentHost;

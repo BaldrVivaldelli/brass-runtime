@@ -194,4 +194,5 @@ export {
   drop as dropStream,
 } from "./core/stream/operators";
 export * from "./core/runtime/engineStats";
+export * from "./core/runtime/boundaryDiagnostics";
 export * from "./core/runtime/capabilities";

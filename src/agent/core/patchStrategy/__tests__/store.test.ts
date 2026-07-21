@@ -1,108 +1,40 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { loadRewardStore, flushRewardStore } from "../store";
+import { describe, expect, it, vi } from "vitest";
+import { makeInMemoryAgentPersistence } from "../../persistence";
+import { flushRewardStore, loadRewardStore, parseRewardStore, serializeRewardStore } from "../store";
 import type { RewardEntry } from "../types";
-import * as fs from "node:fs/promises";
-import * as path from "node:path";
 
-/**
- * Unit tests for store persistence.
- * Feature: adaptive-patch-strategy
- */
+const entries: RewardEntry[] = [
+  { arm: "direct-patch", reward: 1, timestamp: 1_718_000_000_000 },
+  { arm: "multi-step-patch", reward: 0.5, timestamp: 1_718_000_100_000 },
+];
 
-vi.mock("node:fs/promises");
+describe("patch strategy persistence", () => {
+  it("parses only the versioned reward shape", () => {
+    expect(parseRewardStore(serializeRewardStore(entries))).toEqual(entries);
+    expect(parseRewardStore("not json")).toEqual([]);
+    expect(parseRewardStore(JSON.stringify({ version: 2, entries }))).toEqual([]);
+    expect(parseRewardStore(JSON.stringify({ version: 1, entries: "bad" }))).toEqual([]);
+  });
 
-const mockReadFile = vi.mocked(fs.readFile);
-const mockWriteFile = vi.mocked(fs.writeFile);
-const mockMkdir = vi.mocked(fs.mkdir);
+  it("round-trips through AgentPersistence and uses the versioned key", async () => {
+    const persistence = makeInMemoryAgentPersistence();
+    await flushRewardStore(persistence, entries);
+    expect(await loadRewardStore(persistence)).toEqual(entries);
+    expect(persistence.snapshot()["workspace:agent.patch-strategy.v1"])
+      .toBe(serializeRewardStore(entries));
+  });
 
-describe("store unit tests", () => {
-    beforeEach(() => {
-        vi.clearAllMocks();
-        mockMkdir.mockResolvedValue(undefined);
-    });
-
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
-    describe("loadRewardStore", () => {
-        it("returns empty array when file does not exist (ENOENT)", async () => {
-            const err = new Error("ENOENT") as NodeJS.ErrnoException;
-            err.code = "ENOENT";
-            mockReadFile.mockRejectedValue(err);
-
-            const result = await loadRewardStore("/tmp/test");
-            expect(result).toStrictEqual([]);
-        });
-
-        it("returns empty array when file contains corrupt JSON", async () => {
-            mockReadFile.mockResolvedValue("not valid json {{{");
-
-            const result = await loadRewardStore("/tmp/test");
-            expect(result).toStrictEqual([]);
-        });
-
-        it("returns empty array when version is not 1", async () => {
-            mockReadFile.mockResolvedValue(JSON.stringify({ version: 2, entries: [] }));
-
-            const result = await loadRewardStore("/tmp/test");
-            expect(result).toStrictEqual([]);
-        });
-
-        it("returns entries when file contains valid data", async () => {
-            const entries: RewardEntry[] = [
-                { arm: "direct-patch", reward: 1.0, timestamp: 1718000000000 },
-                { arm: "multi-step-patch", reward: 0.5, timestamp: 1718000100000 },
-            ];
-            mockReadFile.mockResolvedValue(JSON.stringify({ version: 1, entries }));
-
-            const result = await loadRewardStore("/tmp/test");
-            expect(result).toStrictEqual(entries);
-        });
-
-        it("returns empty array when entries field is not an array", async () => {
-            mockReadFile.mockResolvedValue(JSON.stringify({ version: 1, entries: "not-array" }));
-
-            const result = await loadRewardStore("/tmp/test");
-            expect(result).toStrictEqual([]);
-        });
-    });
-
-    describe("flushRewardStore", () => {
-        it("writes correct format to the expected path", async () => {
-            mockWriteFile.mockResolvedValue(undefined);
-
-            const entries: RewardEntry[] = [
-                { arm: "direct-patch", reward: 1.0, timestamp: 1718000000000 },
-            ];
-
-            await flushRewardStore("/tmp/test", entries);
-
-            expect(mockMkdir).toHaveBeenCalledWith(
-                path.dirname(path.join("/tmp/test", ".brass/patch-strategy.json")),
-                { recursive: true },
-            );
-            expect(mockWriteFile).toHaveBeenCalledWith(
-                path.join("/tmp/test", ".brass/patch-strategy.json"),
-                JSON.stringify({ version: 1, entries }, null, 2),
-                "utf-8",
-            );
-        });
-
-        it("logs warning without throwing on write failure", async () => {
-            const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-            mockWriteFile.mockRejectedValue(new Error("disk full"));
-
-            await expect(
-                flushRewardStore("/tmp/test", []),
-            ).resolves.toBeUndefined();
-
-            expect(warnSpy).toHaveBeenCalledWith(
-                expect.stringContaining("[patchStrategy]"),
-                expect.stringContaining("disk full"),
-            );
-
-            warnSpy.mockRestore();
-        });
-    });
+  it("degrades on read/write failures", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const persistence = {
+      version: 1 as const,
+      read: async () => { throw new Error("read denied"); },
+      write: async () => { throw new Error("disk full"); },
+      remove: async () => undefined,
+    };
+    await expect(loadRewardStore(persistence)).resolves.toEqual([]);
+    await expect(flushRewardStore(persistence, entries)).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[patchStrategy]"), "disk full");
+    warn.mockRestore();
+  });
 });

@@ -1,5 +1,74 @@
 # Changelog
 
+## Unreleased - Native Runtime and VS Code Roadmap
+
+### Architecture and Runtime
+
+- Added a formal pinned Rust workspace with the host-independent
+  `brass-engine-core`, a thin WASM adapter, native model/property tests, shared
+  lifecycle fixtures, and pinned fuzz targets.
+- Stabilized WASM ABI v1 with bounded binary decoding, version/capability
+  negotiation, typed compatibility failures, reset/free lifecycle operations,
+  and strict rejection of unknown newer contracts.
+- Added explicit runtime engine selection: `wasm` remains fail-fast, while
+  `auto` can fall back to TypeScript with a stable redacted diagnostic.
+- Added low-cost frozen runtime diagnostics for fibers, scopes, lanes,
+  finalizers, host effects, and TS/WASM boundary activity.
+- Added versioned fork/complete, suspend/resume, fairness, and suspended-memory
+  benchmarks to the release gate.
+
+### Native Editor Search
+
+- Added `brass-native-service`, a read-only Rust editor companion using private
+  authenticated protocol-v1 JSON-lines IPC over stdio.
+- Added bounded indexing/search, deadlines, priority, cancellation, progress,
+  terminal events, health checks, crash recovery, rehydration, and ordered
+  shutdown with no direct filesystem, network, write, credential, or secret
+  capability.
+- Added `NativeServiceClient`, deterministic `TypeScriptSearchIndex` fallback,
+  bounded/coalescing event streams, the Node child-process owner, and
+  `makeVsCodeNativeSearchPilot` without importing VS Code into agent core.
+- Promoted read-only native search as the preferred editor backend through the
+  native-first `auto` mode after two final-worktree benchmark runs passed every
+  predeclared gate. The committed confirmation measured 100% result parity,
+  85.082% better p95, 93.984% lower query CPU, 106.6% RSS, 101.8% JS heap, and
+  0.426 ms cancellation p95 relative to the TypeScript baseline.
+- Kept WASM as an optional runtime engine and explicitly did not promote native
+  HTTP, agent scheduling, cold/full or incremental indexing, or binary IPC
+  without capability-specific evidence.
+
+### Agent, Streams, and HTTP
+
+- Added the host-independent versioned `AgentHost` contract with Node and VS
+  Code adapters, workspace trust enforcement, lifecycle ownership, and bounded
+  versioned persistence with migration, retention, redaction, quotas, and
+  optional codecs.
+- Replaced boolean-style approval trust with short-lived SHA-256-bound
+  capabilities scoped to workspace, goal, action, issue time, and expiry.
+- Added stream queue occupancy, high-water, waiting, cancellation, discard, and
+  shutdown diagnostics across bounded buffer strategies.
+- Added observable `editor`, `service`, and `highThroughputProxy` HTTP profiles,
+  frozen effective configuration, and middleware order/cancellation/immutability
+  contracts with pairwise composition coverage.
+
+### Distribution and Documentation
+
+- Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
+  compatibility, performance-gate, adoption, rollback, and 35-point roadmap
+  traceability documentation.
+- Added Linux/macOS/Windows native artifact packaging, SHA-256 manifests, SPDX
+  2.3 SBOM generation, complete npm/Cargo license inventory, and release CI
+  uploads. The editor-specific native binary remains separate from the generic
+  npm runtime package and retains immediate TypeScript reversal.
+
+### Validation
+
+- `npm run release:check` passes, including Rust fmt/Clippy/tests, a real WASM
+  build, TypeScript types, 2,151 tests across 243 files, ESM/CJS/DTS builds, CJS
+  validation, and runtime/HTTP/observability performance budgets.
+- `npm pack --dry-run` passes; release metadata covers 232 packages with zero
+  missing license assertions and four checksummed local artifacts.
+
 ## 1.21.0 - Agent Adaptive Systems
 
 ### Features

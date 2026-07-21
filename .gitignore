@@ -70,6 +70,9 @@ web_modules/
 
 # Rust build output
 crates/**/target/
+/target/
+/native/
+/artifacts/
 
 # Yarn Integrity file
 .yarn-integrity

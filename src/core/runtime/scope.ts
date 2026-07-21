@@ -1,7 +1,7 @@
 // src/core/runtime/scope.ts
 import { Fiber, getCurrentFiber } from "./fiber";
 import { Cause, Exit } from "../types/effect";
-import { async, Async, asyncFlatMap, asyncFold, unit } from "../types/asyncEffect";
+import { async, Async, asyncFlatMap, asyncFold, asyncSync, unit } from "../types/asyncEffect";
 import { Runtime } from "./runtime";
 
 export type ScopeId = number;
@@ -37,6 +37,7 @@ class Scope<R> {
 
     constructor(private readonly runtime: Runtime<R>, private readonly parentScopeId?: ScopeId) {
         this.id = nextScopeId++;
+        this.runtime.recordScopeOpened();
 
         const inferredParent = this.parentScopeId ?? (getCurrentFiber() as any)?.scopeId;
 
@@ -56,6 +57,14 @@ class Scope<R> {
             throw new Error("Trying to add finalizer to closed scope");
         }
         this.finalizers.push(f);
+        this.runtime.recordScopeFinalizerAdded();
+        if (this.runtime.hasActiveHooks()) {
+            this.runtime.emit({
+                type: "scope.finalizer.add",
+                scopeId: this.id,
+                finalizerId: this.finalizers.length,
+            });
+        }
     }
 
     /** crea un sub scope (mismo runtime) */
@@ -84,7 +93,7 @@ class Scope<R> {
     }
 
     /** Emit the scope.close event if hooks are active. */
-    private emitCloseEvent(exit: Exit<any, any>): void {
+    private emitCloseEvent(exit: Exit<any, any>, finalizerDurationMs: number): void {
         if (this.runtime.hasActiveHooks()) {
             const status =
                 exit._tag === "Success"
@@ -98,6 +107,8 @@ class Scope<R> {
                 type: "scope.close",
                 scopeId: this.id,
                 status,
+                finalizerCount: this.finalizers.length,
+                finalizerDurationMs,
                 error: failure?._tag === "Some" ? failure.value : exit._tag === "Failure" ? exit.cause : undefined,
             });
         }
@@ -122,27 +133,49 @@ class Scope<R> {
 
         for (let i = fins.length - 1; i >= 0; i--) {
             const fin = fins[i];
+            const finalizerId = i + 1;
 
             chain = asyncFlatMap(chain, () => {
+                if (this.runtime.hasActiveHooks()) {
+                    this.runtime.emit({ type: "scope.finalizer.start", scopeId: this.id, finalizerId });
+                }
                 let result: Async<R, any, any>;
                 try {
                     result = fin(exit);
                 } catch {
                     // best-effort: never crash the runtime because of a finalizer
+                    this.runtime.recordScopeFinalizerFinished();
+                    if (this.runtime.hasActiveHooks()) {
+                        this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
+                    }
                     return unit<R>() as any;
                 }
 
                 // Fast-path: if the finalizer returned a Succeed effect (e.g. unit()),
                 // skip the asyncFold wrapper entirely — no Fold node needed.
                 if (result._tag === "Succeed") {
+                    this.runtime.recordScopeFinalizerFinished();
+                    if (this.runtime.hasActiveHooks()) {
+                        this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
+                    }
                     return unit<R>() as any;
                 }
 
                 // Non-trivial effect: wrap with asyncFold to swallow errors
                 return asyncFold(
                     result,
-                    () => unit<R>(),
-                    () => unit<R>()
+                    () => asyncSync(() => {
+                        this.runtime.recordScopeFinalizerFinished();
+                        if (this.runtime.hasActiveHooks()) {
+                            this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
+                        }
+                    }),
+                    () => asyncSync(() => {
+                        this.runtime.recordScopeFinalizerFinished();
+                        if (this.runtime.hasActiveHooks()) {
+                            this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
+                        }
+                    })
                 );
             });
         }
@@ -192,14 +225,27 @@ class Scope<R> {
                 const hasNoFinalizers = this.finalizers.length === 0;
 
                 if (!hasSubScopes && !needsAwait && hasNoFinalizers) {
-                    this.emitCloseEvent(exit);
+                    this.runtime.recordScopeClosed(0);
+                    this.emitCloseEvent(exit, 0);
                     cb({ _tag: "Success", value: undefined });
                     return;
                 }
 
-                const all = asyncFlatMap(closeSubs, () => asyncFlatMap(awaitChildrenEff, () => runFinalizers));
+                let finalizerStartedAt = 0;
+                let finalizerDurationMs = 0;
+                const timedFinalizers = asyncFlatMap(
+                    asyncSync(() => {
+                        finalizerStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+                    }),
+                    () => asyncFlatMap(runFinalizers, () => asyncSync(() => {
+                        const endedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+                        finalizerDurationMs = Math.max(0, endedAt - finalizerStartedAt);
+                    })),
+                );
+                const all = asyncFlatMap(closeSubs, () => asyncFlatMap(awaitChildrenEff, () => timedFinalizers));
                 this.runtime.fork(all as any).join(() => {
-                    this.emitCloseEvent(exit);
+                    this.runtime.recordScopeClosed(finalizerDurationMs);
+                    this.emitCloseEvent(exit, finalizerDurationMs);
                     cb({ _tag: "Success", value: undefined });
                 });
             })

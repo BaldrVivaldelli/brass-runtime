@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "protocolVersion": 1,
+  "transport": "newline-delimited-json-over-private-stdio",
+  "limits": {
+    "maxMessageBytes": 16777216,
+    "maxDocuments": 4096,
+    "maxDocumentBytes": 262144,
+    "maxWorkspaceDocumentBytes": 8388608,
+    "maxQueryBytes": 4096,
+    "maxSearchResults": 100,
+    "maxActiveRequests": 16
+  },
+  "requests": [
+    {
+      "protocolVersion": 1,
+      "id": "fixture:hello",
+      "sessionId": "fixture-session",
+      "workspaceId": "",
+      "nonce": "fixture-nonce",
+      "deadlineMs": 4102444800000,
+      "priority": 1000,
+      "method": "hello",
+      "params": { "clientBuild": "fixture-client", "maxMessageBytes": 16777216 }
+    },
+    {
+      "protocolVersion": 1,
+      "id": "fixture:index",
+      "sessionId": "fixture-session",
+      "workspaceId": "fixture-workspace",
+      "nonce": "fixture-nonce",
+      "deadlineMs": 4102444800000,
+      "priority": 0,
+      "method": "index.replace",
+      "params": {
+        "documents": [
+          { "id": "virtual:alpha", "text": "brass runtime brass" },
+          { "id": "virtual:beta", "text": "structured concurrency" }
+        ]
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "id": "fixture:search",
+      "sessionId": "fixture-session",
+      "workspaceId": "fixture-workspace",
+      "nonce": "fixture-nonce",
+      "deadlineMs": 4102444800000,
+      "priority": 10,
+      "method": "search",
+      "params": { "query": "brass", "limit": 20 }
+    },
+    {
+      "protocolVersion": 1,
+      "id": "fixture:cancel",
+      "sessionId": "fixture-session",
+      "workspaceId": "fixture-workspace",
+      "nonce": "fixture-nonce",
+      "deadlineMs": 4102444800000,
+      "priority": 1000,
+      "method": "cancel",
+      "params": { "targetRequestId": "fixture:search" }
+    },
+    {
+      "protocolVersion": 1,
+      "id": "fixture:shutdown",
+      "sessionId": "fixture-session",
+      "workspaceId": "fixture-workspace",
+      "nonce": "fixture-nonce",
+      "deadlineMs": 4102444800000,
+      "priority": 1000,
+      "method": "shutdown",
+      "params": {}
+    }
+  ],
+  "messages": [
+    {
+      "protocolVersion": 1,
+      "type": "response",
+      "id": "fixture:hello",
+      "sessionId": "fixture-session",
+      "result": {
+        "protocolVersion": 1,
+        "serviceBuild": "0.1.0",
+        "capabilities": ["health", "index.replace", "search", "cancel", "shutdown"],
+        "maxMessageBytes": 16777216,
+        "maxDocuments": 4096,
+        "maxActiveRequests": 16,
+        "readOnly": true
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "event",
+      "event": {
+        "version": 1,
+        "type": "native.progress",
+        "requestId": "fixture:search",
+        "phase": "searching",
+        "completed": 0,
+        "total": 1
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "event",
+      "event": {
+        "version": 1,
+        "type": "runtime.boundary",
+        "boundary": "ipc-rust",
+        "operation": "search",
+        "at": 1784635200000,
+        "durationMs": 0.25,
+        "requestBytes": 256,
+        "responseBytes": 160,
+        "result": "success",
+        "correlationId": "fixture:search",
+        "queueDepth": 0
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "response",
+      "id": "fixture:search",
+      "sessionId": "fixture-session",
+      "result": { "hits": [{ "id": "virtual:alpha", "score": 2 }] }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "event",
+      "event": {
+        "version": 1,
+        "type": "native.terminal",
+        "requestId": "fixture:search",
+        "outcome": "success"
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "response",
+      "id": "fixture:search",
+      "sessionId": "fixture-session",
+      "error": { "code": "CANCELLED", "message": "request cancelled" }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "event",
+      "event": {
+        "version": 1,
+        "type": "native.terminal",
+        "requestId": "fixture:search",
+        "outcome": "cancelled",
+        "errorCode": "CANCELLED"
+      }
+    },
+    {
+      "protocolVersion": 1,
+      "type": "response",
+      "id": "fixture:shutdown",
+      "sessionId": "fixture-session",
+      "result": { "shuttingDown": true, "drained": true, "activeRequests": 0 }
+    }
+  ]
+}

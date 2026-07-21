@@ -1,10 +1,10 @@
 // src/agent/core/validationIntensity/store.ts
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import type { AgentPersistence } from "../types";
+import { readAgentState, writeAgentState } from "../persistence";
 import type { ValidationHistory } from "./types";
 
-const STORE_PATH = ".brass/validation-history.json";
+const STORE_KEY = "agent.validation-intensity.v1" as const;
 
 /** Empty history used as the default/fallback. */
 export const emptyHistory = (): ValidationHistory => ({
@@ -17,10 +17,8 @@ export const emptyHistory = (): ValidationHistory => ({
  * Returns empty history on missing file, parse error, or invalid schema.
  * Performs exactly one file read.
  */
-export const loadValidationHistory = async (cwd: string): Promise<ValidationHistory> => {
+export const parseValidationHistory = (raw: string): ValidationHistory => {
     try {
-        const filePath = join(cwd, STORE_PATH);
-        const raw = await readFile(filePath, "utf-8");
         const data: unknown = JSON.parse(raw);
 
         // Validate schema version
@@ -46,6 +44,12 @@ export const loadValidationHistory = async (cwd: string): Promise<ValidationHist
     }
 };
 
+export const serializeValidationHistory = (history: ValidationHistory): string =>
+    JSON.stringify(history, null, 2);
+
+export const loadValidationHistory = (persistence?: AgentPersistence): Promise<ValidationHistory> =>
+    readAgentState(persistence, STORE_KEY, parseValidationHistory, emptyHistory);
+
 /**
  * Flush validation history to .brass/validation-history.json.
  * Creates .brass/ directory if needed.
@@ -53,15 +57,11 @@ export const loadValidationHistory = async (cwd: string): Promise<ValidationHist
  * Performs exactly one file write.
  */
 export const flushValidationHistory = async (
-    cwd: string,
+    persistence: AgentPersistence | undefined,
     history: ValidationHistory,
 ): Promise<void> => {
     try {
-        const filePath = join(cwd, STORE_PATH);
-
-        // Ensure directory exists
-        await mkdir(dirname(filePath), { recursive: true });
-        await writeFile(filePath, JSON.stringify(history, null, 2), "utf-8");
+        await writeAgentState(persistence, STORE_KEY, serializeValidationHistory(history), { maxBytes: 262_144 });
     } catch (err: unknown) {
         console.warn(
             "[validationIntensity] Failed to flush validation history:",

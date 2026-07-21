@@ -1,0 +1,29 @@
+[package]
+name = "brass-engine-core-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+brass-engine-core = { path = ".." }
+
+[[bin]]
+name = "abi_decoder"
+path = "fuzz_targets/abi_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "state_models"
+path = "fuzz_targets/state_models.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
