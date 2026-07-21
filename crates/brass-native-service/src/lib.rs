@@ -414,17 +414,15 @@ pub fn run_stdio() -> io::Result<()> {
                         Ok(document_count) => Ok(json!({ "documentCount": document_count })),
                         Err(error) => Err(error),
                     };
-                    let queue_depth = lock(&active).len().saturating_sub(1);
                     finish_async(
+                        &active,
                         &writer,
                         &request,
                         outcome,
                         started,
                         at,
                         request_bytes,
-                        queue_depth,
                     );
-                    lock(&active).remove(&request.id);
                 });
             }
             "search" => {
@@ -464,17 +462,15 @@ pub fn run_stdio() -> io::Result<()> {
                         Ok(hits) => Ok(json!({ "hits": hits })),
                         Err(error) => Err(error),
                     };
-                    let queue_depth = lock(&active).len().saturating_sub(1);
                     finish_async(
+                        &active,
                         &writer,
                         &request,
                         outcome,
                         started,
                         at,
                         request_bytes,
-                        queue_depth,
                     );
-                    lock(&active).remove(&request.id);
                 });
             }
             "shutdown" => {
@@ -559,14 +555,22 @@ fn register_active(active: &ActiveRequests, request_id: &str) -> Arc<AtomicBool>
 }
 
 fn finish_async(
+    active: &ActiveRequests,
     writer: &SharedWriter,
     request: &RpcRequest,
     outcome: Result<Value, ServiceError>,
     started: Instant,
     at: u64,
     request_bytes: usize,
-    queue_depth: usize,
 ) {
+    // A terminal response is also the externally observable drain boundary.
+    // Deregister first so a following health or shutdown request cannot observe
+    // work that the client already knows has completed.
+    let queue_depth = {
+        let mut active_requests = lock(active);
+        active_requests.remove(&request.id);
+        active_requests.len()
+    };
     let (response, result, error_code) = match outcome {
         Ok(result) => (response_value(request, Some(result), None), "success", None),
         Err(error) => {

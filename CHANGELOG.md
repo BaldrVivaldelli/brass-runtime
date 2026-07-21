@@ -21,6 +21,9 @@
 
 - Added `brass-native-service`, a read-only Rust editor companion using private
   authenticated protocol-v1 JSON-lines IPC over stdio.
+- Fixed native-service terminal ordering so completed or cancelled work is
+  removed from the active-request registry before its terminal response is
+  published, keeping immediate health checks consistent.
 - Added bounded indexing/search, deadlines, priority, cancellation, progress,
   terminal events, health checks, crash recovery, rehydration, and ordered
   shutdown with no direct filesystem, network, write, credential, or secret
