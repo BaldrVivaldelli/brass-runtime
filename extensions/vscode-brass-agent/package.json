@@ -713,7 +713,7 @@
   },
   "devDependencies": {
     "@types/vscode": "^1.95.0",
-    "@vscode/vsce": "^2.25.0",
+    "@vscode/vsce": "^3.9.2",
     "typescript": "^5.9.3"
   }
 }
