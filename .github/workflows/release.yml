@@ -130,7 +130,7 @@ jobs:
       - run: npm run native:package
       - run: npm run release:artifacts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: brass-native-service-${{ runner.os }}-${{ runner.arch }}
           path: |
@@ -181,7 +181,7 @@ jobs:
 
       - run: npm run release:artifacts
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: brass-release-metadata
           path: artifacts/release/
