@@ -1,5 +1,6 @@
 import { defineConfig } from "tsup";
-import { cpSync, existsSync, mkdirSync } from "node:fs";
+import type { Plugin } from "esbuild";
+import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 function copyWasmAssets() {
@@ -13,7 +14,13 @@ function copyWasmAssets() {
   const distDest = path.join(root, "dist", "wasm", "pkg");
 
   mkdirSync(distDest, { recursive: true });
-  cpSync(src, distDest, { recursive: true });
+  cpSync(src, distDest, {
+    recursive: true,
+    // Root wasm/pkg needs this override for npm packing. The dist copy keeps
+    // wasm-pack's .gitignore so the tarball does not contain duplicate binaries.
+    filter: (source) => path.basename(source) !== ".npmignore",
+  });
+  writeFileSync(path.join(distDest, ".npmignore"), "*\n", "utf8");
 }
 
 const entry = {
@@ -36,6 +43,28 @@ const base = {
   splitting: true,
   sourcemap: false,
   outDir: "dist",
+};
+
+const browserAliases: Plugin = {
+  name: "brass-browser-aliases",
+  setup(build) {
+    const aliases = new Map([
+      [
+        path.resolve("src/core/runtime/wasmModule"),
+        path.resolve("src/core/runtime/wasmModule.browser.ts"),
+      ],
+      [
+        path.resolve("src/http/compression/decompressor"),
+        path.resolve("src/http/compression/decompressor.browser.ts"),
+      ],
+    ]);
+
+    build.onResolve({ filter: /(?:wasmModule|decompressor)$/ }, (args) => {
+      const resolved = path.resolve(args.resolveDir, args.path);
+      const replacement = aliases.get(resolved);
+      return replacement ? { path: replacement } : undefined;
+    });
+  },
 };
 
 export default defineConfig([
@@ -67,6 +96,26 @@ export default defineConfig([
     },
     onSuccess: async () => {
       copyWasmAssets();
+    },
+  },
+  {
+    entry: {
+      "browser/index": "src/index.ts",
+      "browser/core/index": "src/core/index.ts",
+      "browser/http/index": "src/http/browser.ts",
+      "browser/observability/index": "src/observability/index.ts",
+    },
+    platform: "browser",
+    target: "es2022",
+    splitting: true,
+    sourcemap: false,
+    outDir: "dist",
+    format: ["esm"],
+    dts: false,
+    clean: false,
+    esbuildPlugins: [browserAliases],
+    outExtension() {
+      return { js: ".mjs" };
     },
   },
 ]);

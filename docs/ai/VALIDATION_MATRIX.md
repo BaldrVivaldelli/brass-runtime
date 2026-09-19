@@ -18,12 +18,19 @@ Run this before release, package export work, or broad refactors:
 ```bash
 npm run check:full
 npm run validate:cjs
+npm run validate:browser
 ```
 
 Notes:
 
-- `npm run build` and `npm run check:full` require `wasm-pack`.
+- `npm run build`, `npm run test:wasm`, and `npm run check:full` require `wasm-pack`.
+- `npm run build:wasm` records a deterministic Rust-source fingerprint, and
+  `npm run validate:wasm` rejects missing, ABI-incompatible, or stale artifacts.
+- `npm run validate:package` dry-runs the npm tarball and requires the Node,
+  browser, declaration, WASM, and WASM-fingerprint artifacts.
 - `npm run check` includes coverage and is slower than the baseline.
+- `npm test` rejects a stale local WASM artifact before running; when the
+  artifact is absent, real-WASM suites are skipped explicitly.
 
 ## By changed area
 
@@ -31,7 +38,7 @@ Notes:
 | --- | --- | --- |
 | `src/core/types` | `npm run test:types`; `npm test -- src/core/types src/core/runtime/__tests__/flatmap` | `docs/ai/INVARIANTS.md`; `docs/ARCHITECTURE.md` |
 | `src/core/runtime` | `npm run test:types`; `npm test -- src/core/runtime/__tests__` | engine parity tests; scheduler/fiber/scope/resource/supervisor invariants |
-| `src/core/runtime/engine` | `npm run test:types`; `npm test -- src/core/runtime/__tests__/engine` | `docs/wasm-fiber-engine.md`; TS/WASM parity |
+| `src/core/runtime/engine` | `npm run test:types`; `npm run test:wasm`; `npm run validate:wasm` | `docs/wasm-fiber-engine.md`; TS/WASM parity |
 | `src/observability` | `npm run test:types`; `npm test -- src/observability/__tests__ src/core/runtime/__tests__/eventBus.test.ts` | `docs/observability.md`; `docs/ai/PUBLIC_API.md` |
 | `src/perf` | `npm run test:types`; `npm test -- src/perf/__tests__`; `npm run perf -- --profile runtime`; `npm run perf:history -- --profile runtime`; `npm run perf:runtime:ab`; `npm run perf:runtime:soak`; `npm run perf:runtime:budget`; `npm run perf:http:memory -- --calls 1000 --concurrency 64 --warmup 0 --variants default-json,default-json-observed`; optional `node --expose-gc --import tsx src/perf/cli.ts --profile http-memory --calls 1000 --concurrency 64 --force-gc` | `docs/performance-profiler.md`; `docs/ai/PUBLIC_API.md` |
 | `src/examples/observability*` | `npm run example:observability:express`; `npm run example:observability:fastify`; `npm run example:observability:nest` after installing optional framework deps | `docs/observability-framework-examples.md` |
@@ -47,7 +54,7 @@ Notes:
 | native service / IPC pilot | `npm run native:build:debug`; `npm run native:test`; `npm test -- src/agent/native src/agent/node/__tests__/nativeServiceProcess.integration.test.ts src/agent/vscode/__tests__/nativeSearchPilot.test.ts`; promotion evidence: `npm run benchmark:native:pilot` | `docs/native-service-protocol.md`; trust, cancellation, saturation, restart, drain, fallback, redaction |
 | `extensions/vscode-brass-agent` | extension build/test command if present; `npm run agent:vscode:package` | VS Code install/clean docs |
 | `crates/brass-engine-core`, `crates/brass-runtime-wasm-engine`, `crates/brass-native-service` | `npm run rust:check`; `npm run rust:fuzz:check`; `npm run build:wasm`; `npm run native:build`; `npm test -- src/core/runtime/__tests__/engine src/core/runtime/__tests__/scheduler src/agent/native` | ABI/IPC handshake and limits, Rust code, generated bridge shape, shared fixtures |
-| `package.json`, `tsup.config.ts`, exports | `npm run build`; `npm run validate:cjs`; `npm run test:types`; `npm run native:package`; `npm run release:artifacts` | `docs/ai/PUBLIC_API.md`; `docs/native-compatibility-changelog.md`; README install examples; SBOM/licenses/checksums |
+| `package.json`, `tsup.config.ts`, exports | `npm run build`; `npm run validate:cjs`; `npm run validate:browser`; `npm run test:types`; `npm run native:package`; `npm run release:artifacts` | exact public API fingerprint; `docs/ai/PUBLIC_API.md`; README platform examples; SBOM/licenses/checksums |
 | release candidate | `npm run release:check`; optional GC-aware `node --expose-gc --import tsx src/perf/cli.ts --profile http-memory --calls 100000 --concurrency 512 --delay-ms 2 --force-gc` | `docs/release.md`; `CHANGELOG.md`; `docs/recipes/` |
 | docs only | link/path review; optional `npm run context` | `docs/README.md`; public API examples |
 | benchmarks | `npm run benchmark`; `npm run benchmark:json`; `npm run benchmark:runtime`; `npm run benchmark:runtime:budget`; `npm run benchmark:runtime:primitives:budget`; `npm run benchmark:native:pilot`; `npm run benchmark:http:budget`; `npm run benchmark:observability`; `npm run benchmark:observability:budget`; `npm run benchmark:perf`; `npm run perf:runtime:budget`; related tests | versioned thresholds, warnings, decision reports, profiler output, and heap-per-suspended-fiber details |

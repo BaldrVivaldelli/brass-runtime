@@ -7,14 +7,17 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
+  "sideEffects": false,
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": "./dist/browser/index.mjs",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
     "./http": {
       "types": "./dist/http/index.d.ts",
+      "browser": "./dist/browser/http/index.mjs",
       "import": "./dist/http/index.mjs",
       "require": "./dist/http/index.cjs"
     },
@@ -30,11 +33,13 @@
     },
     "./core": {
       "types": "./dist/core/index.d.ts",
+      "browser": "./dist/browser/core/index.mjs",
       "import": "./dist/core/index.mjs",
       "require": "./dist/core/index.cjs"
     },
     "./observability": {
       "types": "./dist/observability/index.d.ts",
+      "browser": "./dist/browser/observability/index.mjs",
       "import": "./dist/observability/index.mjs",
       "require": "./dist/observability/index.cjs"
     },
@@ -81,11 +86,16 @@
     "dev": "tsx src/examples/index.ts",
     "clean": "rimraf dist wasm/pkg",
     "test": "vitest run",
+    "pretest": "node scripts/check-wasm-artifact.mjs --allow-missing",
+    "test:wasm": "npm run build:wasm && node scripts/check-wasm-artifact.mjs --required && vitest run",
     "test:watch": "vitest",
     "test:coverage": "COVERAGE_GATE=baseline vitest run --coverage",
     "test:coverage:report": "COVERAGE_GATE=off vitest run --coverage",
     "test:coverage:100": "COVERAGE_GATE=100 vitest run --coverage",
     "test:types": "tsc -p tsconfig.json --noEmit",
+    "validate:browser": "node scripts/validate-browser.mjs",
+    "validate:package": "npm pack --dry-run --json --cache node_modules/.cache/npm-pack | node scripts/validate-package.mjs",
+    "validate:wasm": "node scripts/check-wasm-artifact.mjs --required",
     "check": "npm run test:types && npm run test && npm run test:coverage",
     "check:full": "npm run clean && npm run build && npm run test",
     "build": "npm run build:wasm && npm run build:ts",
@@ -148,14 +158,14 @@
     "perf:runtime:budget": "tsx src/perf/budgetCli.ts",
     "perf:http:memory": "tsx src/perf/cli.ts --profile http-memory",
     "perf:history": "tsx src/perf/cli.ts --record-history",
-    "release:check": "npm run rust:check && npm run native:build:debug && npm run build:wasm && npm run test:types && npm test && npm run build:ts && npm run validate:cjs && npm run perf:runtime:budget && npm run benchmark:runtime:budget && npm run benchmark:runtime:primitives:budget && npm run benchmark:http:budget && npm run benchmark:observability:budget",
+    "release:check": "npm run rust:check && npm run native:build:debug && npm run build:wasm && npm run validate:wasm && npm run test:types && npm run test:coverage && npm run build:ts && npm run validate:cjs && npm run validate:browser && npm run validate:package && npm run perf:runtime:budget && npm run benchmark:runtime:budget && npm run benchmark:runtime:primitives:budget && npm run benchmark:http:budget && npm run benchmark:observability:budget",
     "example:observability:express": "tsx src/examples/observabilityExpress.ts",
     "example:observability:fastify": "tsx src/examples/observabilityFastify.ts",
     "example:observability:nest": "tsx src/examples/observabilityNest.ts",
     "smoke:observability:collector": "node scripts/observability-collector-smoke.mjs",
     "context": "node scripts/context-pack.mjs",
     "test:coverage:html": "COVERAGE_GATE=off vitest run --coverage --reporter=default",
-    "build:wasm": "cd crates/brass-runtime-wasm-engine && wasm-pack build --target nodejs --out-dir ../../wasm/pkg",
+    "build:wasm": "node scripts/build-wasm.mjs",
     "build:ts": "tsup",
     "validate:cjs": "node scripts/validate-cjs.mjs"
 
@@ -164,6 +174,7 @@
     "@types/node": "^22.15.0",
     "@vitest/coverage-v8": "^4.1.5",
     "conventional-changelog-conventionalcommits": "^9.3.1",
+    "esbuild": "0.28.1",
     "fast-check": "^4.7.0",
     "rimraf": "^6.1.2",
     "tsup": "^8.5.1",

@@ -77,7 +77,7 @@ Con `fromPromiseAbortable`, la closure host sigue viviendo en JS porque Axios/fe
 ```bash
 npm install
 npm run build
-npm pack --dry-run
+npm run validate:package
 npm publish
 ```
 
@@ -88,7 +88,7 @@ cargo --version
 wasm-pack --version
 npm run build:wasm
 npm run build
-npm pack --dry-run
+npm run validate:package
 npm publish
 ```
 

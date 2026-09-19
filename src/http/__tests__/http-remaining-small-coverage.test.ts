@@ -40,7 +40,7 @@ describe("compression small helpers", () => {
     const input = new Uint8Array([1, 2, 3]);
 
     expect(decompressor.isPassthrough).toBe(true);
-    expect(decompressor.decompress(input, "gzip")).toEqual({ ok: true, data: Buffer.from(input) });
+    expect(decompressor.decompress(input, "gzip")).toEqual({ ok: true, data: input });
   });
 
   it("decompresses supported Node encodings and reports unsupported/errors", () => {

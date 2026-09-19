@@ -17,7 +17,7 @@ describe("compression factory environment selection", () => {
     expect(decompressor.isPassthrough).toBe(true);
     expect(decompressor.decompress(new Uint8Array([1, 2]), "gzip")).toEqual({
       ok: true,
-      data: Buffer.from([1, 2]),
+      data: new Uint8Array([1, 2]),
     });
   });
 });

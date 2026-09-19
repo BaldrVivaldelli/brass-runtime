@@ -268,13 +268,16 @@ If you understand this:
 
 ## Status
 
-This architecture is:
-- Experimental
-- Intentionally minimal
-- Designed for learning, exploration, and correctness
+This architecture has a stable TypeScript core, schema, HTTP, and observability
+surface. The compatibility root is frozen and new APIs belong in focused
+subpaths.
 
-But:
-> It already enforces stronger guarantees than most Promise-based codebases.
+The Rust/WASM engine internals and Brass Agent remain experimental. Browser
+builds select the TypeScript engine and exclude Node-only HTTP server/transport
+exports.
+
+The implementation is optimized for correctness, structured lifetimes, and
+observable operational behavior rather than API minimalism.
 
 ---
 

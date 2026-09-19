@@ -1,13 +1,28 @@
 // src/core/runtime/scope.ts
 import { Fiber, getCurrentFiber } from "./fiber";
 import { Cause, Exit } from "../types/effect";
-import { async, Async, asyncFlatMap, asyncFold, asyncSync, unit } from "../types/asyncEffect";
+import { async, Async, asyncFail, asyncFlatMap, asyncFold, asyncSync, unit } from "../types/asyncEffect";
 import { Runtime } from "./runtime";
 
 export type ScopeId = number;
 
 type CloseOptions = { awaitChildren?: boolean };
 let nextScopeId = 1;
+
+export type ScopeFinalizerFailure = {
+    readonly scopeId: ScopeId;
+    readonly finalizerId: number;
+    readonly error: unknown;
+};
+
+export class ScopeFinalizerError extends Error {
+    readonly _tag = "ScopeFinalizerError" as const;
+
+    constructor(readonly failures: readonly ScopeFinalizerFailure[]) {
+        super(`${failures.length} scope finalizer${failures.length === 1 ? "" : "s"} failed`);
+        this.name = "ScopeFinalizerError";
+    }
+}
 
 // espera a que todos los fibers terminen (sin fallar)
 function awaitAll<E, A>(fibers: Fiber<E, A>[]): Async<any, never, void> {
@@ -34,6 +49,7 @@ class Scope<R> {
     private readonly children = new Set<Fiber<any, any>>();
     private readonly subScopes = new Set<Scope<R>>();
     private readonly finalizers: Array<(exit: Exit<any, any>) => Async<R, any, any>> = [];
+    private readonly failedFinalizers: ScopeFinalizerFailure[] = [];
 
     constructor(private readonly runtime: Runtime<R>, private readonly parentScopeId?: ScopeId) {
         this.id = nextScopeId++;
@@ -75,6 +91,15 @@ class Scope<R> {
         return s;
     }
 
+    /** Snapshot of cleanup failures. Descendant scopes are included by default. */
+    finalizerFailures(options: { recursive?: boolean } = {}): readonly ScopeFinalizerFailure[] {
+        const failures = [...this.failedFinalizers];
+        if (options.recursive ?? true) {
+            for (const scope of this.subScopes) failures.push(...scope.finalizerFailures());
+        }
+        return Object.freeze(failures.slice());
+    }
+
     /** ✅ fork en este scope */
     fork<E, A>(eff: Async<R, E, A>): Fiber<E, A> {
         if (this.closed) throw new Error("Scope closed");
@@ -95,21 +120,42 @@ class Scope<R> {
     /** Emit the scope.close event if hooks are active. */
     private emitCloseEvent(exit: Exit<any, any>, finalizerDurationMs: number): void {
         if (this.runtime.hasActiveHooks()) {
+            const finalizerFailures = this.finalizerFailures();
             const status =
-                exit._tag === "Success"
+                finalizerFailures.length > 0
+                    ? "failure"
+                    : exit._tag === "Success"
                     ? "success"
                     : Cause.isInterruptedOnly(exit.cause)
                         ? "interrupted"
                         : "failure";
             const failure = exit._tag === "Failure" ? Cause.firstFailure(exit.cause) : undefined;
+            const cleanupError = finalizerFailures[0]?.error;
 
             this.runtime.emit({
                 type: "scope.close",
                 scopeId: this.id,
                 status,
                 finalizerCount: this.finalizers.length,
+                finalizerFailureCount: finalizerFailures.length,
                 finalizerDurationMs,
-                error: failure?._tag === "Some" ? failure.value : exit._tag === "Failure" ? exit.cause : undefined,
+                error: cleanupError ?? (failure?._tag === "Some" ? failure.value : exit._tag === "Failure" ? exit.cause : undefined),
+            });
+        }
+    }
+
+    private finishFinalizer(finalizerId: number, status: "success" | "failure", error?: unknown): void {
+        this.runtime.recordScopeFinalizerFinished();
+        if (status === "failure") {
+            this.failedFinalizers.push(Object.freeze({ scopeId: this.id, finalizerId, error }));
+        }
+        if (this.runtime.hasActiveHooks()) {
+            this.runtime.emit({
+                type: "scope.finalizer.end",
+                scopeId: this.id,
+                finalizerId,
+                status,
+                ...(error === undefined ? {} : { error }),
             });
         }
     }
@@ -142,39 +188,27 @@ class Scope<R> {
                 let result: Async<R, any, any>;
                 try {
                     result = fin(exit);
-                } catch {
-                    // best-effort: never crash the runtime because of a finalizer
-                    this.runtime.recordScopeFinalizerFinished();
-                    if (this.runtime.hasActiveHooks()) {
-                        this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
-                    }
+                } catch (error) {
+                    // Best-effort close continues, but the failure remains observable.
+                    this.finishFinalizer(finalizerId, "failure", error);
                     return unit<R>() as any;
                 }
 
                 // Fast-path: if the finalizer returned a Succeed effect (e.g. unit()),
                 // skip the asyncFold wrapper entirely — no Fold node needed.
                 if (result._tag === "Succeed") {
-                    this.runtime.recordScopeFinalizerFinished();
-                    if (this.runtime.hasActiveHooks()) {
-                        this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
-                    }
+                    this.finishFinalizer(finalizerId, "success");
                     return unit<R>() as any;
                 }
 
                 // Non-trivial effect: wrap with asyncFold to swallow errors
                 return asyncFold(
                     result,
-                    () => asyncSync(() => {
-                        this.runtime.recordScopeFinalizerFinished();
-                        if (this.runtime.hasActiveHooks()) {
-                            this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
-                        }
+                    (error) => asyncSync(() => {
+                        this.finishFinalizer(finalizerId, "failure", error);
                     }),
                     () => asyncSync(() => {
-                        this.runtime.recordScopeFinalizerFinished();
-                        if (this.runtime.hasActiveHooks()) {
-                            this.runtime.emit({ type: "scope.finalizer.end", scopeId: this.id, finalizerId });
-                        }
+                        this.finishFinalizer(finalizerId, "success");
                     })
                 );
             });
@@ -250,6 +284,22 @@ class Scope<R> {
                 });
             })
         );
+    }
+
+    /**
+     * Close the complete scope tree and fail only after every finalizer has had
+     * a chance to run. `closeAsync` remains the compatibility best-effort API.
+     */
+    closeAsyncStrict(
+        exit: Exit<any, any> = { _tag: "Success", value: undefined },
+        opts: CloseOptions = { awaitChildren: true }
+    ): Async<R, ScopeFinalizerError, void> {
+        return asyncFlatMap(this.closeAsync(exit, opts), () => {
+            const failures = this.finalizerFailures();
+            return failures.length > 0
+                ? asyncFail(new ScopeFinalizerError(failures))
+                : unit<R>();
+        }) as Async<R, ScopeFinalizerError, void>;
     }
 }
 

@@ -1,8 +1,8 @@
 // src/core/runtime/__tests__/scope.test.ts
 import { describe, it, expect, vi } from "vitest";
 import { Runtime } from "../runtime";
-import { Scope, withScope, withScopeAsync } from "../scope";
-import { async, Async, asyncFlatMap, asyncSucceed, unit } from "../../types/asyncEffect";
+import { Scope, ScopeFinalizerError, withScope, withScopeAsync } from "../scope";
+import { async, Async, asyncFail, asyncFlatMap, asyncSucceed, unit } from "../../types/asyncEffect";
 import { Exit, Cause } from "../../types/effect";
 import { EventBus } from "../eventBus";
 
@@ -164,6 +164,33 @@ describe("Scope optimizations", () => {
             // c and a should still execute despite the middle one throwing
             expect(executed).toContain("c");
             expect(executed).toContain("a");
+        });
+
+        it("reports best-effort finalizer failures and exposes a strict close", async () => {
+            const events: any[] = [];
+            const bus = new EventBus();
+            bus.subscribe((event) => events.push(event));
+            const rt = makeRuntime(bus);
+            const scope = new Scope(rt);
+
+            scope.addFinalizer(() => asyncFail("release-failed"));
+
+            await expect(rt.toPromise(scope.closeAsyncStrict())).rejects.toBeInstanceOf(ScopeFinalizerError);
+            expect(scope.finalizerFailures()).toEqual([
+                expect.objectContaining({ scopeId: scope.id, finalizerId: 1, error: "release-failed" }),
+            ]);
+
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "scope.finalizer.end",
+                status: "failure",
+                error: "release-failed",
+            }));
+            expect(events).toContainEqual(expect.objectContaining({
+                type: "scope.close",
+                status: "failure",
+                finalizerFailureCount: 1,
+            }));
         });
     });
 

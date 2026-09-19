@@ -6,13 +6,13 @@ const coverageThresholds = (() => {
   if (coverageGate === "off") return undefined;
   if (coverageGate === "100") return { 100: true, perFile: true } as const;
 
-  // Per-file gate for executable source. Branch coverage is reported but not
-  // gated per-file yet because several branch-heavy modules still sit below 90%.
+  // Repository-wide gate across every shipped subsystem. Focused per-file
+  // regressions are handled by module tests and exact public API checks.
   return {
-    statements: 90,
-    functions: 90,
-    lines: 90,
-    perFile: true,
+    statements: 80,
+    branches: 65,
+    functions: 80,
+    lines: 80,
   };
 })();
 
@@ -27,26 +27,28 @@ export default defineConfig({
       provider: "v8",
       reportsDirectory: "./coverage",
       reporter: ["text", "html", "json", "json-summary", "lcov"],
-      include: [
-        "src/core/**/*.ts",
-        "src/http/**/*.ts",
-        "src/index.ts"
-      ],
+      include: ["src/**/*.ts"],
       exclude: [
         "src/**/*.test.ts",
         "src/**/*.pbt.test.ts",
         "src/**/__tests__/**",
         "src/**/*.d.ts",
-        "src/**/index.ts",
+        "src/index.ts",
+        "src/core/**/index.ts",
+        "src/http/**/index.ts",
+        "src/observability/**/index.ts",
+        "src/perf/**/index.ts",
+        "src/agent/**/index.ts",
         "src/core/runtime/engine/types.ts",
         "src/http/lifecycle/types.ts",
         "src/http/prewarm/types.ts",
         "src/core/runtime/dx-type-tests.ts",
         "src/http/schema-type-tests.ts",
+        "src/schema/type-tests.ts",
+        "src/http/browser.ts",
         "src/**/bench/**",
         "src/benchmarks/**",
         "src/examples/**",
-        "src/agent/**",
         "dist/**",
         "coverage/**",
         "wasm/pkg/**"

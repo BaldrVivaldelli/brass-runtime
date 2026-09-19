@@ -7,7 +7,7 @@ export function createNodeDecompressor(zlib: typeof import("node:zlib")): Decomp
   return {
     isPassthrough: false,
 
-    decompress(data: Buffer | Uint8Array, encoding: SupportedEncoding): DecompressResult {
+    decompress(data: Uint8Array, encoding: SupportedEncoding): DecompressResult {
       try {
         const input = Buffer.isBuffer(data) ? data : Buffer.from(data);
         let result: Buffer;

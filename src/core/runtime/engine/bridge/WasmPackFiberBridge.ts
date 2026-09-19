@@ -7,7 +7,11 @@ import {
   type EngineAbiHandshake,
   type EngineAbiProvider,
 } from "../abiContract";
-import { resolveWasmModule, wasmModuleResolutionErrors } from "../../wasmModule";
+import {
+  STRICT_WASM_VM_EXPORTS,
+  resolveWasmModule,
+  wasmModuleResolutionErrors,
+} from "../../wasmModule";
 import {
   emitRuntimeBoundaryEvent,
   type RuntimeBoundaryDiagnosticsOptions,
@@ -227,29 +231,7 @@ export class WasmPackFiberBridge implements WasmBridge {
 
   private assertStrictWasmHotPath(): void {
     const missing: string[] = [];
-    const required = [
-      "abi_version",
-      "min_compatible_abi_version",
-      "engine_version",
-      "capabilities",
-      "max_program_words",
-      "max_patch_words",
-      "max_event_batch",
-      "memory",
-      "prepare_program_words",
-      "prepare_patch_words",
-      "create_fiber_from_program_words",
-      "drive_batch_ptr",
-      "event_batch_len",
-      "provide_value_ptr",
-      "provide_error_ptr",
-      "provide_effect_from_words",
-      "interrupt_ptr",
-      "metrics_snapshot_ptr",
-      "metrics_snapshot_len",
-    ] as const;
-
-    for (const name of required) {
+    for (const name of STRICT_WASM_VM_EXPORTS) {
       if (typeof this.vm[name] !== "function") missing.push(name);
     }
 

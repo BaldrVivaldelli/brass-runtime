@@ -28,6 +28,19 @@ const result = await run(
 - If `use` fails or is interrupted, `release` still runs
 - Errors in `release` are swallowed (the `use` result propagates)
 
+That behavior is the compatibility, best-effort policy. Direct `Scope`
+management additionally exposes `finalizerFailures()` and
+`closeAsyncStrict()`: the strict close still runs every finalizer in LIFO order,
+then fails with `ScopeFinalizerError` when any cleanup failed. With runtime hooks
+enabled, both policies emit failed `scope.finalizer.end` events.
+
+```ts
+const scope = new Scope(runtime);
+scope.addFinalizer(() => closeDatabase());
+
+await runtime.toPromise(scope.closeAsyncStrict());
+```
+
 ## ensuring — Attach a finalizer
 
 ```ts

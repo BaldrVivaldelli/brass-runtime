@@ -374,3 +374,5 @@ For public API changes:
 - Do type declarations include it?
 - Are README/docs examples still correct?
 - Is the change semver-relevant?
+- Does the exact export fingerprint change intentionally?
+- Do both the Node and conditional browser bundles validate?

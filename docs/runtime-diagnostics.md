@@ -19,9 +19,12 @@ records. If a `RuntimeRegistry` is already the active hook, the snapshot uses
 its run-state detail; it does not activate one implicitly. WASM values come
 from the negotiated engine metrics.
 
-Scope hooks now include `scope.finalizer.add`, `.start`, and `.end`, while
-`scope.close` carries finalizer count and duration. These events are for sinks
-that already opted into hooks; the compact counters do not depend on them.
+Scope hooks include `scope.finalizer.add`, `.start`, and `.end`. Finalizer end
+events carry `success`/`failure` plus the cleanup error when present, while
+`scope.close` carries finalizer count, failure count, and duration. Runtime
+metrics increment `brass_runtime_scope_finalizer_failures_total` for failed
+cleanup. These events are for sinks that already opted into hooks; the compact
+counters do not depend on them.
 
 The snapshot schema is additive within version 1. A breaking field/meaning
 change requires a new version. Lane keys must remain low-cardinality and the

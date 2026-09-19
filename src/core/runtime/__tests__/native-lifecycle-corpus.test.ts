@@ -11,7 +11,7 @@ import { ReferenceWasmBridge } from "../engine/bridge/ReferenceWasmBridge";
 import { WasmPackFiberBridge } from "../engine/bridge/WasmPackFiberBridge";
 import type { EngineEvent } from "../engine/types";
 import type { NodeId, OpcodeNode, OpcodeProgram } from "../engine/opcodes";
-import { resolveWasmModule } from "../wasmModule";
+import { isStrictWasmModule, resolveWasmModule } from "../wasmModule";
 
 type CorpusStep = {
   readonly op: "poll" | "provideValue" | "provideError" | "provideEffect" | "interrupt";
@@ -50,9 +50,11 @@ const corpus = JSON.parse(readFileSync(
   "utf8",
 )) as Corpus;
 
+const generatedWasm = resolveWasmModule({ fresh: true });
+
 const bridgeFactories: readonly [string, () => Bridge][] = [
   ["typescript-reference", () => new ReferenceWasmBridge()],
-  ...(resolveWasmModule({ fresh: true }) === null
+  ...(!isStrictWasmModule(generatedWasm)
     ? []
     : [["generated-wasm", () => new WasmPackFiberBridge()] as [string, () => Bridge]]),
 ];

@@ -32,11 +32,11 @@ describe("HTTP body helpers", () => {
     expect(httpBodyByteLength(uint8)).toBe(2);
   });
 
-  it("converts supported bodies to Buffer and stable key parts", () => {
+  it("converts supported bodies to bytes and stable key parts", () => {
     const arrayBuffer = new Uint8Array([1, 2, 3]).buffer;
     const uint8 = new Uint8Array([4, 5]);
 
-    expect(httpBodyToBuffer("hello").toString("utf8")).toBe("hello");
+    expect(new TextDecoder().decode(httpBodyToBuffer("hello"))).toBe("hello");
     expect(Array.from(httpBodyToBuffer(arrayBuffer))).toEqual([1, 2, 3]);
     expect(Array.from(httpBodyToBuffer(uint8))).toEqual([4, 5]);
     expect(httpBodyKeyPart(undefined)).toBe("");

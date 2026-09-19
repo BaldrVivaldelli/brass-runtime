@@ -2,7 +2,7 @@
 import { asyncFold, asyncSucceed, asyncFail } from "../../core/types/asyncEffect";
 import type { HttpClientFn, HttpRequest, HttpWireResponse } from "../client";
 import { httpBodyByteLength, httpBodyToBuffer } from "../body";
-import { createDecompressor } from "./decompressor";
+import { compressData, createDecompressor } from "./decompressor";
 import type {
   CompressionConfig,
   CompressionMiddlewareResult,
@@ -79,8 +79,7 @@ function processResponse(
   // Process in reverse order (last-applied encoding first)
   const reversedEncodings = [...encodings].reverse();
 
-  // Start with the body as a Buffer
-  let currentData: Buffer = Buffer.from(res.bodyText, "latin1");
+  let currentData = latin1ToBytes(res.bodyText);
   let decompressedCount = 0;
 
   for (let i = 0; i < reversedEncodings.length; i++) {
@@ -107,7 +106,7 @@ function processResponse(
       return {
         ...res,
         headers: newHeaders,
-        bodyText: currentData.toString("latin1"),
+        bodyText: bytesToLatin1(currentData),
       };
     }
 
@@ -130,7 +129,7 @@ function processResponse(
       return {
         ...res,
         headers: newHeaders,
-        bodyText: currentData.toString("latin1"),
+        bodyText: bytesToLatin1(currentData),
       };
     }
 
@@ -148,7 +147,7 @@ function processResponse(
     stats.decompressedBytes += result.data.byteLength;
     stats.decompressed[enc]++;
     decompressedCount++;
-    currentData = result.data as Buffer;
+    currentData = result.data;
   }
 
   // All encodings successfully decompressed
@@ -172,7 +171,7 @@ function processResponse(
   return {
     ...res,
     headers: newHeaders,
-    bodyText: currentData.toString("utf-8"),
+    bodyText: new TextDecoder().decode(currentData),
   };
 }
 
@@ -292,7 +291,7 @@ function compressRequest(
   }
 
   try {
-    const compressed = compressBuffer(httpBodyToBuffer(req.body), encoding);
+    const compressed = compressData(httpBodyToBuffer(req.body), encoding);
     stats.compressedCount++;
     stats.originalBytes += originalBytes;
     stats.compressedBytes += compressed.byteLength;
@@ -310,17 +309,21 @@ function compressRequest(
   }
 }
 
-function compressBuffer(input: Buffer, encoding: SupportedEncoding): Uint8Array {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const zlib = require("node:zlib") as typeof import("node:zlib");
-  switch (encoding) {
-    case "gzip":
-      return zlib.gzipSync(input);
-    case "br":
-      return zlib.brotliCompressSync(input);
-    case "deflate":
-      return zlib.deflateSync(input);
+function latin1ToBytes(value: string): Uint8Array {
+  const out = new Uint8Array(value.length);
+  for (let index = 0; index < value.length; index++) {
+    out[index] = value.charCodeAt(index) & 0xff;
   }
+  return out;
+}
+
+function bytesToLatin1(value: Uint8Array): string {
+  let out = "";
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < value.length; offset += chunkSize) {
+    out += String.fromCharCode(...value.subarray(offset, offset + chunkSize));
+  }
+  return out;
 }
 
 function hasHeader(headers: Record<string, string> | undefined, name: string): boolean {
