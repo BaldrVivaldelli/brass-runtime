@@ -283,6 +283,12 @@ function recordRuntimeMetricEvent(
       return;
     }
 
+    case "scope.finalizer.end":
+      if (ev.status === "failure") {
+        state.metrics.counter("brass_runtime_scope_finalizer_failures_total").increment();
+      }
+      return;
+
     case "span.start":
       if (ctx.spanId) state.spanStarts.set(ctx.spanId, now);
       state.metrics.counter("brass_runtime_spans_started_total", state.includeSpanNameLabel ? { name: ev.name } : {}).increment();

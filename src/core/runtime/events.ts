@@ -32,6 +32,7 @@ export type RuntimeEvent =
       status: "success" | "failure" | "interrupted";
       error?: unknown;
       finalizerCount?: number;
+      finalizerFailureCount?: number;
       finalizerDurationMs?: number;
     }
   | {
@@ -41,9 +42,16 @@ export type RuntimeEvent =
       label?: string;
     }
   | {
-      type: "scope.finalizer.start" | "scope.finalizer.end";
+      type: "scope.finalizer.start";
       scopeId: number;
       finalizerId: number;
+    }
+  | {
+      type: "scope.finalizer.end";
+      scopeId: number;
+      finalizerId: number;
+      status: "success" | "failure";
+      error?: unknown;
     }
   | {
       type: "supervisor.child.start";

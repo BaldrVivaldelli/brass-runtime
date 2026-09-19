@@ -9,9 +9,8 @@ export function createNoopDecompressor(): Decompressor {
   return {
     isPassthrough: true,
 
-    decompress(data: Buffer | Uint8Array, _encoding: SupportedEncoding): DecompressResult {
-      const buf = Buffer.isBuffer(data) ? data : Buffer.from(data);
-      return { ok: true, data: buf };
+    decompress(data: Uint8Array, _encoding: SupportedEncoding): DecompressResult {
+      return { ok: true, data };
     },
   };
 }

@@ -7,7 +7,7 @@ import { Runtime } from "../runtime";
 import { Scheduler } from "../scheduler";
 import { Scope } from "../scope";
 import type { RuntimeEngineMode } from "../engine/types";
-import { resolveWasmModule } from "../wasmModule";
+import { isStrictWasmModule, resolveWasmModule } from "../wasmModule";
 
 type HostLifecycleFixture = {
   readonly name: string;
@@ -23,9 +23,11 @@ const fixtures = (JSON.parse(readFileSync(
   "utf8",
 )) as { hostLifecycle: readonly HostLifecycleFixture[] }).hostLifecycle;
 
+const generatedWasm = resolveWasmModule({ fresh: true });
+
 const engines: RuntimeEngineMode[] = [
   "ts",
-  ...(resolveWasmModule({ fresh: true }) === null ? [] : ["wasm" as const]),
+  ...(!isStrictWasmModule(generatedWasm) ? [] : ["wasm" as const]),
 ];
 
 describe("structured lifecycle parity from the shared corpus", () => {

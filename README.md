@@ -591,6 +591,18 @@ const result = await Stream
 
 CLI: `brass-agent`
 
+### Platform support
+
+`brass-runtime`, `/core`, `/http`, and `/observability` publish conditional
+browser bundles. Browser HTTP excludes the Node-only server and
+`node:http` transport; native `fetch` already handles response decompression,
+so synchronous request compression is reported as unsupported and leaves the
+request unchanged. `brass-runtime/schema` is platform-neutral.
+
+The strict Rust/WASM engine currently uses the Node-targeted wasm-pack loader.
+Browser bundles therefore use `engine: "ts"`; requesting `wasm` fails clearly
+and `auto` records its normal fallback diagnostic.
+
 ---
 
 ## HTTP middleware pipeline
@@ -639,7 +651,7 @@ Optional Rust/WASM-backed components for strict execution:
 - Retry planner
 
 ```bash
-npm run build:wasm  # requires wasm-pack
+npm run build:wasm  # requires wasm-pack; records a Rust-source fingerprint
 ```
 
 `engine: "wasm"` never falls back. `engine: "auto"` is the explicit opt-in to a
@@ -675,8 +687,12 @@ promotion gate:
 
 ```bash
 npm test              # vitest suite
+npm run test:wasm     # rebuild WASM and run the suite with real-WASM parity
 npm run test:types    # TypeScript type checking
 npm run test:coverage # coverage with baseline gate
+npm run validate:browser # rebundle browser entrypoints without Node built-ins
+npm run validate:wasm # reject missing/stale strict-WASM artifacts
+npm run validate:package # require all Node/browser/WASM tarball artifacts
 npm run release:check # full release gate: types, tests, build, CJS, perf budgets
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
 npm run benchmark:runtime        # Runtime Performance Track

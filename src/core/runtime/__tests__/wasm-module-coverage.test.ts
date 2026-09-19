@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  inspectStrictWasmModule,
+  isStrictWasmModule,
   resetWasmModuleCache,
   resolveWasmModule,
   wasmModuleCandidates,
@@ -16,6 +18,19 @@ describe("wasm module resolution helpers", () => {
 
   it("returns an explicit module path as the only candidate", () => {
     expect(wasmModuleCandidates("custom/pkg.js")).toEqual(["custom/pkg.js"]);
+  });
+
+  it("distinguishes a present but stale module from the strict runtime ABI", () => {
+    const stale = {
+      BrassWasmVm: class {
+        abi_version() { return 1; }
+      },
+    };
+
+    const status = inspectStrictWasmModule(stale);
+    expect(status.compatible).toBe(false);
+    expect(status.missing).toContain("memory");
+    expect(isStrictWasmModule(stale)).toBe(false);
   });
 
   it("builds default candidates including package, relative, and cwd paths", () => {

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { resolveWasmModule } from "../wasmModule";
+import { isStrictWasmModule, resolveWasmModule } from "../wasmModule";
 
 type WasmConstructor<T = Record<string, (...args: never[]) => unknown>> = new (
   ...args: any[]
 ) => T;
 
-const wasm = resolveWasmModule({ fresh: true });
+const resolvedWasm = resolveWasmModule({ fresh: true });
+const wasm = isStrictWasmModule(resolvedWasm) ? resolvedWasm : null;
 
 function constructor<T>(name: string): WasmConstructor<T> {
   const value = wasm?.[name];

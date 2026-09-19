@@ -7,10 +7,14 @@ import { WasmPackFiberBridge } from "../engine/bridge/WasmPackFiberBridge";
 import { EventKindCode } from "../engine/binaryAbi";
 import type { OpcodeProgram } from "../engine/opcodes";
 
-vi.mock("../wasmModule", () => ({
-  resolveWasmModule: vi.fn(),
-  wasmModuleResolutionErrors: vi.fn(() => ["missing wasm for test"]),
-}));
+vi.mock("../wasmModule", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../wasmModule")>();
+  return {
+    ...actual,
+    resolveWasmModule: vi.fn(),
+    wasmModuleResolutionErrors: vi.fn(() => ["missing wasm for test"]),
+  };
+});
 
 afterEach(() => {
   vi.restoreAllMocks();

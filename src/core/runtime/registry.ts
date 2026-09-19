@@ -30,7 +30,12 @@ export type ScopeInfo = {
     closedAt?: number;
     finalizerCount?: number;
     finalizerDurationMs?: number;
-    finalizers: Array<{ id: number; label?: string; status: "added" | "running" | "done" }>;
+    finalizers: Array<{
+        id: number;
+        label?: string;
+        status: "added" | "running" | "done" | "failed";
+        error?: string;
+    }>;
 };
 
 export class RuntimeRegistry implements RuntimeHooks {
@@ -131,7 +136,14 @@ export class RuntimeRegistry implements RuntimeHooks {
             case "scope.finalizer.end": {
                 const scope = this.scopes.get(rec.scopeId);
                 const finalizer = scope?.finalizers.find((entry) => entry.id === rec.finalizerId);
-                if (finalizer) finalizer.status = rec.type === "scope.finalizer.start" ? "running" : "done";
+                if (finalizer) {
+                    finalizer.status = rec.type === "scope.finalizer.start"
+                        ? "running"
+                        : rec.status === "failure" ? "failed" : "done";
+                    if (rec.type === "scope.finalizer.end" && rec.error !== undefined) {
+                        finalizer.error = formatRegistryError(rec.error);
+                    }
+                }
                 break;
             }
         }

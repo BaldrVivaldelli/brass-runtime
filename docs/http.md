@@ -646,7 +646,10 @@ type HttpClient = (req: HttpRequest) =>
 
 ## Status
 
-Experimental but stable enough to use and evolve.
+The HTTP client and Node server surfaces are stable. Conditional browser builds
+expose the fetch-backed client and omit the Node-only server and `node:http`
+transport. Browser fetch handles response decompression; synchronous request
+compression remains Node-only.
 
 ---
 

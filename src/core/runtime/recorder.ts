@@ -124,7 +124,12 @@ function explainRuntimeEvents(
         lines.push(`scope#${event.scopeId} opened${event.parentScopeId !== undefined ? ` parent=scope#${event.parentScopeId}` : ""}`);
         break;
       case "scope.close":
-        lines.push(`scope#${event.scopeId} closed ${event.status}${event.error ? ` error=${formatUnknown(event.error)}` : ""}`);
+        lines.push(`scope#${event.scopeId} closed ${event.status}${event.finalizerFailureCount ? ` cleanupFailures=${event.finalizerFailureCount}` : ""}${event.error ? ` error=${formatUnknown(event.error)}` : ""}`);
+        break;
+      case "scope.finalizer.end":
+        if (event.status === "failure") {
+          lines.push(`scope#${event.scopeId} finalizer#${event.finalizerId} failed${event.error ? ` error=${formatUnknown(event.error)}` : ""}`);
+        }
         break;
       case "supervisor.child.restart":
         lines.push(`supervisor#${event.supervisorId} restarting child#${event.childId} attempt=${event.restartCount} delay=${event.delayMs}ms${event.reason ? ` reason=${event.reason}` : ""}`);

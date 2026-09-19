@@ -114,7 +114,7 @@ export function emptyRequestCompressionStats(): MutableRequestCompressionStats {
  * Result of a decompression attempt.
  */
 export type DecompressResult =
-  | { ok: true; data: Buffer }
+  | { ok: true; data: Uint8Array }
   | { ok: false; error: string };
 
 /**
@@ -122,7 +122,7 @@ export type DecompressResult =
  */
 export interface Decompressor {
   readonly isPassthrough: boolean;
-  decompress(data: Buffer | Uint8Array, encoding: SupportedEncoding): DecompressResult;
+  decompress(data: Uint8Array, encoding: SupportedEncoding): DecompressResult;
 }
 
 /**

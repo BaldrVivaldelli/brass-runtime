@@ -14,8 +14,11 @@ npm run release:check
 - A real WASM build from the pinned toolchain.
 - TypeScript API/type checks.
 - Full Vitest suite.
+- Whole-repository coverage baseline over shipped executable source.
 - TS bundle build.
 - CJS compatibility validation.
+- Conditional browser bundle validation.
+- npm tarball validation for Node, browser, declaration, and WASM artifacts.
 - Runtime profiler budget.
 - Runtime benchmark budget.
 - Versioned fork/suspend/resume/fairness/suspended-heap budget.
@@ -40,8 +43,10 @@ npm run perf -- --profile runtime-ab --record-history --save-baseline first-rele
 npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-history --save-baseline first-release-http-memory
 ```
 
-- Confirm `npm pack --dry-run` includes only package files expected by
-  `package.json`.
+- Confirm `npm run validate:package` reports the expected tarball contents.
+- The committed `package.json` version may lag the latest Git tag because
+  semantic-release assigns the publish version in CI. Never publish a local
+  dry-run tarball as a release artifact.
 - Build and package the promoted read-only editor-search companion, then
   generate release provenance:
 

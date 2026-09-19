@@ -97,6 +97,8 @@ describe("observability export", () => {
     bus.subscribeHooks(makeRuntimeMetricsSink(metrics, { clock: () => ++now }));
     bus.emit({ type: "fiber.start", fiberId: 1, name: "root" }, { traceId: "trace", spanId: "span" });
     bus.emit({ type: "log", level: "warn", message: "careful" }, { traceId: "trace", spanId: "span" });
+    bus.emit({ type: "scope.finalizer.end", scopeId: 1, finalizerId: 1, status: "success" }, {});
+    bus.emit({ type: "scope.finalizer.end", scopeId: 1, finalizerId: 2, status: "failure", error: "release failed" }, {});
     bus.emit({ type: "fiber.end", fiberId: 1, status: "success" }, { traceId: "trace", spanId: "span" });
     bus.flush();
 
@@ -105,6 +107,7 @@ describe("observability export", () => {
     expect(text).toContain("brass_runtime_fibers_started_total 1");
     expect(text).toContain('brass_runtime_fibers_finished_total{status="success"} 1');
     expect(text).toContain('brass_runtime_logs_total{level="warn"} 1');
+    expect(text).toContain("brass_runtime_scope_finalizer_failures_total 1");
     expect(text).toContain("brass_runtime_fibers_active 0");
     expect(text).toContain('brass_runtime_fiber_duration_ms_count{status="success"} 1');
   });

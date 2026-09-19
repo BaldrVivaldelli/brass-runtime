@@ -46,20 +46,34 @@ jobs:
         run: cargo install cargo-fuzz --version 0.13.1 --locked
 
       - run: npm ci
+      - run: npm run test:types
       - run: npm run rust:check
       - run: npm run native:build:debug
       - if: matrix.node-version == 22
         run: npm run rust:fuzz:check
-      - run: npm run build:wasm
       - run: npm run build
-      - run: npm test --if-present
+      - run: npm run validate:wasm
+      - run: npm run test:coverage
+      - run: npm run validate:cjs
+      - run: npm run validate:browser
+      - run: npm run validate:package
+      - if: matrix.node-version == 22
+        run: npm run perf:runtime:budget
+      - if: matrix.node-version == 22
+        run: npm run benchmark:runtime:budget
+      - if: matrix.node-version == 22
+        run: npm run benchmark:runtime:primitives:budget
+      - if: matrix.node-version == 22
+        run: npm run benchmark:http:budget
+      - if: matrix.node-version == 22
+        run: npm run benchmark:observability:budget
 
-      - name: Verify WASM files are packed
+      - name: Verify generated WASM files exist
         run: |
           ls -la wasm/pkg
           test -f wasm/pkg/brass_runtime_wasm_engine.js
           test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
-          npm pack --dry-run
+          test -f wasm/pkg/brass-runtime-build.json
 
   node18-smoke:
     runs-on: ubuntu-latest
@@ -83,13 +97,17 @@ jobs:
       - run: npm run native:build:debug
       - run: npm run build:wasm
       - run: npm run build
+      - run: npm run validate:wasm
+      - run: npm run validate:cjs
+      - run: npm run validate:browser
+      - run: npm run validate:package
 
-      - name: Verify WASM files are packed
+      - name: Verify generated WASM files exist
         run: |
           ls -la wasm/pkg
           test -f wasm/pkg/brass_runtime_wasm_engine.js
           test -f wasm/pkg/brass_runtime_wasm_engine_bg.wasm
-          npm pack --dry-run
+          test -f wasm/pkg/brass-runtime-build.json
 
   native-artifacts:
     runs-on: ${{ matrix.os }}
@@ -144,10 +162,12 @@ jobs:
       - run: npm ci
       - run: npm run rust:check
       - run: npm run build
-      - run: npm run build:wasm
+      - run: npm run validate:wasm
+      - run: npm run validate:cjs
+      - run: npm run validate:browser
+      - run: npm run validate:package
       - run: npm run native:build
       - run: npm run native:package
-      - run: rm -f wasm/pkg/.gitignore
       - name: Verify WASM files are packed
         run: |
           ls -la wasm/pkg
@@ -157,6 +177,7 @@ jobs:
           cat pack.json
           tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine.js"
           tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass_runtime_wasm_engine_bg.wasm"
+          tar -tf brass-runtime-*.tgz | grep "package/wasm/pkg/brass-runtime-build.json"
 
       - run: npm run release:artifacts
 

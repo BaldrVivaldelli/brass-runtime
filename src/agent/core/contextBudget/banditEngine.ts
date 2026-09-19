@@ -120,8 +120,13 @@ export const updateBanditState = (
 
   const now = Date.now();
   const updatedArms = { ...state.arms };
+  const updatedIds = new Set<string>();
 
   for (const arm of pulledArms) {
+    // A pull is attributed once per logical arm even if upstream candidate
+    // expansion produced duplicate Arm records.
+    if (updatedIds.has(arm.id)) continue;
+    updatedIds.add(arm.id);
     const existing = updatedArms[arm.id] ?? defaultArmStats();
     updatedArms[arm.id] = {
       alpha: existing.alpha + reward,
