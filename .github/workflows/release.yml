@@ -32,7 +32,7 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Install pinned nightly for fuzz targets
         if: matrix.node-version == 22
@@ -87,7 +87,7 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
@@ -124,7 +124,7 @@ jobs:
         with:
           node-version: 22
 
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - run: npm run native:build
       - run: npm run native:package
@@ -154,7 +154,7 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.100.0
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
