@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 3,
-  "recordedAt": "2026-09-20T21:23:16Z",
-  "status": "publication-blocked-on-npm-organization-read-access",
+  "schemaVersion": 4,
+  "recordedAt": "2026-09-20T23:28:14Z",
+  "status": "publication-blocked-on-isolated-bootstrap-secret-and-npm-organization-read-access",
   "registry": "https://registry.npmjs.org",
   "products": [
     {
@@ -99,17 +99,24 @@
     "environmentProtectedAtRecordedAt": true,
     "requiredReviewer": "BaldrVivaldelli",
     "npmTokenSecretExistsAtRecordedAt": true,
+    "credentialRemediation": {
+      "stableReleaseSecret": "NPM_TOKEN",
+      "productBootstrapSecret": "NPM_PRODUCT_BOOTSTRAP_TOKEN",
+      "productBootstrapScope": "environment:npm-products",
+      "sharedCredentialRemovedFromProductWorkflow": true,
+      "productBootstrapSecretPresentAtRecordedAt": false
+    },
     "authentication": "granular-access-token-for-first-publication",
     "distTag": "alpha",
     "provenance": true,
     "automaticPublish": false
   },
   "bootstrapVerificationAttempt": {
-    "runId": 35538420035,
-    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035",
-    "jobId": 106151532383,
-    "jobUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035/job/106151532383",
-    "sourceSha": "d7bdfd9d5873a5f9de50297f92c89c37eb6ed0d6",
+    "runId": 35544680926,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35544680926",
+    "jobId": 106168376815,
+    "jobUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35544680926/job/106168376815",
+    "sourceSha": "18b4b5ae1179be3d5862ab435f4d6fd25a55e7e9",
     "environment": "npm-products",
     "environmentApproved": true,
     "tokenIdentity": "avivaldelli",
@@ -124,18 +131,19 @@
   },
   "blocker": {
     "code": "E403",
-    "message": "The refreshed token authenticated as avivaldelli, but npm denied the brass organization-membership read before build or publication",
-    "causeBoundary": "The publishing identity is not a member of the brass npm organization, or NPM_TOKEN lacks read access to that organization. The earlier package PUT failures still require @brass package-scope publish access after this preflight passes.",
+    "message": "The repository token authenticated as avivaldelli, but npm denied the brass organization-membership read before build or publication; product bootstrap credentials are now isolated from the stable release token",
+    "causeBoundary": "The publishing identity is not a member of the brass npm organization, or the replacement NPM_PRODUCT_BOOTSTRAP_TOKEN lacks read access to that organization. The earlier package PUT failures still require @brass package-scope publish access after this preflight passes.",
     "notCausedBy": [
-      "missing or invalid npm authentication",
+      "an invalid npm identity",
       "GitHub branch or environment protection",
-      "missing repository secret",
+      "the stable NPM_TOKEN repository secret",
       "an npm registry mutation"
     ]
   },
   "remaining": [
     "Ensure npm user avivaldelli belongs to the brass organization developers team",
-    "Replace NPM_TOKEN with a short-lived granular token that has brass organization read access and read/write publish access for the @brass package scope",
+    "Create NPM_PRODUCT_BOOTSTRAP_TOKEN as an npm-products environment secret using a short-lived granular token with brass organization read access and read/write publish access for the @brass package scope",
+    "Keep the stable brass-runtime NPM_TOKEN separate and unchanged",
     "Explicitly approve and rerun each first alpha publication",
     "After first publication, configure Trusted Publishing per package and retire the bootstrap write token",
     "Verify each alpha tag and retain the uploaded tarball for rollback"
