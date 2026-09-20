@@ -28,12 +28,16 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run validate:evidence
       - run: npm run test:types
       - run: npm run rust:check
       - run: npm run build
+      - run: npm run validate:api
       - run: npm run validate:wasm
       - run: npm run test:coverage
       - run: npm run validate:cjs
       - run: npm run validate:browser
       - run: npm run validate:package
+      - run: npm run validate:products
       - run: npm run benchmark:runtime:budget

@@ -13,6 +13,10 @@ Runnable framework examples live in the
 [repository examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples).
 They are kept out of the npm package so installs stay small.
 
+Project status, API change rules, and evidence requirements are defined in
+[GOVERNANCE.md](./GOVERNANCE.md). Contributions start in
+[CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ---
 
 ## What it does
@@ -758,6 +762,7 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Observability collector smoke](./docs/observability-collector-smoke.md)
 - [HTTP module](./docs/http.md)
 - [Production readiness](./docs/production-readiness.md)
+- [Production evidence and reproduction](./docs/production-evidence.md)
 - [Streams guide](./docs/guides/streams.md)
 - [Testing guide](./docs/guides/testing.md)
 - [WASM engine](./docs/wasm-fiber-engine.md)

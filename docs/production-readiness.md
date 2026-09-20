@@ -37,6 +37,9 @@ Public package gate:
 ```bash
 npm run build
 npm run validate:cjs
+npm run validate:package
+npm run validate:products
+npm run validate:evidence
 ```
 
 Benchmark gates:
@@ -57,6 +60,10 @@ BRASS_HTTP_BENCH_CALLS=100000 node --expose-gc --import tsx src/benchmarks/runne
 
 Treat sustained positive `heapDeltaMb` after explicit GC as leak evidence. Treat
 RSS-only growth as a signal to investigate, not proof of a leak.
+
+The committed controlled baseline and its limitations are documented in
+[`production-evidence.md`](./production-evidence.md). It is production-like
+evidence, not a claim of external production adoption.
 
 ## Operational Notes
 

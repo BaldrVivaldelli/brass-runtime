@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "description": "Generated declaration fingerprints for the frozen v1 API and additive v2 preview.",
+  "entrypoints": {
+    ".": {
+      "file": "dist/index.d.ts",
+      "sha256": "7061cdd9c49cb076393b3c360bc50e5a4b5480f6fd8a773852e897c2ce0d1f97"
+    },
+    "./agent": {
+      "file": "dist/agent/index.d.ts",
+      "sha256": "1ef8aeab0a1e2cc0a40893d4c82a3266a4c466ea97fd1368fa8eef1027db5ada"
+    },
+    "./core": {
+      "file": "dist/core/index.d.ts",
+      "sha256": "c51ea32b6eaf79ee7d4172415a6ffa00daa88cc1d8f3e79f99d84fcc199f03a6"
+    },
+    "./http": {
+      "file": "dist/http/index.d.ts",
+      "sha256": "a43009eddad6524209df2a2e7cad7cf7ec6e549f04e6135d7e07967ef4c20a8e"
+    },
+    "./http/testing": {
+      "file": "dist/http/testing.d.ts",
+      "sha256": "786aad84174a62a0e038d2843d052847a1ca790675cffc73cc7efa7fd7170e67"
+    },
+    "./next": {
+      "file": "dist/next.d.ts",
+      "sha256": "88505907371499cd07cf88fe7f3d35d7d36b177e5a7597aeec29f8475cb99fa1"
+    },
+    "./observability": {
+      "file": "dist/observability/index.d.ts",
+      "sha256": "baa67b5945fb589dbf843bb65e37c4cb2030ad49389882935bdafb3741ca893f"
+    },
+    "./perf": {
+      "file": "dist/perf/index.d.ts",
+      "sha256": "d128814a875785467d82d5dd57f870892c0ea9d69efa14a5778fdd4f8fada49c"
+    },
+    "./schema": {
+      "file": "dist/schema/index.d.ts",
+      "sha256": "9d099339434cd5ff8e7f8876f7b4c9ac39d43822f8e253680efdee4fb3641ca9"
+    }
+  }
+}

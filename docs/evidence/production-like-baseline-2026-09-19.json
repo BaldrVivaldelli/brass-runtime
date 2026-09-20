@@ -1,0 +1,216 @@
+{
+  "schemaVersion": 1,
+  "kind": "production-like-baseline",
+  "claimLevel": "controlled-local",
+  "generatedAt": "2026-09-20T00:05:01.911Z",
+  "machine": {
+    "platform": "linux 7.2.5-3-omarchy",
+    "architecture": "x64",
+    "cpu": "AMD Ryzen 9 8945HS w/ Radeon 780M Graphics",
+    "logicalCpus": 16,
+    "totalMemoryBytes": 32884776960,
+    "node": "v22.23.2"
+  },
+  "source": {
+    "packageVersion": "1.18.3",
+    "state": "worktree containing this evidence record",
+    "apiContract": "docs/ai/api-contract.v1.json"
+  },
+  "runtime": {
+    "command": "npm run benchmark:json -- runtime-performance-track",
+    "capabilities": {
+      "wasmAvailable": true,
+      "wasmFiberEngine": true,
+      "wasmScheduler": true
+    },
+    "results": [
+      {
+        "operation": "flatMap chain",
+        "unitsPerRun": 1000,
+        "perOpMs": 0.143,
+        "perUnitUs": 0.143,
+        "maxPerUnitUs": 0.75
+      },
+      {
+        "operation": "FiberRef update/get",
+        "unitsPerRun": 1000,
+        "perOpMs": 0.162,
+        "perUnitUs": 0.162,
+        "maxPerUnitUs": 1
+      },
+      {
+        "operation": "interruptibility mask/restore",
+        "unitsPerRun": 500,
+        "perOpMs": 0.127,
+        "perUnitUs": 0.254,
+        "maxPerUnitUs": 1.5
+      },
+      {
+        "operation": "Layer 2 typed provideContext",
+        "unitsPerRun": 100,
+        "perOpMs": 1.577,
+        "perUnitUs": 15.77,
+        "maxPerUnitUs": 50
+      },
+      {
+        "operation": "LayerScope memoized diamond graph",
+        "unitsPerRun": 2,
+        "perOpMs": 0.057,
+        "maxPerOpMs": 0.5,
+        "acquiredOnce": true,
+        "releasedOnce": true
+      },
+      {
+        "operation": "ScheduleDriver pure",
+        "unitsPerRun": 50000,
+        "perOpMs": 4.165,
+        "perUnitUs": 0.083,
+        "maxPerUnitUs": 0.5
+      },
+      {
+        "operation": "ScheduleDriver observed",
+        "unitsPerRun": 10000,
+        "perOpMs": 2.44,
+        "perUnitUs": 0.244,
+        "maxPerUnitUs": 1.5,
+        "observed": 10000
+      }
+    ]
+  },
+  "http": {
+    "command": "npm run benchmark:http:budget",
+    "workload": {
+      "calls": 1000,
+      "warmupCalls": 100,
+      "concurrency": 64,
+      "serverDelayMs": 1,
+      "mode": "compare",
+      "gcAvailable": true
+    },
+    "thresholds": {
+      "maxHeapDeltaMb": 24,
+      "minAdaptiveFinalLimit": 4,
+      "minAdaptiveServerInFlight": 4,
+      "maxErrors": 0
+    },
+    "results": [
+      {
+        "variant": "node-http-text",
+        "httpPerSecond": 8000.3,
+        "heapDeltaMb": 0.231,
+        "errorCount": 0
+      },
+      {
+        "variant": "wire-raw",
+        "httpPerSecond": 2873.555,
+        "heapDeltaMb": 1.546,
+        "errorCount": 0
+      },
+      {
+        "variant": "default-minimal-json",
+        "httpPerSecond": 3508.816,
+        "heapDeltaMb": 1.827,
+        "errorCount": 0
+      },
+      {
+        "variant": "default-proxy-json",
+        "httpPerSecond": 3752.241,
+        "heapDeltaMb": 1.973,
+        "errorCount": 0
+      },
+      {
+        "variant": "default-proxy-node-json",
+        "httpPerSecond": 5055.674,
+        "heapDeltaMb": 0.624,
+        "errorCount": 0
+      },
+      {
+        "variant": "high-throughput-proxy-node-json",
+        "httpPerSecond": 5637.291,
+        "heapDeltaMb": 0.607,
+        "errorCount": 0
+      },
+      {
+        "variant": "default-balanced-no-adaptive-json",
+        "httpPerSecond": 3329.155,
+        "heapDeltaMb": 1.908,
+        "errorCount": 0
+      },
+      {
+        "variant": "default-balanced-json",
+        "httpPerSecond": 2300.035,
+        "heapDeltaMb": 2.069,
+        "errorCount": 0,
+        "adaptiveFinalLimit": 128,
+        "adaptiveMaxInFlight": 32
+      },
+      {
+        "variant": "default-node-json",
+        "httpPerSecond": 2454.984,
+        "heapDeltaMb": 0.919,
+        "errorCount": 0,
+        "adaptiveFinalLimit": 256,
+        "adaptiveMaxInFlight": 64
+      },
+      {
+        "variant": "default-json",
+        "httpPerSecond": 2026.392,
+        "heapDeltaMb": 2.176,
+        "errorCount": 0,
+        "adaptiveFinalLimit": 147,
+        "adaptiveMaxInFlight": 64
+      },
+      {
+        "variant": "default-json-observed",
+        "httpPerSecond": 1199.248,
+        "heapDeltaMb": 3.889,
+        "errorCount": 0,
+        "adaptiveFinalLimit": 102,
+        "adaptiveMaxInFlight": 64
+      }
+    ]
+  },
+  "observability": {
+    "command": "npm run benchmark:json -- observability-overhead",
+    "results": [
+      {
+        "operation": "baseline asyncSucceed",
+        "perOpMs": 0.066,
+        "maxPerOpMs": 0.75
+      },
+      {
+        "operation": "withSpan start/end",
+        "perOpMs": 0.094,
+        "maxPerOpMs": 1
+      },
+      {
+        "operation": "logEffect structured sink",
+        "perOpMs": 0.081,
+        "maxPerOpMs": 1
+      },
+      {
+        "operation": "span+event+log composition",
+        "perOpMs": 0.095,
+        "maxPerOpMs": 1.25
+      },
+      {
+        "operation": "OTLP trace flush 25 spans",
+        "perOpMs": 2.237,
+        "maxPerOpMs": 12
+      }
+    ]
+  },
+  "gates": {
+    "runtimeBudget": true,
+    "httpBudget": true,
+    "observabilityBudget": true,
+    "zeroHttpErrors": true,
+    "allPassed": true
+  },
+  "limitations": [
+    "This is a controlled local benchmark, not evidence of third-party production adoption.",
+    "The HTTP target is loopback with a deterministic 1 ms server delay.",
+    "Throughput varies by machine and system load; compatibility and budget outcomes are the durable claims.",
+    "The HTTP memory figures use explicit GC and should not be compared with non-GC runs."
+  ]
+}

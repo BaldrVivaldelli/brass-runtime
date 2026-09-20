@@ -4,6 +4,9 @@ Start here:
 
 - **[Getting started](./getting-started.md)** — installation, first effects, and running examples
 - **[Architecture](./ARCHITECTURE.md)** — how the runtime is structured
+- **[v2 API preview](./api-v2.md)** — small additive facade, migration shape, and promotion gates
+- **[v1 to v2 migration](./migration-v1-to-v2.md)** — incremental namespace migration with rollback
+- **[Product boundaries](./product-boundaries.md)** — dependency rules and Agent/Perf extraction sequence
 - **[Cancellation & interruption](./cancellation.md)** — interruption semantics, scopes, and cancellable `Async`
 - **[Observability](./observability.md)** — hooks, events, sinks, tracing, and HTTP policy context
 - **[Framework integrations](./framework-integrations.md)** — Vanilla, React, Next.js, Angular, Express, Fastify, and Nest patterns
@@ -14,7 +17,9 @@ Start here:
 - **[HTTP recipes](./http-recipes.md)** — typed clients, custom transports, production adoption, observability, and config validation
 - **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths
 - **[API polish notes](./api-polish.md)** — first-release DX audit and compatibility posture
-- **[First release checklist](./release.md)** — local release gate and perf evidence workflow
+- **[Release checklist](./release.md)** — local release gate and perf evidence workflow
+- **[Production evidence](./production-evidence.md)** — evidence levels, reproducible baseline, and honest case-study path
+- **[Case studies](./case-studies/README.md)** — consent and evidence template for real adopters
 - **[Modules overview](./modules.md)** — map of core modules and where things live
 - **[AI context pack](./ai/PROJECT_MAP.md)** — compact project map, invariants, validation matrix, and public API notes
 - **[Agent module boundaries](./agent-boundaries.md)** — rules for keeping `brass-agent` isolated from the core runtime

@@ -8,6 +8,7 @@ Defined in `package.json`:
 
 - `brass-runtime` -> `dist/index.*`
 - `brass-runtime/core` -> `dist/core/index.*`
+- `brass-runtime/next` -> `dist/next.*` (experimental v2 root preview)
 - `brass-runtime/http` -> `dist/http/index.*`
 - `brass-runtime/http/testing` -> `dist/http/testing.*`
 - `brass-runtime/schema` -> `dist/schema/index.*`
@@ -23,8 +24,17 @@ CLI:
 - `brass-agent` -> `dist/agent/cli/main.cjs`
 - `brass-perf` -> `dist/perf/cli.cjs`
 
+Separately versioned alpha candidates:
+
+- `@brass/agent` owns independently built ESM, CJS, and `brass-agent` bundles;
+  its exports and declarations retain parity with the v1 Agent surface.
+- `@brass/perf` owns independently built ESM, CJS, and `brass-perf` bundles;
+  its exports and declarations retain parity with the v1 Perf surface.
+- Both are validated from installed tarballs and are not auto-published.
+
 Bundle entries are defined in `tsup.config.ts`. Package files include `dist`,
-`wasm/pkg`, `README.md`, `CHANGELOG.md`, `docs`, `LICENSE`, and `package.json`.
+`wasm/pkg`, `README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `GOVERNANCE.md`,
+`docs`, `LICENSE`, and `package.json`.
 
 ## Root export: `brass-runtime`
 

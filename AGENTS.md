@@ -178,6 +178,7 @@ Baseline confidence:
 
 ```bash
 npm run test:types
+npm run validate:boundaries
 npm test
 ```
 
@@ -185,6 +186,7 @@ Before changing public package shape:
 
 ```bash
 npm run build
+npm run validate:api
 npm run validate:cjs
 ```
 
