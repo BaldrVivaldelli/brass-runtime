@@ -22,10 +22,15 @@ const expectedProducts = new Map([
   ["perf", "@brass/perf"],
   ["engine-wasm", "@brass/engine-wasm"],
 ]);
+const expectedAttemptRuns = new Map([
+  ["agent", 35520793237],
+  ["perf", 35520792929],
+  ["engine-wasm", 35520792944],
+]);
 
-if (evidence.schemaVersion !== 1) failures.push("schemaVersion must be 1");
-if (evidence.status !== "candidates-validated-not-published") {
-  failures.push("product readiness must not claim publication before registry packages exist");
+if (evidence.schemaVersion !== 2) failures.push("schemaVersion must be 2");
+if (evidence.status !== "publication-blocked-on-npm-scope-access") {
+  failures.push("product readiness must record the verified npm scope-access blocker");
 }
 if (!Array.isArray(evidence.products) || evidence.products.length !== expectedProducts.size) {
   failures.push("all three independent products are required");
@@ -42,6 +47,17 @@ if (!Array.isArray(evidence.products) || evidence.products.length !== expectedPr
     }
     if (product.registryPackageExists !== false) {
       failures.push(`${product.id} must remain a non-publication snapshot until npm is verified`);
+    }
+    const attempt = product.latestPublicationAttempt;
+    if (attempt?.runId !== expectedAttemptRuns.get(product.id)
+      || !/^https:\/\/github\.com\//.test(attempt?.runUrl ?? "")
+      || !/^[a-f0-9]{40}$/.test(attempt?.sourceSha ?? "")
+      || !/^\d{4}-\d{2}-\d{2}T/.test(attempt?.attemptedAt ?? "")
+      || attempt?.httpStatus !== 404
+      || attempt?.result !== "scope-not-found-or-token-not-authorized"
+      || attempt?.registryMutation !== false
+      || !/^https:\/\/search\.sigstore\.dev\//.test(attempt?.provenanceLog ?? "")) {
+      failures.push(`${product.id} latest first-version publication failure evidence is incomplete`);
     }
     const dryRun = product.publishDryRun;
     const budget = productSizeBudgets?.[product.id];
@@ -61,10 +77,13 @@ if (!Array.isArray(evidence.products) || evidence.products.length !== expectedPr
 
 if (evidence.publicationControl?.branch !== "main"
   || evidence.publicationControl?.branchExistsAtRecordedAt !== true
-  || evidence.publicationControl?.branchProtectedAtRecordedAt !== false
+  || evidence.publicationControl?.branchProtectedAtRecordedAt !== true
   || evidence.publicationControl?.environment !== "npm-products"
-  || evidence.publicationControl?.environmentExistsAtRecordedAt !== false
+  || evidence.publicationControl?.environmentExistsAtRecordedAt !== true
+  || evidence.publicationControl?.environmentProtectedAtRecordedAt !== true
+  || evidence.publicationControl?.requiredReviewer !== "BaldrVivaldelli"
   || evidence.publicationControl?.npmTokenSecretExistsAtRecordedAt !== true
+  || evidence.publicationControl?.authentication !== "granular-access-token-for-first-publication"
   || evidence.publicationControl?.distTag !== "alpha"
   || evidence.publicationControl?.provenance !== true
   || evidence.publicationControl?.automaticPublish !== false) {
@@ -73,6 +92,12 @@ if (evidence.publicationControl?.branch !== "main"
 if (!Array.isArray(evidence.validatedConditions) || evidence.validatedConditions.length < 7) {
   failures.push("product validation conditions are incomplete");
 }
+if (evidence.blocker?.code !== "E404"
+  || !evidence.blocker?.causeBoundary?.includes("NPM_TOKEN")
+  || !Array.isArray(evidence.blocker?.notCausedBy)
+  || evidence.blocker.notCausedBy.length < 4) {
+  failures.push("npm scope-access blocker must remain explicit and bounded by evidence");
+}
 if (!Array.isArray(evidence.remaining) || evidence.remaining.length < 5) {
   failures.push("first-publication requirements must remain explicit");
 }
@@ -80,9 +105,14 @@ if (!Array.isArray(evidence.remaining) || evidence.remaining.length < 5) {
 for (const fragment of [
   "github.ref == 'refs/heads/main' && inputs.publish",
   "environment: npm-products",
+  "npm install --global npm@11.5.1",
+  "npm whoami",
+  "npm org ls brass",
   "npm run release:check",
   "--dry-run --access public --tag alpha --json",
   "--tag alpha --provenance",
+  "for attempt in {1..20}",
+  "sleep 15",
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ]) {
   if (!workflow.includes(fragment)) failures.push(`product publisher is missing ${fragment}`);
@@ -94,6 +124,7 @@ if (failures.length > 0) {
   process.exitCode = 1;
 } else {
   console.log(
-    `Product registry readiness validated (${evidence.products.map((product) => product.package).join(", ")}; published: no).`,
+    `Product registry readiness validated (${evidence.products.map((product) => product.package).join(", ")}; ` +
+    "published: no, blocker: npm scope access).",
   );
 }
