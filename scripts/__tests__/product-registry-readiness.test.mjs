@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("companion product registry readiness", () => {
-  it("accepts the three bounded npm scope-access failure snapshots", () => {
+  it("accepts the bounded publication and bootstrap-access failure snapshots", () => {
     expect(validate(committed)).toMatchObject({ status: 0 });
   });
 
@@ -50,6 +50,12 @@ describe("companion product registry readiness", () => {
   it("rejects evidence that still claims an unprotected publication environment", () => {
     const changed = structuredClone(committed);
     changed.publicationControl.environmentProtectedAtRecordedAt = false;
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects a bootstrap attempt that did not verify the npm identity", () => {
+    const changed = structuredClone(committed);
+    changed.bootstrapVerificationAttempt.whoami = "failed";
     expect(validate(changed)).toMatchObject({ status: 1 });
   });
 });

@@ -54,6 +54,9 @@ jobs:
           BRASS_STABILITY_REPORT_PATH: artifacts/stability/adaptive-soak.json
         run: npm run benchmark:adaptive:stability | tee artifacts/stability/adaptive-soak.log
 
+      - name: Create self-verifying run manifest
+        run: npm run stability:manifest -- artifacts/stability
+
       - name: Upload stability diagnostics
         if: always()
         uses: actions/upload-artifact@v7
@@ -61,4 +64,4 @@ jobs:
           name: brass-stability-${{ github.run_id }}
           path: artifacts/stability/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 90
