@@ -21,6 +21,11 @@ on:
         required: true
         default: false
         type: boolean
+      bootstrap:
+        description: Use NPM_TOKEN for this package's first version only; otherwise require Trusted Publishing
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -50,7 +55,55 @@ jobs:
           npm install --global npm@11.5.1
           test "$(npm --version)" = "11.5.1"
 
+      - name: Resolve the selected product
+        id: product
+        env:
+          PRODUCT: ${{ inputs.product }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          case "$PRODUCT" in
+            agent) package_name="@brass/agent"; package_dir="./packages/agent" ;;
+            perf) package_name="@brass/perf"; package_dir="./packages/perf" ;;
+            engine-wasm) package_name="@brass/engine-wasm"; package_dir="./packages/engine-wasm" ;;
+            *) echo "Unsupported product: $PRODUCT" >&2; exit 1 ;;
+          esac
+          actual_version="$(node -p "require('./$package_dir/package.json').version")"
+          test "$actual_version" = "$REQUESTED_VERSION"
+          case "$actual_version" in
+            *-alpha.*) ;;
+            *) echo "The independent prerelease channel accepts exact alpha versions only" >&2; exit 1 ;;
+          esac
+          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
+          echo "package_dir=$package_dir" >> "$GITHUB_OUTPUT"
+          echo "version=$actual_version" >> "$GITHUB_OUTPUT"
+
+      - name: Enforce the bootstrap or Trusted Publishing boundary
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+          PACKAGE_NAME: ${{ steps.product.outputs.package_name }}
+        shell: bash
+        run: |
+          package_exists=false
+          registry_result=""
+          if registry_result="$(npm view "$PACKAGE_NAME" name --json 2>&1)"; then
+            package_exists=true
+          elif ! grep -Eq 'E404|404 Not Found' <<<"$registry_result"; then
+            echo "::error::Unable to determine registry state for $PACKAGE_NAME; refusing to select an authentication mode."
+            exit 1
+          fi
+          if [ "$BOOTSTRAP" = "true" ] && [ "$package_exists" = "true" ]; then
+            echo "::error::$PACKAGE_NAME already exists; disable bootstrap and use its npm Trusted Publisher."
+            exit 1
+          fi
+          if [ "$BOOTSTRAP" != "true" ] && [ "$package_exists" = "false" ]; then
+            echo "::error::$PACKAGE_NAME does not exist; its first version requires an explicitly approved bootstrap run."
+            exit 1
+          fi
+          echo "Registry state for $PACKAGE_NAME is $([ "$package_exists" = "true" ] && echo existing || echo absent); authentication boundary accepted." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify npm bootstrap identity and @brass membership
+        if: inputs.bootstrap
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         shell: bash
@@ -70,29 +123,11 @@ jobs:
       - run: npm ci
       - run: npm run release:check
 
-      - name: Resolve and validate the selected product
-        id: product
+      - name: Validate the selected product
         env:
           PRODUCT: ${{ inputs.product }}
-          REQUESTED_VERSION: ${{ inputs.version }}
-        shell: bash
         run: |
-          case "$PRODUCT" in
-            agent) package_name="@brass/agent"; package_dir="./packages/agent" ;;
-            perf) package_name="@brass/perf"; package_dir="./packages/perf" ;;
-            engine-wasm) package_name="@brass/engine-wasm"; package_dir="./packages/engine-wasm" ;;
-            *) echo "Unsupported product: $PRODUCT" >&2; exit 1 ;;
-          esac
-          actual_version="$(node -p "require('./$package_dir/package.json').version")"
-          test "$actual_version" = "$REQUESTED_VERSION"
-          case "$actual_version" in
-            *-alpha.*) ;;
-            *) echo "The first independent channel accepts exact alpha versions only" >&2; exit 1 ;;
-          esac
           npm run "validate:product:$PRODUCT"
-          echo "package_name=$package_name" >> "$GITHUB_OUTPUT"
-          echo "package_dir=$package_dir" >> "$GITHUB_OUTPUT"
-          echo "version=$actual_version" >> "$GITHUB_OUTPUT"
 
       - name: Dry-run the exact alpha publication
         env:
@@ -128,9 +163,16 @@ jobs:
           path: artifacts/products/*.tgz
           if-no-files-found: error
 
-      - name: Publish only to the alpha channel
+      - name: Bootstrap the first alpha with the short-lived token
+        if: inputs.bootstrap
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          PACKAGE_DIR: ${{ steps.product.outputs.package_dir }}
+        run: npm publish "$PACKAGE_DIR" --ignore-scripts --access public --tag alpha --provenance
+
+      - name: Publish alpha with npm Trusted Publishing
+        if: ${{ !inputs.bootstrap }}
+        env:
           PACKAGE_DIR: ${{ steps.product.outputs.package_dir }}
         run: npm publish "$PACKAGE_DIR" --ignore-scripts --access public --tag alpha --provenance
 
