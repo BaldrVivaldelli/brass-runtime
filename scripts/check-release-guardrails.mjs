@@ -55,6 +55,16 @@ for (const environmentName of ["npm-next", "npm-products"]) {
     || environment.protectedBranchesOnly !== true) {
     failures.push(`${environmentName} must retain the explicit single-maintainer protected-branch approval policy`);
   }
+  const requiredSecretNames = environment?.requiredSecretNames;
+  if (!Array.isArray(requiredSecretNames)) {
+    failures.push(`${environmentName} required secret names must be explicit`);
+  } else if (environmentName === "npm-products"
+    && (requiredSecretNames.length !== 1
+      || requiredSecretNames[0] !== "NPM_PRODUCT_BOOTSTRAP_TOKEN")) {
+    failures.push("npm-products must require only the isolated NPM_PRODUCT_BOOTSTRAP_TOKEN");
+  } else if (environmentName === "npm-next" && requiredSecretNames.length !== 0) {
+    failures.push("npm-next must remain tokenless because it uses Trusted Publishing");
+  }
 }
 
 if (!Array.isArray(policy.limitations) || policy.limitations.length < 3) {

@@ -22,7 +22,7 @@ on:
         default: false
         type: boolean
       bootstrap:
-        description: Use NPM_TOKEN for this package's first version only; otherwise require Trusted Publishing
+        description: Use the isolated product bootstrap token for this package's first version only; otherwise require Trusted Publishing
         required: true
         default: false
         type: boolean
@@ -105,12 +105,12 @@ jobs:
       - name: Verify npm bootstrap identity and @brass membership
         if: inputs.bootstrap
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PRODUCT_BOOTSTRAP_TOKEN }}
         shell: bash
         run: |
           npm_identity="$(npm whoami)"
           if ! npm org ls brass "@$npm_identity" --json >/dev/null; then
-            echo "::error::NPM_TOKEN authenticates as $npm_identity but cannot read membership in the brass npm organization. Create or join the organization and grant the token organization read plus @brass package-scope publish access."
+            echo "::error::NPM_PRODUCT_BOOTSTRAP_TOKEN authenticates as $npm_identity but cannot read membership in the brass npm organization. Create or join the organization and grant the token organization read plus @brass package-scope publish access."
             exit 1
           fi
           echo "npm bootstrap identity $npm_identity can read @brass organization membership." >> "$GITHUB_STEP_SUMMARY"
@@ -166,7 +166,7 @@ jobs:
       - name: Bootstrap the first alpha with the short-lived token
         if: inputs.bootstrap
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_PRODUCT_BOOTSTRAP_TOKEN }}
           PACKAGE_DIR: ${{ steps.product.outputs.package_dir }}
         run: npm publish "$PACKAGE_DIR" --ignore-scripts --access public --tag alpha --provenance
 
