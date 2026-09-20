@@ -21,8 +21,8 @@ compatibility, or operational evidence does not close a workstream.
 - The public first-party `create-brass` consumer independently retains that
   migration's distribution candidate: four validation modes across two
   templates pass (8/8 builds), with a hashed tarball and protected release
-  controls. Its npm beta remains unpublished after a pre-publish authentication
-  failure, and the record explicitly does not count as external adoption.
+  controls. OIDC validation now passes, but the beta awaits npm Trusted
+  Publisher confirmation; the record is not external adoption.
 - Public discovery currently shows 8,760 npm downloads in the last year but
   only 1 in the last week; public manifest search found no external repository.
   These are reach signals, not users. A Git-ignored private adopter inventory
