@@ -1,9 +1,8 @@
 # Private adopter inventory
 
-Package downloads and public code search are discovery signals, not adopter
-records. Real adoption tracking lives in `.brass-private/adopters.json`, which
-is ignored by Git and must not contain credentials, raw production payloads, or
-unredacted traces.
+Downloads and code search are discovery signals, not adopters. Keep real
+observations in Git-ignored `.brass-private/adopters.json`; never store secrets,
+raw production payloads, or unredacted traces.
 
 Start from this shape:
 
@@ -33,11 +32,15 @@ Start from this shape:
 }
 ```
 
-Only `publishable` consent permits naming the adopter or committing its
-workload data. Aggregate retention and upgrade-lag metrics require current
-`lastVerifiedAt` observations; do not derive them from npm download counts.
+Validate and aggregate locally without emitting identity, owner, or evidence
+references:
 
-For public projects, use the repository's **Brass adoption report** issue form.
-It records the exact version, deployment stage, surfaces, workload, evidence,
-migration gaps, and one of three explicit consent levels. Public issues are not
-a substitute for private handoff when evidence contains restricted data.
+```bash
+BRASS_ADOPTION_REPORT_PATH=.brass-private/adoption-report.json npm run adoption:report
+```
+
+It derives 30/90-day activity from observation dates, rejects stale flags, and
+reports version distribution plus median upgrade lag. Only `publishable`
+consent permits naming or committing a workload. Use the **Brass adoption
+report** issue form for public data and private handoff for restricted evidence;
+never infer retention from downloads.
