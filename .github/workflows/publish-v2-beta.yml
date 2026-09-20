@@ -93,12 +93,13 @@ jobs:
         shell: bash
         run: |
           current_next=""
-          for attempt in 1 2 3 4 5 6; do
+          for attempt in {1..20}; do
             current_next="$(npm view brass-runtime dist-tags.next 2>/dev/null || true)"
             if [ "$current_next" = "$BRASS_BETA_VERSION" ]; then
               break
             fi
-            sleep 5
+            echo "Waiting for npm registry propagation ($attempt/20)..."
+            sleep 15
           done
           current_latest="$(npm view brass-runtime dist-tags.latest)"
           test "$current_next" = "$BRASS_BETA_VERSION"

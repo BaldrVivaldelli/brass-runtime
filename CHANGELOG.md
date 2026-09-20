@@ -58,7 +58,7 @@
   and the generated 546-symbol disposition leaves no unmapped v1 export.
 - Added read-only migration analysis, three measured internal lighthouse
   migrations, reproducible adoption/readiness evidence, and explicit
-  non-claims for external production adoption and unpublished registry state.
+  non-claims for external production adoption.
 - Added independently built `@brass/agent`, `@brass/perf`, and
   `@brass/engine-wasm` alpha candidates with self-contained declarations,
   packed-consumer smokes, individual size budgets, and protected manual
@@ -72,6 +72,9 @@
 - Pinned and verified npm `11.5.1` in that publisher, satisfying npm's minimum
   CLI version for the OIDC exchange instead of silently falling back to token
   authentication with the npm 10 CLI bundled by Node 22.
+- Published `brass-runtime@2.0.0-beta.0` on `next` with npm provenance while
+  preserving `latest=1.22.0`, then recorded registry integrity, artifact, and
+  rollback evidence and allowed for npm's asynchronous indexing delay.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.
