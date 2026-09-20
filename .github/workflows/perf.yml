@@ -1,0 +1,79 @@
+name: Perf
+
+on:
+  pull_request:
+    paths:
+      - "src/perf/**"
+      - "src/benchmarks/**"
+      - "src/core/**"
+      - "src/http/**"
+      - "src/observability/**"
+      - "packages/perf/**"
+      - "scripts/check-product-boundaries.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "tsconfig.perf.json"
+      - "tsup.config.ts"
+      - "tsup.perf.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/perf.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/perf/**"
+      - "src/benchmarks/**"
+      - "src/core/**"
+      - "src/http/**"
+      - "src/observability/**"
+      - "packages/perf/**"
+      - "scripts/check-product-boundaries.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "tsconfig.perf.json"
+      - "tsup.config.ts"
+      - "tsup.perf.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/perf.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run test:types:perf
+      - run: npm run test:perf
+      - run: npm run build
+      - run: npm run validate:product:perf
+
+      - name: Pack Perf release candidate
+        run: |
+          mkdir -p artifacts/perf
+          npm pack --ignore-scripts --pack-destination artifacts/perf ./packages/perf
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: brass-perf-package
+          path: artifacts/perf/*.tgz
+          if-no-files-found: error

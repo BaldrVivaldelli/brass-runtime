@@ -1,7 +1,9 @@
 # Agent release readiness
 
 The current Brass Agent work is suitable for an experimental branch or alpha
-release. It is not yet a stable release candidate. CI/release automation is intentionally deferred until the end; local install and doctor commands are the current readiness path.
+release candidate. It is not stable and is not auto-published. The path-scoped
+`Agent` and `VS Code` workflows now validate and upload npm/VSIX candidates;
+local install and doctor commands remain the dogfooding path.
 
 ## Good enough to publish to a repo
 
@@ -47,18 +49,20 @@ Before calling it stable, the project should have:
 
 - boring local install via `npm run agent:vscode:install`
 - clean local diagnostics via `npm run agent:doctor`
-- clean, repeatable `npm ci && npm run build` in CI, added later
+- clean, repeatable `npm ci && npm run build` in CI
 - unit tests for `src/agent/core` decisions, patch extraction, rollback, config,
   redaction, batch parsing, and CI exit codes
 - integration tests for CLI flows with fake LLM and temporary git workspaces
-- extension compile/package CI for `extensions/vscode-brass-agent`
-- `.vsix` artifact generation in GitHub Releases
+- extension compile/package CI for `extensions/vscode-brass-agent` (implemented)
+- `.vsix` candidate artifact generation (implemented); a deliberate published
+  release and marketplace flow remain pending
 - documented security model for command allowlists, approvals, redaction,
   context exclusions, patch storage, and rollback
 - config schema validation with helpful errors
 - a public compatibility statement for Node.js, VS Code, package managers, and
   model providers
-- a release workflow for runtime package, CLI, and VS Code extension versioning
+- a coordinated changelog/version policy before stable runtime, CLI, and VS
+  Code publication
 - marketplace readiness only after local `.vsix` installs are boring and reliable
 
 ## Recommended versioning

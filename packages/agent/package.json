@@ -1,0 +1,49 @@
+{
+  "name": "@brass/agent",
+  "version": "0.1.0-alpha.0",
+  "description": "Independently versioned Brass Agent package",
+  "license": "MIT",
+  "author": "Augusto Vivaldelli",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./index.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "brass-agent": "./dist/cli.cjs"
+  },
+  "files": [
+    "dist",
+    "index.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "npm --prefix ../.. run build:product:agent"
+  },
+  "peerDependencies": {
+    "brass-runtime": ">=1.18.3 <2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaldrVivaldelli/brass-runtime.git",
+    "directory": "packages/agent"
+  },
+  "bugs": {
+    "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
+  }
+}

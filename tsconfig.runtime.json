@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "src/index.ts",
+    "src/next.ts",
+    "src/core/**/*.ts",
+    "src/schema/**/*.ts",
+    "src/http/**/*.ts",
+    "src/observability/**/*.ts"
+  ]
+}

@@ -609,8 +609,13 @@ const result = await Stream
 | `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
 | `brass-runtime/perf` | Runtime, HTTP, observability, memory, and baseline performance profiler |
 | `brass-runtime/agent` | Brass Agent core (experimental) |
+| `@brass/perf` | Independently built Perf candidate with v1 export/type parity |
+| `@brass/agent` | Independently built Agent library/CLI candidate with v1 export/type parity |
 
-CLI: `brass-agent`
+The `brass-runtime/perf` and `brass-runtime/agent` paths remain supported
+through v1. `@brass/perf` and `@brass/agent` are release-candidate packages,
+not an assertion that the npm namespace has already been published. Their CI
+artifacts install next to `brass-runtime`. CLI: `brass-agent` and `brass-perf`.
 
 ### Platform support
 
@@ -714,6 +719,7 @@ npm run test:coverage # coverage with baseline gate
 npm run validate:browser # rebundle browser entrypoints without Node built-ins
 npm run validate:wasm # reject missing/stale strict-WASM artifacts
 npm run validate:package # require all Node/browser/WASM tarball artifacts
+npm run validate:products # install packed Agent/Perf adapters and smoke ESM/CJS/types/CLI
 npm run release:check # full release gate: types, tests, build, CJS, perf budgets
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
 npm run benchmark:runtime        # Runtime Performance Track
