@@ -20,6 +20,9 @@ const required = [
   "dist/browser/core/index.mjs",
   "dist/browser/http/index.mjs",
   "dist/browser/observability/index.mjs",
+  "docs/migration-v1-to-v2.md",
+  "docs/production-evidence.md",
+  "docs/support-and-maintenance.md",
   "wasm/pkg/brass_runtime_wasm_engine.js",
   "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
   "wasm/pkg/brass-runtime-build.json",
@@ -36,6 +39,14 @@ const unpublishedDuplicateEsm = packageFiles
   .filter((path) => path.startsWith("dist/") && path.endsWith(".js"));
 if (unpublishedDuplicateEsm.length > 0) {
   console.error(`Package contains unpublished duplicate ESM artifacts: ${unpublishedDuplicateEsm.join(", ")}`);
+  process.exit(1);
+}
+
+const sourceOnlyEvidence = packageFiles
+  .map((file) => file.path)
+  .filter((path) => path.startsWith("docs/evidence/"));
+if (sourceOnlyEvidence.length > 0) {
+  console.error(`Package contains source-only operational evidence: ${sourceOnlyEvidence.join(", ")}`);
   process.exit(1);
 }
 

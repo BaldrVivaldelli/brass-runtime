@@ -6,11 +6,11 @@ being oversold.
 | Level | What it proves | Current evidence |
 | --- | --- | --- |
 | Contract | Package shape, types, compatibility, cancellation semantics | CI tests, API fingerprint, packed-consumer smoke tests |
-| Production-like | Behavior under controlled runtime, HTTP, memory, and observability workloads | [`production-like-baseline-2026-09-19.json`](./evidence/production-like-baseline-2026-09-19.json) |
+| Production-like | Behavior under controlled runtime, HTTP, memory, and observability workloads | [`production-like-baseline-2026-09-19.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/production-like-baseline-2026-09-19.json) |
 | External production | Outcomes in an identifiable, consenting user workload | Not yet claimed |
 
 Public discovery signals are recorded in
-[`adoption-discovery-2026-09-20.json`](./evidence/adoption-discovery-2026-09-20.json).
+[`adoption-discovery-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/adoption-discovery-2026-09-20.json).
 They show package reach and two GitHub dependency-graph repositories. Both are
 first-party: this repository and `create-brass`, the verified template consumer.
 No external public consumer is currently identifiable, and these signals must
@@ -30,7 +30,7 @@ through the repository's **Brass adoption report** issue form. The form warns
 against posting private traces, credentials, or restricted customer data.
 
 The v2 package and registry state are captured in
-[`v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
+[`v2-beta-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-beta-readiness-2026-09-20.json).
 It records the protected OIDC publication, npm integrity and provenance, the
 public registry tarball replay, and rollback controls. npm currently resolves
 `next` to `2.0.0-beta.0` while `latest` remains `1.22.0`.
@@ -40,9 +40,9 @@ beta package and core lighthouse, and retained a digest-addressed package
 artifact.
 
 The first v2 import inventory is recorded as
-[`v2-migration-assessment-2026-09-20.json`](./evidence/v2-migration-assessment-2026-09-20.json).
+[`v2-migration-assessment-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-migration-assessment-2026-09-20.json).
 Its completed, anonymized migration is recorded separately as
-[`v2-migration-lighthouse-1-2026-09-20.json`](./evidence/v2-migration-lighthouse-1-2026-09-20.json).
+[`v2-migration-lighthouse-1-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-migration-lighthouse-1-2026-09-20.json).
 The migration built both template variants against the packed 1.22.0 artifact
 and retained `zipPar` as its single distinct v1 fallback. Both variants also
 build unchanged after replacing only the local facade with its stable-v1
@@ -51,14 +51,14 @@ evidence, not a public case study, and one consumer does not justify changing
 the v2 API.
 
 The second internal migration,
-[`v2-migration-lighthouse-2-2026-09-20.json`](./evidence/v2-migration-lighthouse-2-2026-09-20.json),
+[`v2-migration-lighthouse-2-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-migration-lighthouse-2-2026-09-20.json),
 moves the shared Express runtime, Layer, and LayerContext imports to the preview.
 Its packed smoke verifies types, HTTP, incoming trace propagation, health,
 metrics, and `SIGTERM` shutdown. `RuntimeService` and `makeConfigLayer` remain
 measured v1 fallbacks; this internal example is not external-production proof.
 
 The third internal migration,
-[`v2-migration-lighthouse-3-2026-09-20.json`](./evidence/v2-migration-lighthouse-3-2026-09-20.json),
+[`v2-migration-lighthouse-3-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-migration-lighthouse-3-2026-09-20.json),
 promotes the core Effect and Stream example from `/next` to the beta package
 root. It produces identical results after rollback to the beta `/next` facade
 and to the exact published `brass-runtime@1.22.0` tarball. Its timestamped
@@ -94,19 +94,26 @@ npm run validate:evidence
 ```
 
 A full local execution of the scheduled stability budgets is recorded in
-[`stability-local-2026-09-20.json`](./evidence/stability-local-2026-09-20.json):
+[`stability-local-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stability-local-2026-09-20.json):
 ten runtime retained-memory rounds, 100,000 observed HTTP calls with zero
 errors, and 100,000 samples each for stable and saturation/recovery limiter
 scenarios. The record includes hashes for the Git-ignored raw reports and is
 explicitly local production-like evidence.
 
 The corresponding cross-runner execution is recorded in
-[`stability-ci-2026-09-20.json`](./evidence/stability-ci-2026-09-20.json). GitHub
+[`stability-ci-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stability-ci-2026-09-20.json). GitHub
 Actions run `35525819646` passed the semantic/fault corpus, ten runtime rounds,
 100,000 observed HTTP calls with zero errors, and both 100,000-sample limiter
 scenarios. Its retained artifact has an ID, expiry, byte count, and SHA-256 for
 each raw report; the validator can optionally re-hash a downloaded artifact
 directory rather than trusting the summary alone.
+
+The same record contains a second retained manual run, `35536301076`, on the
+post-maintenance `main` SHA. It repeated every gate with 0.231 MB runtime heap
+trend, 100,000 error-free observed HTTP calls, and both limiter scenarios. Its
+downloaded artifact was independently re-hashed. These two same-day runs prove
+repeatability across repository states, not a weekly trend; scheduled runs must
+still accumulate over time.
 
 ## Reproduce the workloads
 

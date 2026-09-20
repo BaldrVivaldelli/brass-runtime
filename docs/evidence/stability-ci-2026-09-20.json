@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "github-actions-stability",
   "recordedAt": "2026-09-20T17:29:32Z",
   "packageVersion": "1.22.0",
@@ -98,15 +98,125 @@
     ],
     "passed": true
   },
-  "decision": "retained-ci-stability-gates-passed",
+  "repeatValidation": {
+    "recordedAt": "2026-09-20T20:45:34Z",
+    "sourceSha": "7afb4df45b76d55074ea4ffac76d52ee6dbeac18",
+    "workflow": {
+      "runId": 35536301076,
+      "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35536301076",
+      "jobId": 106145839843,
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "startedAt": "2026-09-20T20:40:34Z",
+      "completedAt": "2026-09-20T20:45:34Z",
+      "durationSeconds": 300
+    },
+    "environment": {
+      "runner": "ubuntu-latest",
+      "platform": "linux-x64",
+      "node": "22.23.2",
+      "forcedGc": true,
+      "wasmAvailable": true
+    },
+    "artifact": {
+      "id": 10612641947,
+      "name": "brass-stability-35536301076",
+      "sizeBytes": 5039,
+      "archiveDigest": "sha256:40e05d7d4a6c56da6d25fd52c6fd1bda1878f39df3d91c20059f0c68423b81fc",
+      "expiresAt": "2026-10-20T20:45:30Z",
+      "files": {
+        "runtime-soak.json": {
+          "bytes": 36134,
+          "sha256": "94d2d388e1233d430881d3114b0e36184f1438aad23ef3ca1a22610022e5b088"
+        },
+        "http-soak.json": {
+          "bytes": 2849,
+          "sha256": "fb46b3afdb9519caf6ddee94788ecff225380c2f41bb6f3158cb896ca98d8a43"
+        },
+        "adaptive-soak.json": {
+          "bytes": 2585,
+          "sha256": "8c078fc5a374cc8309eb663f69e915104c06d371dbb79036f17d8d6eeed8c6f0"
+        }
+      }
+    },
+    "conformance": {
+      "command": "npm run test:stability",
+      "result": "passed"
+    },
+    "runtime": {
+      "rounds": 10,
+      "iterationsPerRound": 5000,
+      "chainDepth": 100,
+      "heapTrendMb": 0.231,
+      "totalHeapDeltaMb": 0.219,
+      "totalRssDeltaMb": 17.992,
+      "throughputTrendPercent": 30.202,
+      "passed": true
+    },
+    "http": {
+      "calls": 100000,
+      "concurrency": 128,
+      "delayMs": 1,
+      "throughputPerSecond": 1121.315,
+      "requestP50Ms": 112.066,
+      "requestP95Ms": 134.776,
+      "requestP99Ms": 150.989,
+      "successes": 100000,
+      "errors": 0,
+      "heapDeltaMb": 12.386,
+      "rssDeltaMb": 104.316,
+      "adaptiveFinalLimit": 256,
+      "adaptiveMaxInFlight": 64,
+      "observedFinishedSpans": 10000,
+      "passed": true
+    },
+    "adaptive": {
+      "samplesPerScenario": 100000,
+      "keyCount": 64,
+      "results": [
+        {
+          "scenario": "stable",
+          "stateCount": 64,
+          "finalLimit": 8192,
+          "limitChanges": 2304,
+          "p50": 21,
+          "p99": 24,
+          "samplesPerSecond": 10185.782
+        },
+        {
+          "scenario": "saturation-recovery",
+          "stateCount": 64,
+          "finalLimit": 1433,
+          "limitChanges": 6825,
+          "p50": 18,
+          "p99": 20,
+          "samplesPerSecond": 10184.354
+        }
+      ],
+      "passed": true
+    },
+    "decision": "retained-ci-repeat-passed"
+  },
+  "comparison": {
+    "runCount": 2,
+    "distinctSourceShas": 2,
+    "relationship": "same-day-repeat-after-maintenance",
+    "allBudgetsPassed": true,
+    "weeklyTrendEstablished": false,
+    "claimBoundary": "Two retained manual runs prove repeatability across repository states; they do not establish a weekly trend or external production behavior."
+  },
+  "decision": "two-retained-ci-stability-gates-passed",
   "limitations": [
-    "This is one GitHub-hosted runner execution, not a long-term trend or external production evidence.",
+    "These are two same-day manual GitHub-hosted runner executions, not a long-term weekly trend or external production evidence.",
     "The downloadable raw artifact expires after 30 days; committed hashes and run metadata preserve its identity after expiration.",
     "Absolute throughput and memory values can vary across shared runners; versioned budgets and semantic invariants are the release decision."
   ],
   "reproduce": [
     "gh run view 35525819646",
     "gh run download 35525819646 --name brass-stability-35525819646",
+    "sha256sum runtime-soak.json http-soak.json adaptive-soak.json",
+    "gh run view 35536301076",
+    "gh run download 35536301076 --name brass-stability-35536301076",
     "sha256sum runtime-soak.json http-soak.json adaptive-soak.json"
   ]
 }
