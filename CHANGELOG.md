@@ -59,6 +59,9 @@
 - Added read-only migration analysis, three measured internal lighthouse
   migrations, reproducible adoption/readiness evidence, and explicit
   non-claims for external production adoption.
+- Linked the first-party `create-brass` migration to its commit-pinned public
+  readiness record, including 8/8 template builds and the retained candidate
+  digest, without promoting it to an external-adoption claim.
 - Added independently built `@brass/agent`, `@brass/perf`, and
   `@brass/engine-wasm` alpha candidates with self-contained declarations,
   packed-consumer smokes, individual size budgets, and protected manual
