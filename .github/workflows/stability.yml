@@ -6,6 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -56,6 +57,35 @@ jobs:
 
       - name: Create self-verifying run manifest
         run: npm run stability:manifest -- artifacts/stability
+
+      - name: Validate retained scheduled history
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRASS_STABILITY_TREND_REPORT_PATH: artifacts/stability/stability-trend.json
+        run: |
+          set -euo pipefail
+          current_dir="artifacts/stability-history/${GITHUB_RUN_ID}"
+          mkdir -p "$current_dir"
+          cp artifacts/stability/{stability-run-manifest,runtime-soak,http-soak,adaptive-soak}.json "$current_dir/"
+
+          gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow stability.yml \
+            --event schedule \
+            --status success \
+            --limit 3 \
+            --json databaseId \
+            --jq '.[].databaseId' |
+          while IFS= read -r prior_run_id; do
+            [[ "$prior_run_id" =~ ^[0-9]+$ ]]
+            gh run download "$prior_run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name "brass-stability-$prior_run_id" \
+              --dir "artifacts/stability-history/$prior_run_id"
+          done
+
+          npm run stability:trend -- --allow-incomplete artifacts/stability-history
 
       - name: Upload stability diagnostics
         if: always()
