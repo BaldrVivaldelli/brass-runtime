@@ -118,6 +118,7 @@
     "api:v2-map:update": "node scripts/check-v2-export-disposition.mjs --write",
     "validate:v2-map": "node scripts/check-v2-export-disposition.mjs",
     "migrate:v2:analyze": "node scripts/analyze-v2-migration.mjs",
+    "adoption:report": "node scripts/report-adopter-metrics.mjs",
     "validate:example:express": "node scripts/validate-express-lighthouse.mjs",
     "validate:example:v2-core": "node scripts/validate-v2-core-lighthouse.mjs",
     "validate:browser": "node scripts/validate-browser.mjs",
