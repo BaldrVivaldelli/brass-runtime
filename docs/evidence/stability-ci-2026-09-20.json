@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "kind": "github-actions-stability",
   "recordedAt": "2026-09-20T17:29:32Z",
   "packageVersion": "1.22.0",
@@ -197,6 +197,66 @@
     },
     "decision": "retained-ci-repeat-passed"
   },
+  "manifestValidation": {
+    "recordedAt": "2026-09-20T21:50:19Z",
+    "sourceSha": "37744632732424c7a81ebc91e1139049ca2d8153",
+    "workflow": {
+      "runId": 35539644454,
+      "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35539644454",
+      "jobId": 106154888612,
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "startedAt": "2026-09-20T21:45:15Z",
+      "completedAt": "2026-09-20T21:50:18Z",
+      "durationSeconds": 303
+    },
+    "environment": {
+      "runner": "ubuntu-latest",
+      "platform": "linux-x64",
+      "node": "22.23.2",
+      "forcedGc": true,
+      "wasmAvailable": true
+    },
+    "artifact": {
+      "id": 10614257693,
+      "name": "brass-stability-35539644454",
+      "sizeBytes": 6322,
+      "archiveDigest": "sha256:5884d57f19675cf7bb9a010488177c7479431d2aa313f5e4bb11809ece58f087",
+      "expiresAt": "2026-12-19T21:45:12Z",
+      "retentionDays": 90,
+      "files": {
+        "stability-run-manifest.json": {
+          "bytes": 2702,
+          "sha256": "055390f042999763c9fff8f95a0342fde0af84b79801de53def38d408ed5cfa7"
+        },
+        "runtime-soak.json": {
+          "bytes": 36151,
+          "sha256": "5544a995e8f977a0ee8f47450de0c78b6846fa186f14b5763b299fd8557c882c"
+        },
+        "http-soak.json": {
+          "bytes": 2842,
+          "sha256": "8e2c728bec2affdae840838b862282ca117d1f0b257865984ee087f74ef07332"
+        },
+        "adaptive-soak.json": {
+          "bytes": 2597,
+          "sha256": "f48bcde266c897681e255db2ddf128604f76df80f6c97d7d651294df9548c8ae"
+        }
+      }
+    },
+    "manifest": {
+      "schemaVersion": 1,
+      "kind": "github-actions-stability-run",
+      "budgetsVersion": 1,
+      "sourceRef": "refs/heads/main",
+      "event": "workflow_dispatch",
+      "scheduled": false,
+      "decision": "stability-gates-passed",
+      "rawHashesMatched": true,
+      "metricsDerivedFromRawReports": true,
+      "weeklyTrendEligible": false
+    },
+    "decision": "post-merge-manifest-and-retention-passed"
+  },
   "comparison": {
     "runCount": 2,
     "distinctSourceShas": 2,
@@ -205,10 +265,10 @@
     "weeklyTrendEstablished": false,
     "claimBoundary": "Two retained manual runs prove repeatability across repository states; they do not establish a weekly trend or external production behavior."
   },
-  "decision": "two-retained-ci-stability-gates-passed",
+  "decision": "two-retained-ci-stability-gates-and-post-merge-manifest-proof-passed",
   "limitations": [
-    "These are two same-day manual GitHub-hosted runner executions, not a long-term weekly trend or external production evidence.",
-    "The downloadable raw artifact expires after 30 days; committed hashes and run metadata preserve its identity after expiration.",
+    "All three executions are same-day manual GitHub-hosted runner samples, not a long-term weekly trend or external production evidence.",
+    "The first two raw artifacts expire after 30 days; the post-merge manifest artifact proves the new 90-day retention policy while committed hashes preserve every artifact identity after expiration.",
     "Absolute throughput and memory values can vary across shared runners; versioned budgets and semantic invariants are the release decision."
   ],
   "reproduce": [
@@ -217,6 +277,10 @@
     "sha256sum runtime-soak.json http-soak.json adaptive-soak.json",
     "gh run view 35536301076",
     "gh run download 35536301076 --name brass-stability-35536301076",
-    "sha256sum runtime-soak.json http-soak.json adaptive-soak.json"
+    "sha256sum runtime-soak.json http-soak.json adaptive-soak.json",
+    "gh run view 35539644454",
+    "gh run download 35539644454 --name brass-stability-35539644454",
+    "sha256sum stability-run-manifest.json runtime-soak.json http-soak.json adaptive-soak.json",
+    "npm run stability:trend -- <directory-containing-stability-run-manifest.json> # expected to reject this manual-only sample as a weekly trend"
   ]
 }
