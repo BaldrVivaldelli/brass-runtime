@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 
 import * as root from "../index";
 import * as core from "../core";
+import * as next from "../next";
 import * as http from "../http";
 import * as httpTesting from "../http/testing";
 import * as observability from "../observability";
@@ -13,6 +14,7 @@ import * as agent from "../agent";
 const EXACT_EXPORT_SNAPSHOTS = Object.freeze({
   root: { count: 323, sha256: "4630f1eb941a5c011dbcd02b8c8f8bdd550e13f4797d75f3c67c4c5de05ff442" },
   core: { count: 213, sha256: "9ccc40e704735494964da8b2e1a76cac84b7eef2ccb3584e76cd736b6542c66f" },
+  next: { count: 18, sha256: "0ca5ba96279f716ed9693e97842db434af788d63510bc21408e087387450e9e5" },
   http: { count: 156, sha256: "6413697e1da8b34120c8d6b6112ee39159870bdbad0fe1f86c27837bce43c253" },
   httpTesting: { count: 12, sha256: "096ea6dca6b1e10f96e9e3cda9f0188f54dd19040d1e7c6ee2bec4acc95f7851" },
   schema: { count: 12, sha256: "bfd3feaf9db8a8367da8ab9ced8d6a5adba4110b167ef7487ef89ffd8168b0bb" },
@@ -69,6 +71,21 @@ const REQUIRED_EXPORTS = Object.freeze({
     "Schedule",
     "makeTestRuntime",
   ],
+  next: [
+    "Effect",
+    "Cause",
+    "Exit",
+    "Runtime",
+    "makeRuntime",
+    "runPromise",
+    "runExit",
+    "Scope",
+    "Resource",
+    "Layer",
+    "Schedule",
+    "Stream",
+    "Pipeline",
+  ],
   http: [
     "makeDefaultHttpClient",
     "makeDefaultHttpClientLayer",
@@ -110,7 +127,7 @@ const REQUIRED_EXPORTS = Object.freeze({
 
 describe("public API release snapshot", () => {
   it("freezes the complete runtime export surface for every package entrypoint", () => {
-    const modules = { root, core, http, httpTesting, schema, observability, perf, agent };
+    const modules = { root, core, next, http, httpTesting, schema, observability, perf, agent };
     const actual = Object.fromEntries(
       Object.entries(modules).map(([name, module]) => [name, exportFingerprint(module)]),
     );
@@ -121,6 +138,7 @@ describe("public API release snapshot", () => {
   it("keeps first-release DX exports discoverable", () => {
     expectMissing("root", root, REQUIRED_EXPORTS.root);
     expectMissing("core", core, REQUIRED_EXPORTS.core);
+    expectMissing("next", next, REQUIRED_EXPORTS.next);
     expectMissing("http", http, REQUIRED_EXPORTS.http);
     expectMissing("observability", observability, REQUIRED_EXPORTS.observability);
     expectMissing("schema", schema, REQUIRED_EXPORTS.schema);
@@ -128,7 +146,7 @@ describe("public API release snapshot", () => {
   });
 
   it("does not leak obvious generated or test-only symbols from public barrels", () => {
-    for (const [name, module] of Object.entries({ root, core, http, observability, schema, perf })) {
+    for (const [name, module] of Object.entries({ root, core, next, http, observability, schema, perf })) {
       const leaked = Object.keys(module).filter((key) =>
         key.includes("__")
         || key.endsWith("TypeTest")

@@ -25,6 +25,7 @@ function copyWasmAssets() {
 
 const entry = {
   index: "src/index.ts",
+  next: "src/next.ts",
   "core/index": "src/core/index.ts",
   "http/index": "src/http/index.ts",
   "http/testing": "src/http/testing.ts",
@@ -101,6 +102,7 @@ export default defineConfig([
   {
     entry: {
       "browser/index": "src/index.ts",
+      "browser/next": "src/next.ts",
       "browser/core/index": "src/core/index.ts",
       "browser/http/index": "src/http/browser.ts",
       "browser/observability/index": "src/observability/index.ts",

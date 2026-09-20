@@ -37,6 +37,12 @@
       "import": "./dist/core/index.mjs",
       "require": "./dist/core/index.cjs"
     },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "browser": "./dist/browser/next.mjs",
+      "import": "./dist/next.mjs",
+      "require": "./dist/next.cjs"
+    },
     "./observability": {
       "types": "./dist/observability/index.d.ts",
       "browser": "./dist/browser/observability/index.mjs",

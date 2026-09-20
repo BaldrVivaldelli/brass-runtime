@@ -43,6 +43,7 @@ export default defineConfig({
         "src/http/lifecycle/types.ts",
         "src/http/prewarm/types.ts",
         "src/core/runtime/dx-type-tests.ts",
+        "src/next-type-tests.ts",
         "src/http/schema-type-tests.ts",
         "src/schema/type-tests.ts",
         "src/http/browser.ts",

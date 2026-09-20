@@ -6,6 +6,7 @@ const root = process.cwd();
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const browserExports = {
   ".": "./dist/browser/index.mjs",
+  "./next": "./dist/browser/next.mjs",
   "./core": "./dist/browser/core/index.mjs",
   "./http": "./dist/browser/http/index.mjs",
   "./observability": "./dist/browser/observability/index.mjs",
@@ -22,6 +23,7 @@ for (const [subpath, expected] of Object.entries(browserExports)) {
 
 const entries = [
   "dist/browser/index.mjs",
+  "dist/browser/next.mjs",
   "dist/browser/core/index.mjs",
   "dist/browser/http/index.mjs",
   "dist/browser/observability/index.mjs",

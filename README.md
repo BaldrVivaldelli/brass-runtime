@@ -54,6 +54,27 @@ index/search pilot with TypeScript fallback.
 
 ## Quick start
 
+### Preview the smaller v2 API
+
+The additive `brass-runtime/next` entrypoint reduces the root to 18 runtime
+values while v1 remains compatible. It is experimental until the next major
+release:
+
+```ts
+import { Effect, runPromise } from "brass-runtime/next";
+
+const program = Effect.flatMap(
+  Effect.succeed(20),
+  (left) => Effect.map(Effect.succeed(22), (right) => left + right),
+);
+
+console.log(await runPromise(program)); // 42
+```
+
+See the [v2 contract](./docs/api-v2.md) and
+[incremental migration guide](./docs/migration-v1-to-v2.md) before adopting the
+preview.
+
 ### Run an effect
 
 ```ts
