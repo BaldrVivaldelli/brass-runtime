@@ -104,11 +104,13 @@ compatibility, or operational evidence does not close a workstream.
 2. Provide migration tooling that inventories v1 imports, maps supported names
    to v2 namespaces, and reports manual migrations without modifying files by
    default.
-3. Maintain the published `2.0.0-beta` on the `next` prerelease channel with packed-package
-   Node, browser, ESM, CJS, declaration, and rollback validation.
+3. Maintain the published `2.0.0-beta` on the `next` prerelease channel with
+   packed-package Node, browser, ESM, CJS, declaration, and rollback validation.
 4. Publish Agent and Perf under independent versions. Preserve the v1
    `brass-runtime/agent` and `/perf` compatibility paths until the documented
-   major-version boundary.
+   major-version boundary. Their candidates and protected publication route are
+   ready; first publication is blocked only on ownership or publish permission
+   for the npm `@brass` scope, as recorded in the dated registry evidence.
 5. **Decision implemented:** WASM is an optional independently versioned engine
    candidate. It accounts for 315,792 unpacked bytes and no verified adopter
    requires it; v1 retains the embedded artifact while the v2 beta validates

@@ -109,18 +109,29 @@ their own type/test lane and upload a package candidate without publishing it:
 - `Perf` produces the `@brass/perf` tarball.
 - `Engine WASM` produces the optional `@brass/engine-wasm` tarball.
 - `VS Code` compiles the extension and produces a VSIX.
-- `V2 Beta` produces the installable `brass-runtime@2.0.0-beta.0` candidate
-  tarball without publishing it.
+- `V2 Beta` produces the installable `brass-runtime@2.0.0-beta.0` candidate;
+  the protected publisher has promoted it to npm's `next` channel.
 
 The registry snapshot in
 [`evidence/product-registry-readiness-2026-09-20.json`](./evidence/product-registry-readiness-2026-09-20.json)
 records that the three scoped npm products do not yet exist. Their first
 publication uses the separate `Publish Companion Product Alpha` workflow from
 `main`. It accepts one fixed product choice, requires an exact manifest version
-and `npm-products` approval, performs a dry-run, rejects an existing version,
-publishes only to `alpha` with provenance, and verifies that `latest` remains
-unchanged. This is a prepared route, not a claim that those packages are
-already public.
+and `npm-products` approval, verifies the token identity and membership in the
+`brass` npm organization before the expensive release gate, performs a dry-run,
+rejects an existing version, publishes only to `alpha` with provenance, waits
+up to five minutes for registry indexing, and verifies that `latest` remains
+unchanged.
+
+All three protected first-publication attempts built, packed, and signed their
+candidates, then npm rejected the package-creation PUT with `E404`. No registry
+mutation occurred. This bounds the remaining blocker to ownership/membership
+of the `brass` npm organization or the granular token's package-scope write
+permission. Create or confirm the organization, grant the publishing user
+membership, and replace `NPM_TOKEN` with a short-lived token that has
+organization read access and `@brass` package-scope publish access. Do not put
+the token in source, logs, issues, or chat. After the first versions exist,
+configure Trusted Publishing for each package and retire the bootstrap token.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the
@@ -131,19 +142,19 @@ measurement, not a cross-platform checksum. The validator also fails if npm
 would silently normalize a product manifest. The command runs inside
 `release:check` after packed-consumer validation has rebuilt each product.
 
-The 2026-09-20 remote-control audit found the repository-level `NPM_TOKEN`, but
-no GitHub environments, no remote `next` branch, and no protection on `main`.
-Consequently neither manual publisher is considered approval-protected yet.
-Before first use, protect `main`, create and protect `next`, and configure
-required-reviewer gates on `npm-next` and `npm-products`. The dated readiness
-records preserve this negative finding rather than treating workflow YAML as
-proof of an operational approval boundary.
+The 2026-09-20 remote-control audit now confirms protected `main` and `next`
+branches, enforced `validate` and `CodeQL` checks, and required-reviewer gates
+on `npm-next` and `npm-products`. The beta was published through `npm-next`;
+the product attempts were explicitly approved through `npm-products`. The
+dated readiness records preserve both the enforced controls and the remaining
+npm scope-access failure instead of treating workflow YAML as operational
+proof.
 
 The reviewed desired state is machine-readable in
 `.github/release-guardrails.json`; `npm run validate:release-policy` checks its
 verified status-check app IDs, branch protections, environment reviewer, and
-single-maintainer limitations. The file is a plan until a separate remote
-audit proves GitHub is enforcing it.
+single-maintainer limitations. The remote audit is the evidence that GitHub is
+enforcing that desired state.
 Run that read-only comparison with `npm run audit:release-guardrails`; a
 non-zero exit lists every missing or divergent remote control.
 

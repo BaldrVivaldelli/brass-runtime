@@ -19,7 +19,7 @@ afterEach(() => {
 });
 
 describe("companion product registry readiness", () => {
-  it("accepts the three committed non-publication snapshots", () => {
+  it("accepts the three bounded npm scope-access failure snapshots", () => {
     expect(validate(committed)).toMatchObject({ status: 0 });
   });
 
@@ -38,6 +38,18 @@ describe("companion product registry readiness", () => {
   it("rejects a first-publication workflow targeting latest", () => {
     const changed = structuredClone(committed);
     changed.publicationControl.distTag = "latest";
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects a missing first-publication failure run", () => {
+    const changed = structuredClone(committed);
+    changed.products[2].latestPublicationAttempt = null;
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects evidence that still claims an unprotected publication environment", () => {
+    const changed = structuredClone(committed);
+    changed.publicationControl.environmentProtectedAtRecordedAt = false;
     expect(validate(changed)).toMatchObject({ status: 1 });
   });
 });

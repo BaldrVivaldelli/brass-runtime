@@ -111,10 +111,15 @@ const requiredProductPublishFragments = [
   "workflow_dispatch:",
   "github.ref == 'refs/heads/main' && inputs.publish",
   "environment: npm-products",
+  "npm install --global npm@11.5.1",
+  "npm whoami",
+  "npm org ls brass",
   "npm run release:check",
   'npm run "validate:product:$PRODUCT"',
   "--dry-run --access public --tag alpha --json",
   "--tag alpha --provenance",
+  "for attempt in {1..20}",
+  "sleep 15",
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ];
 for (const fragment of requiredProductPublishFragments) {
