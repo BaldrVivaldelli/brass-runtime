@@ -147,16 +147,19 @@ audit proves GitHub is enforcing it.
 Run that read-only comparison with `npm run audit:release-guardrails`; a
 non-zero exit lists every missing or divergent remote control.
 
-Actual beta publication uses the separate `Publish V2 Beta` manual workflow.
-It runs only from the `next` branch, requires the boolean publish confirmation
-and approval of the `npm-next` environment, reruns `release:check`, rebuilds the
-exact requested beta version, executes an npm publication dry-run, rejects an
-already-published version, retains the tarball, and publishes only with the
-`next` dist-tag and npm provenance. After publication it tolerates brief
-registry propagation delay, verifies that `next` resolves to the requested
-version, and proves that `latest` did not move. Semantic Release is restricted
-to `main` and therefore cannot accidentally publish the v1 package on the beta
-channel.
+Actual beta publication is dispatched through the trusted `Release` workflow
+from the `next` branch with `channel=v2-beta`, the exact version, and the
+boolean publish confirmation. That entrypoint calls the reusable `Publish V2
+Beta` workflow. Keeping `release.yml` as the caller lets npm validate the same
+short-lived OIDC trusted publisher used by the stable train; the beta publisher
+does not receive a long-lived npm write token. It still requires approval of
+the `npm-next` environment, reruns `release:check`, rebuilds the exact requested
+beta version, executes an npm publication dry-run, rejects an already-published
+version, retains the tarball, and publishes only with the `next` dist-tag and
+npm provenance. After publication it tolerates brief registry propagation
+delay, verifies that `next` resolves to the requested version, and proves that
+`latest` did not move. Semantic Release remains restricted to `main` and cannot
+accidentally publish the v1 package on the beta channel.
 The latest pre-publication registry and artifact snapshot is recorded in
 [`evidence/v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
 

@@ -33,8 +33,9 @@ renaming a stable API requires a major release.
 Runtime, Agent, Perf, and VS Code candidates are produced by separate CI
 workflows. Publishing remains a maintainer decision; a green candidate artifact
 does not grant automatic publication or change package maturity.
-The v2 beta has a distinct manual publisher protected by the `npm-next`
-environment; stable Semantic Release cannot publish from `next`.
+The v2 beta has a distinct reusable publisher protected by the `npm-next`
+environment and invoked through the npm-trusted `release.yml` workflow; stable
+Semantic Release cannot publish from `next`.
 
 ## Decision making
 

@@ -53,7 +53,8 @@ if (!gitPlugin[1]?.message?.includes("[skip ci]")) fail("release commits must pr
 
 if (!releaseWorkflow.includes('cron: "0 9 * * 1"')) fail("stable weekly release schedule is missing");
 if (releaseWorkflow.includes("branches: [next]")) fail("the stable publisher must not run on next pushes");
-if (!releaseWorkflow.includes("if: github.ref == 'refs/heads/main'")) {
+if (!releaseWorkflow.includes("github.ref == 'refs/heads/main' &&")
+  || !releaseWorkflow.includes("inputs.channel == 'stable'")) {
   fail("the stable publisher must be locked to the main branch");
 }
 if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.includes("@semantic-release/git@10.0.1")) {
@@ -73,7 +74,7 @@ for (const fragment of requiredV2BetaFragments) {
 }
 
 const requiredV2PublishFragments = [
-  "workflow_dispatch:",
+  "workflow_call:",
   "github.ref == 'refs/heads/next' && inputs.publish",
   "environment: npm-next",
   "npm run release:check",
@@ -89,6 +90,17 @@ const requiredV2PublishFragments = [
 ];
 for (const fragment of requiredV2PublishFragments) {
   if (!publishV2BetaWorkflow.includes(fragment)) fail(`v2 beta publisher is missing: ${fragment}`);
+}
+if (publishV2BetaWorkflow.includes("NODE_AUTH_TOKEN:")) {
+  fail("v2 beta publisher must use the trusted release caller instead of a long-lived write token");
+}
+for (const fragment of [
+  "channel:",
+  "v2-beta",
+  "uses: ./.github/workflows/publish-v2-beta.yml",
+  "id-token: write",
+]) {
+  if (!releaseWorkflow.includes(fragment)) fail(`trusted v2 beta entrypoint is missing: ${fragment}`);
 }
 
 const requiredProductPublishFragments = [
