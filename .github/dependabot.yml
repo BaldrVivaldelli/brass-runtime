@@ -46,6 +46,10 @@ updates:
     ignore:
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+      # Angular 20 requires zone.js ~0.15.0. Dependabot otherwise proposes
+      # 0.16.x, which npm correctly rejects as an incompatible peer.
+      - dependency-name: "zone.js"
+        update-types: ["version-update:semver-minor"]
     groups:
       angular-minor-patch:
         patterns: ["*"]
@@ -133,6 +137,11 @@ updates:
       timezone: "America/Argentina/Buenos_Aires"
     commit-message:
       prefix: "deps(actions)"
+    ignore:
+      # The action tag is also interpreted as the Rust toolchain. Dependabot
+      # can see future action tags before that Rust release exists, producing
+      # a workflow-wide rustup 404. Toolchain bumps stay deliberate and pinned.
+      - dependency-name: "dtolnay/rust-toolchain"
     groups:
       gha-minor-patch:
         patterns: ["*"]

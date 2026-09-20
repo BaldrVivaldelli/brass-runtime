@@ -122,6 +122,16 @@ for (const surface of surfaces) {
 
 const rootLock = readJson(".", "package-lock.json");
 const rootManifest = readJson(".", "package.json");
+const dependabotPolicy = readFileSync(path.join(root, ".github", "dependabot.yml"), "utf8");
+for (const fragment of [
+  'dependency-name: "zone.js"',
+  'update-types: ["version-update:semver-minor"]',
+  'dependency-name: "dtolnay/rust-toolchain"',
+]) {
+  if (!dependabotPolicy.includes(fragment)) {
+    failures.push(`Dependabot compatibility policy is missing: ${fragment}`);
+  }
+}
 if (rootManifest.devDependencies?.rimraf !== undefined
   || rootLock.packages?.["node_modules/rimraf"] !== undefined) {
   failures.push("root must use the bounded Node cleaner instead of rimraf/glob tooling");
