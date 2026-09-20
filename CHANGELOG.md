@@ -66,6 +66,9 @@
 - Added a protected manual `brass-runtime@2.0.0-beta.0` publisher for the
   `next` channel with exact-version rebuild, npm dry-run, provenance, retained
   artifact, v1 rollback, and post-publication tag verification.
+- Routed beta publication through the npm-trusted `release.yml` caller so the
+  protected `next` channel uses short-lived OIDC credentials instead of a
+  long-lived npm write token.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.

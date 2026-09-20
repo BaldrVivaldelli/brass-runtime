@@ -12,6 +12,7 @@ const evidencePath = path.resolve(
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const budget = JSON.parse(readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8")).v2Target;
+const releaseEntrypoint = readFileSync(path.join(root, ".github", "workflows", "release.yml"), "utf8");
 const publisher = readFileSync(path.join(root, ".github", "workflows", "publish-v2-beta.yml"), "utf8");
 const failures = [];
 
@@ -78,6 +79,19 @@ for (const fragment of [
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ]) {
   if (!publisher.includes(fragment)) failures.push(`publisher is missing ${fragment}`);
+}
+
+for (const fragment of [
+  "channel:",
+  "v2-beta",
+  "uses: ./.github/workflows/publish-v2-beta.yml",
+  "id-token: write",
+]) {
+  if (!releaseEntrypoint.includes(fragment)) failures.push(`trusted release entrypoint is missing ${fragment}`);
+}
+
+if (!publisher.includes("workflow_call:") || publisher.includes("NODE_AUTH_TOKEN:")) {
+  failures.push("v2 beta publication must be called by the trusted OIDC release workflow without a write token");
 }
 
 const artifactPath = path.resolve(root, evidence.candidate?.path ?? "");
