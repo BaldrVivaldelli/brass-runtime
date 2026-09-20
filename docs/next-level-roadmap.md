@@ -48,7 +48,8 @@ compatibility, or operational evidence does not close a workstream.
 - The v1 tarball no longer ships a duplicate unpublished ESM build: the measured
   artifact remains roughly 18% smaller compressed and unpacked and more than
   12% smaller by file count while all package-condition and independent-product
-  smoke tests stay green and generated evidence remains included.
+  smoke tests stay green. Raw operational evidence remains versioned in the
+  repository and linked from consumer docs instead of inflating the npm tarball.
 - Agent, Perf, and Engine WASM build as independently versioned candidates.
   Agent and Perf now own bundled declarations as well as executable output.
   Their v1 compatibility entrypoints/artifact remain in `brass-runtime`.
@@ -151,9 +152,10 @@ compatibility, or operational evidence does not close a workstream.
    for a second release-capable maintainer.
 
 Items 4 and 5 are implemented as gates and have produced both a local run and a
-retained green GitHub Actions run with independently hashed raw reports. This
-closes the first-run operational exit criterion; continuing weekly history is
-required to establish a trend and catch runner-specific regressions.
+pair of retained green GitHub Actions runs with independently hashed raw
+reports. This closes repeatability across two repository states; continuing
+weekly history is required to establish a time trend and catch runner-specific
+regressions.
 Item 7 is documented in `support-and-maintenance.md`; the second-maintainer
 outcome remains open until a real maintainer completes that qualification path.
 

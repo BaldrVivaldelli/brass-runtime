@@ -56,7 +56,7 @@ approved ownership boundary:
 npm run benchmark:native:pilot
 ```
 
-The 2026-07-21 record is `docs/evidence/native-search-pilot-2026-07-21.json` and
+The [2026-07-21 record](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/native-search-pilot-2026-07-21.json) and
 the gate interpretation is `docs/native-search-pilot-decision.md`. Read-only
 editor search is **promoted** after two consecutive final-worktree runs passed
 every gate. The committed confirmation recorded 100% result parity, 85.082%

@@ -62,8 +62,11 @@ npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-h
 - Confirm `npm run validate:package` reports the expected tarball contents.
   The command also enforces the versioned compressed, unpacked, file-count, and
   top-level group ceilings in `scripts/package-size-budget.json`, and rejects
-  the unpublished duplicate `.js` ESM artifacts. Public ESM entrypoints use
-  `.mjs`; CommonJS and bin entrypoints use `.cjs`.
+  the unpublished duplicate `.js` ESM artifacts. Raw operational records under
+  `docs/evidence` stay versioned in GitHub instead of shipping in the npm
+  tarball; the validator requires the linked migration, production-evidence,
+  and support documentation. Public ESM entrypoints use `.mjs`; CommonJS and
+  bin entrypoints use `.cjs`.
 - Confirm `npm run validate:evidence` passes and rerun the relevant benchmark
   budget when a hot path or threshold changed.
 - The committed `package.json` and lockfile version must match the latest stable
@@ -113,7 +116,7 @@ their own type/test lane and upload a package candidate without publishing it:
   the protected publisher has promoted it to npm's `next` channel.
 
 The registry snapshot in
-[`evidence/product-registry-readiness-2026-09-20.json`](./evidence/product-registry-readiness-2026-09-20.json)
+[`evidence/product-registry-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/product-registry-readiness-2026-09-20.json)
 records that the three scoped npm products do not yet exist. Their first
 publication uses the separate `Publish Companion Product Alpha` workflow from
 `main`. It accepts one fixed product choice, requires an exact manifest version
@@ -174,7 +177,7 @@ registry indexing, verifies that `next` resolves to the requested version, and p
 `latest` did not move. Semantic Release remains restricted to `main` and cannot
 accidentally publish the v1 package on the beta channel.
 The publication, registry integrity, provenance, artifact, and rollback snapshot is recorded in
-[`evidence/v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
+[`evidence/v2-beta-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-beta-readiness-2026-09-20.json).
 
 Before approving the `npm-next` environment, record the current tags and the
 last known-good beta in the release notes:
@@ -223,12 +226,14 @@ sample. Logs and all three machine-readable reports are retained as workflow
 artifacts for 30 days. These runs are regression evidence, not external
 production-adoption evidence.
 
-The first retained green run is recorded in
-[`evidence/stability-ci-2026-09-20.json`](./evidence/stability-ci-2026-09-20.json).
-It identifies the exact source SHA, workflow/job and artifact IDs, report byte
-counts and SHA-256 hashes, runner metrics, budget decisions, and the 30-day
-expiry. `npm run validate:stability-evidence` checks both this remote record and
-the independent local run.
+Two retained green manual runs are recorded in
+[`evidence/stability-ci-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stability-ci-2026-09-20.json).
+They identify each source SHA, workflow/job and artifact IDs, report byte
+counts and SHA-256 hashes, runner metrics, budget decisions, and 30-day expiry.
+The second artifact was downloaded and re-hashed independently. These same-day
+runs prove repeatability, not a weekly trend. `npm run
+validate:stability-evidence` checks both remote snapshots and the independent
+local run.
 
 ## Release cadence and channels
 

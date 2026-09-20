@@ -2,7 +2,8 @@
 
 This directory is reserved for verifiable Brass adoption reports. There is no
 external production case study yet; controlled local results live in
-[`docs/evidence`](../evidence/) and are labeled production-like.
+[`docs/evidence`](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/docs/evidence)
+and are labeled production-like.
 
 Use this template when a consenting adopter is available:
 
