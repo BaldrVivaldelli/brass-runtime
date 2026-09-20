@@ -72,7 +72,7 @@ jobs:
           mkdir -p artifacts/perf
           npm pack --ignore-scripts --pack-destination artifacts/perf ./packages/perf
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: brass-perf-package
           path: artifacts/perf/*.tgz

@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "baselineDate": "2026-09-20",
-  "description": "Regression ceiling for the v1 compatibility package after removing the unpublished duplicate .js ESM build and retaining the audited lighthouse and public v2 beta publication evidence.",
+  "description": "Regression ceiling for the v1 compatibility package after removing the unpublished duplicate .js ESM build and retaining the audited lighthouse, public v2 beta, and remote stability evidence.",
   "maximum": {
     "compressedBytes": 1180000,
-    "unpackedBytes": 4900000,
+    "unpackedBytes": 4910000,
     "fileCount": 245,
     "groups": {
       "dist": 4050000,
-      "docs": 635000,
+      "docs": 640000,
       "wasm": 330000
     }
   },

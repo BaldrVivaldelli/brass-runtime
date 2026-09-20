@@ -37,6 +37,9 @@ compatibility, or operational evidence does not close a workstream.
   native top-level fast path, direct adapter, and the WASM engine when built.
 - A bounded weekly stability lane runs that corpus plus cancellation, finalizer,
   shutdown, timeout/queue, retained-memory, HTTP, and limiter saturation checks.
+  Its first retained GitHub Actions run passed all gates with hashed runtime,
+  HTTP, and adaptive-limiter reports; the weekly schedule remains the source of
+  trend evidence.
 - The v1 tarball no longer ships a duplicate unpublished ESM build: the measured
   artifact remains roughly 18% smaller compressed and unpacked and more than
   12% smaller by file count while all package-condition and independent-product
@@ -142,11 +145,10 @@ compatibility, or operational evidence does not close a workstream.
 7. Document an LTS window for v1, v2 rollback, release ownership, and the path
    for a second release-capable maintainer.
 
-Items 4 and 5 are implemented as gates. They remain open as operational exit
-evidence until the scheduled workflow has produced and retained a green run.
-All three versioned soak budgets have also passed once locally with hashed raw
-reports; that closes local execution risk but does not substitute for retained
-cross-runner CI history.
+Items 4 and 5 are implemented as gates and have produced both a local run and a
+retained green GitHub Actions run with independently hashed raw reports. This
+closes the first-run operational exit criterion; continuing weekly history is
+required to establish a trend and catch runner-specific regressions.
 Item 7 is documented in `support-and-maintenance.md`; the second-maintainer
 outcome remains open until a real maintainer completes that qualification path.
 

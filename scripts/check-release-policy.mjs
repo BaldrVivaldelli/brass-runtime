@@ -14,6 +14,9 @@ const stabilityWorkflow = await readFile(new URL("../.github/workflows/stability
 const v2BetaWorkflow = await readFile(new URL("../.github/workflows/v2-beta.yml", import.meta.url), "utf8");
 const publishV2BetaWorkflow = await readFile(new URL("../.github/workflows/publish-v2-beta.yml", import.meta.url), "utf8");
 const publishProductWorkflow = await readFile(new URL("../.github/workflows/publish-product-alpha.yml", import.meta.url), "utf8");
+const agentWorkflow = await readFile(new URL("../.github/workflows/agent.yml", import.meta.url), "utf8");
+const perfWorkflow = await readFile(new URL("../.github/workflows/perf.yml", import.meta.url), "utf8");
+const vscodeWorkflow = await readFile(new URL("../.github/workflows/vscode.yml", import.meta.url), "utf8");
 
 if (packageJson.version !== packageLock.version || packageJson.version !== packageLock.packages?.[""]?.version) {
   fail("package.json and package-lock.json versions must match");
@@ -63,6 +66,7 @@ if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.inc
 
 const requiredV2BetaFragments = [
   "branches: [main, next]",
+  "group: v2-beta-${{ github.ref }}",
   "node-version: [20, 22]",
   "npm run validate:v2-beta",
   "npm run validate:example:v2-core",
@@ -71,6 +75,23 @@ const requiredV2BetaFragments = [
 ];
 for (const fragment of requiredV2BetaFragments) {
   if (!v2BetaWorkflow.includes(fragment)) fail(`v2 beta workflow is missing: ${fragment}`);
+}
+if (/^\s*group:.*matrix\./m.test(v2BetaWorkflow)) {
+  fail("v2 beta workflow-level concurrency cannot reference the job matrix");
+}
+for (const [name, workflow] of [
+  ["release", releaseWorkflow],
+  ["stability", stabilityWorkflow],
+  ["v2 beta", v2BetaWorkflow],
+  ["v2 publisher", publishV2BetaWorkflow],
+  ["product publisher", publishProductWorkflow],
+  ["agent", agentWorkflow],
+  ["perf", perfWorkflow],
+  ["VS Code", vscodeWorkflow],
+]) {
+  if (workflow.includes("actions/upload-artifact@v4")) {
+    fail(`${name} workflow must not use the deprecated Node 20 artifact action`);
+  }
 }
 
 const requiredV2PublishFragments = [

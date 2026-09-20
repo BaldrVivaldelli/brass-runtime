@@ -14,6 +14,10 @@ const completed = JSON.parse(readFileSync(
   path.join(root, "docs", "evidence", "v2-migration-lighthouse-1-2026-09-20.json"),
   "utf8",
 ));
+const registryFollowUp = JSON.parse(readFileSync(
+  path.join(root, "docs", "evidence", "v2-migration-lighthouse-3-2026-09-20.json"),
+  "utf8",
+));
 const temporaryDirectories = [];
 
 afterEach(() => {
@@ -67,6 +71,18 @@ describe("adoption evidence integrity", () => {
     const result = validate(changed);
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("rollback template builds must pass");
+  });
+
+  it("accepts a public-registry replay that retains the initial migration boundary", () => {
+    expect(validate(registryFollowUp)).toMatchObject({ status: 0 });
+  });
+
+  it("rejects an incomplete public-registry replay", () => {
+    const changed = structuredClone(registryFollowUp);
+    changed.registryFollowUp.registryTarballSha256 = "not-a-digest";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("registry follow-up");
   });
 });
 

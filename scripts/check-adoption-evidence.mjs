@@ -70,6 +70,18 @@ function validate(evidence) {
   if (typeof evidence.reproduce !== "string" || !evidence.reproduce.includes("analyze-v2-migration")) {
     failures.push("the migration analyzer reproduction command is required");
   }
+  if (evidence.registryFollowUp !== undefined) {
+    const followUp = evidence.registryFollowUp;
+    if (followUp?.source !== "npm registry tarball"
+      || followUp?.version !== "2.0.0-beta.0"
+      || followUp?.distTag !== "next"
+      || !/^[a-f0-9]{64}$/.test(followUp?.registryTarballSha256 ?? "")
+      || followUp?.publicationEvidence !== "docs/evidence/v2-beta-readiness-2026-09-20.json"
+      || !Array.isArray(followUp?.checks)
+      || followUp.checks.length < 5) {
+      failures.push("registry follow-up must identify the public beta tarball and replayed rollback checks");
+    }
+  }
 
   if (evidence.stage === "completed") validateCompletedMigration(evidence, failures);
   return failures;

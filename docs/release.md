@@ -223,6 +223,13 @@ sample. Logs and all three machine-readable reports are retained as workflow
 artifacts for 30 days. These runs are regression evidence, not external
 production-adoption evidence.
 
+The first retained green run is recorded in
+[`evidence/stability-ci-2026-09-20.json`](./evidence/stability-ci-2026-09-20.json).
+It identifies the exact source SHA, workflow/job and artifact IDs, report byte
+counts and SHA-256 hashes, runner metrics, budget decisions, and the 30-day
+expiry. `npm run validate:stability-evidence` checks both this remote record and
+the independent local run.
+
 ## Release cadence and channels
 
 - Stable releases run from `main` on the weekly Monday release train or by an
