@@ -31,6 +31,7 @@ const surfaces = [
       "@angular-devkit/build-angular": "20.3.37",
       "@angular/cli": "20.3.37",
       "@angular/compiler-cli": "20.3.31",
+      uuid: "11.1.1",
     },
     localRuntime: true,
   },
@@ -117,6 +118,9 @@ for (const surface of surfaces) {
     if (runtime?.link !== true || runtime?.resolved !== "../..") {
       failures.push(`${label} must lock brass-runtime to the repository root`);
     }
+  }
+  if (surface.directory === "examples/angular" && manifest.overrides?.sockjs?.uuid !== "11.1.1") {
+    failures.push("examples/angular must override sockjs uuid to the audited 11.1.1 security line");
   }
 }
 
