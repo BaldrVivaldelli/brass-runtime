@@ -19,14 +19,11 @@ not be converted into active-user or production-workload counts.
 The `create-brass` entry now points to a commit-pinned, machine-checked
 [public readiness record](https://github.com/BaldrVivaldelli/create-brass/blob/6e09a9754a4f55b4fd73c2f20c2a9368d6b5f6dd/docs/evidence/beta-readiness-2026-09-20.json).
 It retains the merged migration, four validation modes across two templates
-(8/8 builds), the historical token authentication failure, and the exact
-post-hardening OIDC candidate. The newer validation passed the production
-dependency audit, build, rollback, public-beta root, and `/v1` bridge paths;
-its publish job was deliberately skipped and the registry remained unchanged.
-Actual publication still requires the package owner to confirm the npm Trusted
-Publisher connection. This strengthens the first-party consumer evidence; it
-does not identify an independent adopter, production deployment, or publishable
-case study.
+(8/8 builds), protected controls, the historical token failure, and the exact
+post-hardening OIDC candidate. Audit, build, and both rollback paths passed;
+publication was skipped and npm stayed unchanged pending Trusted Publisher
+confirmation. This is first-party evidence, not an
+independent adopter, production deployment, or publishable case study.
 
 Users can provide a workload and choose an explicit evidence-consent level
 through the repository's **Brass adoption report** issue form. The form warns

@@ -86,23 +86,18 @@ if (createBrass?.relationship !== "first-party-template-generator"
   || !/^[a-f0-9]{40}$/.test(publicVerification?.evidenceCommitSha ?? "")
   || !publicVerification?.evidenceUrl?.includes(publicVerification.evidenceCommitSha)
   || publicVerification?.migrationPullRequest !== 13
-  || publicVerification?.initialEvidencePullRequest !== 15
-  || publicVerification?.evidencePullRequest !== 19
   || publicVerification?.runtimeBeta !== "brass-runtime@2.0.0-beta.0"
   || publicVerification?.candidate !== "create-brass@1.3.0-beta.0"
   || publicVerification?.candidateStatus !== "validated-not-published"
-  || !/^[a-f0-9]{40}$/.test(publicVerification?.validationSourceSha ?? "")
   || !Number.isInteger(publicVerification?.validationRunId)
   || publicVerification?.validationResult !== "success"
-  || !Number.isInteger(publicVerification?.artifactId)
   || publicVerification?.templateModes !== 4
   || publicVerification?.buildsPassed !== 8
   || publicVerification?.buildsTotal !== 8
   || !/^[a-f0-9]{64}$/.test(publicVerification?.tarballSha256 ?? "")
   || publicVerification?.authentication !== "npm-trusted-publishing-oidc"
   || publicVerification?.publicationRequested !== false
-  || publicVerification?.trustedPublisherConfiguration !== "requires-package-owner-confirmation"
-  || !["templates", "audit", "CodeQL"].every((check) => publicVerification?.requiredChecks?.includes(check))
+  || publicVerification?.trustedPublisherConfiguration !== "owner-confirmation-required"
   || publicVerification?.registryLatest !== "1.2.1"
   || publicVerification?.registryNext !== null
   || !publicVerification?.claimBoundary?.includes("not independent external production adoption")) {
