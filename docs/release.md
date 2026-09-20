@@ -118,30 +118,25 @@ their own type/test lane and upload a package candidate without publishing it:
 The registry snapshot in
 [`evidence/product-registry-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/product-registry-readiness-2026-09-20.json)
 records that the three scoped npm products do not yet exist. Their first
-publication uses the separate `Publish Companion Product Alpha` workflow from
-`main`. It accepts one fixed product choice, requires an exact manifest version
-and `npm-products` approval, verifies the token identity and membership in the
-`brass` npm organization before the expensive release gate, performs a dry-run,
-rejects an existing version, publishes only to `alpha` with provenance, waits
-up to five minutes for registry indexing, and verifies that `latest` remains
-unchanged.
+publication uses `Publish Companion Product Alpha` from `main`. It requires an
+exact manifest version and `npm-products` approval, checks bootstrap identity,
+runs the release and dry-run gates, rejects reused versions, publishes only to
+`alpha` with provenance, and proves `latest` did not move.
 
-All three protected first-publication attempts built, packed, and signed their
-candidates, then npm rejected the package-creation PUT with `E404`. No registry
-mutation occurred. This bounds the remaining blocker to ownership/membership
-of the `brass` npm organization or the granular token's package-scope write
-permission. Create or confirm the organization, grant the publishing user
-membership, and replace `NPM_TOKEN` with a short-lived token that has
-organization read access and `@brass` package-scope publish access. Do not put
-the token in source, logs, issues, or chat. After the first versions exist,
-configure Trusted Publishing for each package and retire the bootstrap token.
+All three first attempts reached npm, which rejected package creation with
+`E404` without registry mutation. Confirm the publishing user's `brass`
+membership and replace `NPM_TOKEN` with a short-lived token that has
+organization read access and `@brass` package-scope publish access. Select
+`bootstrap=true` only for each package's first version. Once it exists, the
+workflow rejects token bootstrap and requires its npm Trusted Publisher; after
+all three first versions, retire the secret. Never expose it in source or logs.
+Configure each package with GitHub owner `BaldrVivaldelli`, repository
+`brass-runtime`, workflow `publish-product-alpha.yml`, environment
+`npm-products`, and direct `npm publish` enabled.
 
-Approved bootstrap run `35538420035` then authenticated as npm user
-`avivaldelli`, but the refreshed token received `E403` while reading `brass`
-organization membership. It stopped before build or publication and left npm
-unchanged. The active blocker is therefore organization membership or the
-token's organization-read permission; package-scope publish access is still
-required after that preflight passes.
+Bootstrap run `35538420035` authenticated as `avivaldelli` but got `E403`
+reading `brass` membership. It stopped before build or publication. The blocker
+is membership or organization-read permission; scope write remains required.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the

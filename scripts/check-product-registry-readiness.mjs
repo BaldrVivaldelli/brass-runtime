@@ -120,7 +120,14 @@ if (!Array.isArray(evidence.remaining) || evidence.remaining.length < 5) {
 for (const fragment of [
   "github.ref == 'refs/heads/main' && inputs.publish",
   "environment: npm-products",
+  "bootstrap:",
   "npm install --global npm@11.5.1",
+  "Enforce the bootstrap or Trusted Publishing boundary",
+  'if: inputs.bootstrap',
+  'if: ${{ !inputs.bootstrap }}',
+  "already exists; disable bootstrap",
+  "does not exist; its first version requires an explicitly approved bootstrap run",
+  "Unable to determine registry state",
   "npm whoami",
   "npm org ls brass",
   "npm run release:check",
@@ -131,6 +138,16 @@ for (const fragment of [
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ]) {
   if (!workflow.includes(fragment)) failures.push(`product publisher is missing ${fragment}`);
+}
+if ((workflow.match(/NODE_AUTH_TOKEN:/g)?.length ?? 0) !== 2) {
+  failures.push("NPM_TOKEN must be limited to bootstrap identity and first-publication steps");
+}
+const trustedPublishStep = workflow.slice(
+  workflow.indexOf("- name: Publish alpha with npm Trusted Publishing"),
+  workflow.indexOf("- name: Verify alpha changed and latest did not"),
+);
+if (!trustedPublishStep || trustedPublishStep.includes("NODE_AUTH_TOKEN")) {
+  failures.push("recurring alpha publication must use npm Trusted Publishing without NPM_TOKEN");
 }
 
 if (failures.length > 0) {
