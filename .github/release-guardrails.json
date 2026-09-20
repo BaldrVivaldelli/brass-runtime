@@ -44,6 +44,7 @@
   },
   "environments": {
     "npm-next": {
+      "requiredSecretNames": [],
       "reviewers": [
         { "type": "User", "id": 18494121, "login": "BaldrVivaldelli" }
       ],
@@ -52,6 +53,7 @@
       "protectedBranchesOnly": true
     },
     "npm-products": {
+      "requiredSecretNames": ["NPM_PRODUCT_BOOTSTRAP_TOKEN"],
       "reviewers": [
         { "type": "User", "id": 18494121, "login": "BaldrVivaldelli" }
       ],

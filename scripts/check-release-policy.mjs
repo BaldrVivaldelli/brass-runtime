@@ -196,7 +196,16 @@ for (const fragment of requiredProductPublishFragments) {
 }
 const productTokenBindings = publishProductWorkflow.match(/NODE_AUTH_TOKEN:/g)?.length ?? 0;
 if (productTokenBindings !== 2) {
-  fail("the product alpha publisher must expose NPM_TOKEN only to bootstrap identity and first-publication steps");
+  fail("the product alpha publisher must expose its token only to bootstrap identity and first-publication steps");
+}
+const productBootstrapSecretBindings = publishProductWorkflow.match(
+  /secrets\.NPM_PRODUCT_BOOTSTRAP_TOKEN/g,
+)?.length ?? 0;
+if (productBootstrapSecretBindings !== 2 || publishProductWorkflow.includes("secrets.NPM_TOKEN")) {
+  fail("the product alpha publisher must use only the isolated NPM_PRODUCT_BOOTSTRAP_TOKEN");
+}
+if (!releaseWorkflow.includes("secrets.NPM_TOKEN")) {
+  fail("the stable publisher must retain its independent NPM_TOKEN binding");
 }
 const trustedProductPublishStep = publishProductWorkflow.slice(
   publishProductWorkflow.indexOf("- name: Publish alpha with npm Trusted Publishing"),
