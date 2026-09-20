@@ -99,8 +99,19 @@ function protectLazy(
         };
         const deferred = {
           _tag: "Async" as const,
-          register: (innerEnv: unknown, innerCb: (exit: Exit<HttpError, unknown>) => void) =>
-            registerHttpEffect(next(req) as any, innerEnv, innerCb as any),
+          register: (innerEnv: unknown, innerCb: (exit: Exit<HttpError, unknown>) => void) => {
+            try {
+              return registerHttpEffect(next(req) as any, innerEnv, innerCb as any);
+            } catch (error) {
+              innerCb({
+                _tag: "Failure",
+                cause: {
+                  _tag: "Fail",
+                  error: { _tag: "FetchError", message: String(error) } satisfies HttpError,
+                },
+              });
+            }
+          },
         };
         cancel = registerHttpEffect(breaker.protect(deferred as any) as any, env, finish as any);
       } catch (error) {

@@ -155,15 +155,27 @@ export type AsyncWithPromise<R, E, A> = Async<R, E, A> & {
 export const withAsyncPromise =
     <R, E, A>(run: (eff: Async<R, E, A>, env: R) => Promise<A>) =>
         (eff: Async<R, E, A>): AsyncWithPromise<R, E, A> => {
-            const anyEff: any = eff;
+            const candidate = eff as Partial<AsyncWithPromise<R, E, A>>;
 
-            //si lo llamo varias veces, no lo re-re escribo
-            if (!anyEff.toPromise) {
-                anyEff.toPromise = (env: R) => run(eff, env);
-                anyEff.unsafeRunPromise = () => run(eff, {} as R);
+            // Preserve idempotency for an already decorated compatibility
+            // value, but never mutate the underlying effect node.
+            if (typeof candidate.toPromise === "function" && typeof candidate.unsafeRunPromise === "function") {
+                return candidate as AsyncWithPromise<R, E, A>;
             }
 
-            return anyEff as AsyncWithPromise<R, E, A>;
+            const decorated = { ...eff } as AsyncWithPromise<R, E, A>;
+            Object.defineProperties(decorated, {
+                toPromise: {
+                    enumerable: false,
+                    value: (env: R) => run(decorated, env),
+                },
+                unsafeRunPromise: {
+                    enumerable: false,
+                    value: () => run(decorated, {} as R),
+                },
+            });
+
+            return decorated;
         };
 
 export const mapAsync = <R, E, A, B>(fa: Async<R, E, A>, f: (a: A) => B): Async<R, E, B> =>

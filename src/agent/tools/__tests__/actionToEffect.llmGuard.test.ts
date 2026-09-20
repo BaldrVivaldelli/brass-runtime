@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fc from "fast-check";
 import { actionToEffect } from "../actionToEffect";
 import type { AgentAction, AgentEnv, AgentError, AgentState, Observation } from "../../core/types";
-import { registerHttpEffect } from "../../../http/effectRunner";
+import { registerEffectDirect } from "../../../core/runtime/directEffectRunner";
 import type { Exit } from "../../../core/types/effect";
 import { asyncSucceed } from "../../../core/types/asyncEffect";
 
@@ -24,7 +24,7 @@ function runEffect<E, A>(
     env: AgentEnv,
 ): Exit<E, A> {
     let result: Exit<E, A> | undefined;
-    registerHttpEffect(effect as any, env, (exit) => {
+    registerEffectDirect(effect as any, env, (exit) => {
         result = exit as Exit<E, A>;
     });
     return result!;

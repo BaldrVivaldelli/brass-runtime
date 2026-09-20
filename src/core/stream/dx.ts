@@ -6,7 +6,7 @@ export type Stream<A, R = unknown, E = never> = ZStream<R, E, A> & {
   readonly pipe: <Rp, Ep, B>(pipeline: ZPipeline<Rp, Ep, A, B>) => Stream<B, R & Rp, E | Ep>;
   readonly map: <B>(f: (value: A) => B) => Stream<B, R, E>;
   readonly filter: (predicate: (value: A) => boolean) => Stream<A, R, E>;
-  readonly collect: (runtime: Runtime<R>) => Promise<A[]>;
+  readonly collect: <R0 extends R>(runtime: Runtime<R0>) => Promise<A[]>;
 };
 
 export const Stream = Object.freeze({
@@ -22,8 +22,12 @@ export const Pipeline = Object.freeze({
 });
 
 export function asStream<R, E, A>(stream: ZStream<R, E, A>): Stream<A, R, E> {
-  const target = stream as Stream<A, R, E>;
-  if (typeof target.pipe === "function") return target;
+  const candidate = stream as Partial<Stream<A, R, E>>;
+  if (typeof candidate.pipe === "function") return candidate as Stream<A, R, E>;
+
+  // The fluent facade is a compatibility wrapper. Keep the stream AST itself
+  // immutable so sharing it between functional and fluent APIs is safe.
+  const target = { ...stream } as Stream<A, R, E>;
 
   Object.defineProperties(target, {
     pipe: {
@@ -42,8 +46,8 @@ export function asStream<R, E, A>(stream: ZStream<R, E, A>): Stream<A, R, E> {
       },
     },
     collect: {
-      value(runtime: Runtime<R>) {
-        return runtime.toPromise(collectStream(target));
+      value<R0 extends R>(runtime: Runtime<R0>) {
+        return runtime.toPromise(collectStream(target) as any);
       },
     },
   });
