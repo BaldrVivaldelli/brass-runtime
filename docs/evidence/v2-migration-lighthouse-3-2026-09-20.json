@@ -62,9 +62,24 @@
     "rawReportPath": "artifacts/stability/v2-core-lighthouse-local-2026-09-20.json",
     "rawReportSha256": "54128e91b2ad6d3bedbaa29f7dff563bdc6196ed252a557dd76b8dd2e5d306ac"
   },
+  "registryFollowUp": {
+    "recordedAt": "2026-09-20T16:47:41.498Z",
+    "source": "npm registry tarball",
+    "version": "2.0.0-beta.0",
+    "distTag": "next",
+    "registryTarballSha256": "f6e9f3e95c256b0806be34da226774e8ce72d7bcdca2ac6c549109ad63e9c065",
+    "publicationEvidence": "docs/evidence/v2-beta-readiness-2026-09-20.json",
+    "checks": [
+      "v2 package root strict typecheck and execution",
+      "Effect result 42",
+      "Stream result [6, 8, 10]",
+      "beta /next rollback",
+      "published stable 1.22.0 rollback"
+    ]
+  },
   "negativeFindings": [
     "The static migration analyzer correctly reports no v1 imports because the baseline already uses /next; package-root promotion therefore requires installed-package type and execution checks rather than import counting alone.",
-    "The beta candidate is a local tarball and is not yet available through the npm next tag.",
+    "The initial migration run used the local beta tarball; a separate post-publication follow-up repeated the checks against the npm registry tarball after next became available.",
     "This small deterministic core example does not measure cancellation, concurrency, retained memory, latency, or HTTP behavior."
   ],
   "decision": "promote-the-documented-core-preview-to-the-v2-package-root",
@@ -72,7 +87,7 @@
   "limitations": [
     "This is an internal deterministic example, not an independent external production workload.",
     "The run proves one Effect and one Stream program and does not represent the full core API.",
-    "The beta candidate was packed and installed locally; this record does not claim registry beta publication.",
+    "The initial measurement used a local candidate; registry publication and the later public-tarball replay are separate, timestamped evidence.",
     "The published-v1 rollback was downloaded from npm during this run, but long-term registry availability is outside this evidence.",
     "CPU, memory, latency, retention, upgrade lag, and operational reliability are outside this migration record."
   ],

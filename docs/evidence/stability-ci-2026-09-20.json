@@ -1,0 +1,112 @@
+{
+  "schemaVersion": 1,
+  "kind": "github-actions-stability",
+  "recordedAt": "2026-09-20T17:29:32Z",
+  "packageVersion": "1.22.0",
+  "sourceSha": "f26f73dd97c185c66e688cfc242ab4399c43054f",
+  "budgetsVersion": 1,
+  "workflow": {
+    "runId": 35525819646,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35525819646",
+    "jobId": 106117659991,
+    "event": "workflow_dispatch",
+    "conclusion": "success",
+    "startedAt": "2026-09-20T17:25:34Z",
+    "completedAt": "2026-09-20T17:29:32Z",
+    "durationSeconds": 238
+  },
+  "environment": {
+    "runner": "ubuntu-latest",
+    "platform": "linux-x64",
+    "node": "22.23.2",
+    "forcedGc": true,
+    "wasmAvailable": true
+  },
+  "artifact": {
+    "id": 10609472526,
+    "name": "brass-stability-35525819646",
+    "sizeBytes": 5051,
+    "expiresAt": "2026-10-20T17:29:29Z",
+    "files": {
+      "runtime-soak.json": {
+        "bytes": 36150,
+        "sha256": "d1871821f804c158b6c71f434a0783429411ae84eac6558562ffddd907304f45"
+      },
+      "http-soak.json": {
+        "bytes": 2840,
+        "sha256": "7b716cbcf5a9d18aafe9e70a59bce994f679af304e34f43040468cf53b5e3ce5"
+      },
+      "adaptive-soak.json": {
+        "bytes": 2597,
+        "sha256": "ceb31a7d6581be9827c93fbfec761312094bff8a7f82b6f6eaaf4ae39aca0f74"
+      }
+    }
+  },
+  "conformance": {
+    "command": "npm run test:stability",
+    "result": "passed"
+  },
+  "runtime": {
+    "rounds": 10,
+    "iterationsPerRound": 5000,
+    "chainDepth": 100,
+    "heapTrendMb": 0.32,
+    "totalHeapDeltaMb": 0.218,
+    "totalRssDeltaMb": 20.32,
+    "throughputTrendPercent": 13.097,
+    "passed": true
+  },
+  "http": {
+    "calls": 100000,
+    "concurrency": 128,
+    "delayMs": 1,
+    "throughputPerSecond": 1513.091,
+    "requestP50Ms": 82.625,
+    "requestP95Ms": 104.303,
+    "requestP99Ms": 122.024,
+    "successes": 100000,
+    "errors": 0,
+    "heapDeltaMb": 10.946,
+    "rssDeltaMb": 71.125,
+    "adaptiveFinalLimit": 256,
+    "adaptiveMaxInFlight": 64,
+    "observedFinishedSpans": 10000,
+    "passed": true
+  },
+  "adaptive": {
+    "samplesPerScenario": 100000,
+    "keyCount": 64,
+    "results": [
+      {
+        "scenario": "stable",
+        "stateCount": 64,
+        "finalLimit": 8192,
+        "limitChanges": 2304,
+        "p50": 21,
+        "p99": 24,
+        "samplesPerSecond": 15868.729
+      },
+      {
+        "scenario": "saturation-recovery",
+        "stateCount": 64,
+        "finalLimit": 1435,
+        "limitChanges": 6845,
+        "p50": 18,
+        "p99": 20,
+        "samplesPerSecond": 15138.132
+      }
+    ],
+    "passed": true
+  },
+  "decision": "retained-ci-stability-gates-passed",
+  "limitations": [
+    "This is one GitHub-hosted runner execution, not a long-term trend or external production evidence.",
+    "The downloadable raw artifact expires after 30 days; committed hashes and run metadata preserve its identity after expiration.",
+    "Absolute throughput and memory values can vary across shared runners; versioned budgets and semantic invariants are the release decision."
+  ],
+  "reproduce": [
+    "gh run view 35525819646",
+    "gh run download 35525819646 --name brass-stability-35525819646",
+    "sha256sum runtime-soak.json http-soak.json adaptive-soak.json"
+  ]
+}

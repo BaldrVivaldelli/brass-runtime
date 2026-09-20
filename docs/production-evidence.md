@@ -22,8 +22,9 @@ against posting private traces, credentials, or restricted customer data.
 
 The v2 package and registry state are captured in
 [`v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
-It records a fully validated local candidate while explicitly preserving the
-fact that npm has no `next` tag yet.
+It records the protected OIDC publication, npm integrity and provenance, the
+public registry tarball replay, and rollback controls. npm currently resolves
+`next` to `2.0.0-beta.0` while `latest` remains `1.22.0`.
 
 The first v2 import inventory is recorded as
 [`v2-migration-assessment-2026-09-20.json`](./evidence/v2-migration-assessment-2026-09-20.json).
@@ -47,9 +48,27 @@ The third internal migration,
 [`v2-migration-lighthouse-3-2026-09-20.json`](./evidence/v2-migration-lighthouse-3-2026-09-20.json),
 promotes the core Effect and Stream example from `/next` to the beta package
 root. It produces identical results after rollback to the beta `/next` facade
-and to the exact published `brass-runtime@1.22.0` tarball. This completes the
-three internal lighthouse records without changing the count of external
-adopters or publishable case studies.
+and to the exact published `brass-runtime@1.22.0` tarball. Its timestamped
+follow-up repeats those checks against the public beta registry tarball. This
+completes the three internal lighthouse records without changing the count of
+external adopters or publishable case studies.
+
+## Documented internal use cases
+
+The master adoption objective permits consented internal or external use-case
+evidence. The following internal records meet the reproducibility and consent
+requirements without being relabeled as external production or public adopter
+case studies:
+
+| Workload | Consent boundary | Reproducible evidence |
+| --- | --- | --- |
+| React and vanilla workspace templates | anonymized internal migration evidence | two packed builds, stable rollback, beta root, and `/v1` bridge |
+| Express HTTP and observability example | internal repository example | strict types, three routes, trace propagation, metrics, health, and graceful shutdown |
+| Core Effect and Stream example | internal repository example | public beta root, `/next`, and stable-v1 execution with identical results |
+
+The first record explicitly does not authorize a public case study, and the
+other two remain internal evidence. Consequently the project still reports
+zero external-production adopters and zero publishable adopter case studies.
 
 The committed production-like baseline was recorded on a Ryzen 9 8945HS with
 Node 22.23.2. It contains seven runtime measurements, eleven local HTTP
@@ -66,8 +85,15 @@ A full local execution of the scheduled stability budgets is recorded in
 ten runtime retained-memory rounds, 100,000 observed HTTP calls with zero
 errors, and 100,000 samples each for stable and saturation/recovery limiter
 scenarios. The record includes hashes for the Git-ignored raw reports and is
-explicitly local production-like evidence; a retained scheduled CI run remains
-separate evidence.
+explicitly local production-like evidence.
+
+The corresponding cross-runner execution is recorded in
+[`stability-ci-2026-09-20.json`](./evidence/stability-ci-2026-09-20.json). GitHub
+Actions run `35525819646` passed the semantic/fault corpus, ten runtime rounds,
+100,000 observed HTTP calls with zero errors, and both 100,000-sample limiter
+scenarios. Its retained artifact has an ID, expiry, byte count, and SHA-256 for
+each raw report; the validator can optionally re-hash a downloaded artifact
+directory rather than trusting the summary alone.
 
 ## Reproduce the workloads
 

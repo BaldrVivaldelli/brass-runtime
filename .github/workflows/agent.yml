@@ -66,7 +66,7 @@ jobs:
           mkdir -p artifacts/agent
           npm pack --ignore-scripts --pack-destination artifacts/agent ./packages/agent
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: brass-agent-package
           path: artifacts/agent/*.tgz

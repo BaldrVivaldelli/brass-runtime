@@ -35,15 +35,18 @@ file. This is intentionally separate until the uncovered modules have tests.
 
 The baseline thresholds are:
 
-| Metric | Minimum |
-| --- | ---: |
-| Statements | 80% |
-| Branches | 65% |
-| Functions | 80% |
-| Lines | 80% |
+| Surface | Statements | Branches | Functions | Lines |
+| --- | ---: | ---: | ---: | ---: |
+| Whole repository | 80% | 65% | 80% | 80% |
+| Stable core | 94% | 85% | 95% | 95% |
+| Stable HTTP | 88% | 82% | 90% | 91% |
+| Stable schema | 88% | 75% | 85% | 90% |
+| Stable observability | 75% | 63% | 80% | 78% |
 
-These are whole-repository thresholds rather than per-file thresholds. Focused
-module tests and the exact public-API snapshot catch local regressions while
-allowing deliberately thin platform adapters and command-line entry points.
-Do not exclude executable code to make the number look better. Prefer focused
-tests for uncovered behavior, then raise the baseline.
+The repository-wide floor includes experimental Agent and Perf code, while the
+four path-scoped floors prevent that experimental surface from masking a
+regression in a stable product. Focused module tests and the exact public-API
+snapshot catch more local regressions while allowing deliberately thin
+platform adapters and command-line entry points. Do not exclude executable code
+to make the number look better. Prefer focused tests for uncovered behavior,
+then raise the relevant floor.

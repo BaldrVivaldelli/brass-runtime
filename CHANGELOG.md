@@ -78,6 +78,9 @@
 - Published `brass-runtime@2.0.0-beta.0` on `next` with npm provenance while
   preserving `latest=1.22.0`, then recorded registry integrity, artifact, and
   rollback evidence and allowed for npm's asynchronous indexing delay.
+- Recorded the first retained green GitHub Actions stability run with verified
+  report hashes and budgets, fixed the undispatchable v2 Node matrix concurrency
+  expression, and moved remaining artifact uploads off the deprecated action.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.
