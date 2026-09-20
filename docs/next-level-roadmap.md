@@ -54,8 +54,10 @@ compatibility, or operational evidence does not close a workstream.
   Agent and Perf now own bundled declarations as well as executable output.
   Their v1 compatibility entrypoints/artifact remain in `brass-runtime`.
   Registry checks confirm that none of the three scoped packages exists yet;
-  a manual protected `alpha` publisher is ready, but first publication and npm
-  namespace authorization remain open external steps.
+  a manual protected `alpha` publisher is ready and its short-lived bootstrap
+  credential is isolated from the stable release token. First publication,
+  the environment-scoped secret, and npm namespace authorization remain open
+  external steps.
 - A distinct `2.0.0-beta.0` tarball shape is generated and installed locally:
   v2 owns the root, `/v1` is the bridge, optional products are absent, and the
   WASM engine is installed separately. Both variants of the first lighthouse

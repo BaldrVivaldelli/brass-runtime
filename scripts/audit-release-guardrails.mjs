@@ -73,7 +73,7 @@ for (const [branchName, desired] of Object.entries(policy.branches)) {
 
 for (const [environmentName, desired] of Object.entries(policy.environments)) {
   const environment = apiOptional(`repos/${policy.repository}/environments/${environmentName}`);
-  observed.environments[environmentName] = { exists: environment !== null };
+  observed.environments[environmentName] = { exists: environment !== null, secretNames: [] };
   if (!environment) {
     failures.push(`environment ${environmentName} does not exist`);
     continue;
@@ -102,6 +102,14 @@ for (const [environmentName, desired] of Object.entries(policy.environments)) {
     environment.deployment_branch_policy?.custom_branch_policies,
     !desired.protectedBranchesOnly,
   );
+  const environmentSecrets = api(`repos/${policy.repository}/environments/${environmentName}/secrets`);
+  const environmentSecretNames = environmentSecrets.secrets?.map((secret) => secret.name).sort() ?? [];
+  observed.environments[environmentName].secretNames = environmentSecretNames;
+  for (const secretName of desired.requiredSecretNames) {
+    if (!environmentSecretNames.includes(secretName)) {
+      failures.push(`${environmentName} is missing environment secret ${secretName}`);
+    }
+  }
 }
 
 if (process.argv.includes("--json")) {

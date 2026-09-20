@@ -56,6 +56,19 @@ function preflight(configuration) {
   for (const name of configuration.requiredRepositorySecretNames) {
     if (!names.has(name)) throw new Error(`Preflight failed: missing repository secret ${name}`);
   }
+  for (const [environmentName, environment] of Object.entries(configuration.environments)) {
+    const environmentSecrets = api(
+      `repos/${configuration.repository}/environments/${environmentName}/secrets`,
+    );
+    const environmentSecretNames = new Set(
+      environmentSecrets.secrets?.map((secret) => secret.name) ?? [],
+    );
+    for (const name of environment.requiredSecretNames) {
+      if (!environmentSecretNames.has(name)) {
+        throw new Error(`Preflight failed: missing ${environmentName} environment secret ${name}`);
+      }
+    }
+  }
   for (const branchName of Object.keys(configuration.branches)) {
     api(`repos/${configuration.repository}/branches/${branchName}`);
   }

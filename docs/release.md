@@ -125,18 +125,25 @@ runs the release and dry-run gates, rejects reused versions, publishes only to
 
 All three first attempts reached npm, which rejected package creation with
 `E404` without registry mutation. Confirm the publishing user's `brass`
-membership and replace `NPM_TOKEN` with a short-lived token that has
-organization read access and `@brass` package-scope publish access. Select
-`bootstrap=true` only for each package's first version. Once it exists, the
-workflow rejects token bootstrap and requires its npm Trusted Publisher; after
-all three first versions, retire the secret. Never expose it in source or logs.
+membership and create the `NPM_PRODUCT_BOOTSTRAP_TOKEN` environment secret in
+`npm-products` with a short-lived token that has organization read access and
+`@brass` package-scope publish access. Do not replace the repository-level
+`NPM_TOKEN`: it belongs only to the stable unscoped `brass-runtime` release.
+Select `bootstrap=true` only for each package's first version. Once it exists,
+the workflow rejects token bootstrap and requires its npm Trusted Publisher;
+after all three first versions, retire the product bootstrap secret. Never
+expose either credential in source or logs.
 Configure each package with GitHub owner `BaldrVivaldelli`, repository
 `brass-runtime`, workflow `publish-product-alpha.yml`, environment
 `npm-products`, and direct `npm publish` enabled.
 
-Bootstrap run `35538420035` authenticated as `avivaldelli` but got `E403`
-reading `brass` membership. It stopped before build or publication. The blocker
-is membership or organization-read permission; scope write remains required.
+Bootstrap run `35544680926` authenticated as `avivaldelli` but got `E403`
+reading `brass` membership. It stopped before build or publication with no
+registry mutation. The product workflow now uses only the environment-scoped
+`NPM_PRODUCT_BOOTSTRAP_TOKEN`, preventing a scoped bootstrap credential from
+breaking or broadening the stable publisher. The remaining blocker is the new
+secret plus membership or organization-read permission; scope write remains
+required.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the

@@ -28,9 +28,9 @@ const expectedAttemptRuns = new Map([
   ["engine-wasm", 35520792944],
 ]);
 
-if (evidence.schemaVersion !== 3) failures.push("schemaVersion must be 3");
-if (evidence.status !== "publication-blocked-on-npm-organization-read-access") {
-  failures.push("product readiness must record the verified npm organization-access blocker");
+if (evidence.schemaVersion !== 4) failures.push("schemaVersion must be 4");
+if (evidence.status !== "publication-blocked-on-isolated-bootstrap-secret-and-npm-organization-read-access") {
+  failures.push("product readiness must record the isolated-secret and npm organization-access blockers");
 }
 if (!Array.isArray(evidence.products) || evidence.products.length !== expectedProducts.size) {
   failures.push("all three independent products are required");
@@ -83,6 +83,11 @@ if (evidence.publicationControl?.branch !== "main"
   || evidence.publicationControl?.environmentProtectedAtRecordedAt !== true
   || evidence.publicationControl?.requiredReviewer !== "BaldrVivaldelli"
   || evidence.publicationControl?.npmTokenSecretExistsAtRecordedAt !== true
+  || evidence.publicationControl?.credentialRemediation?.stableReleaseSecret !== "NPM_TOKEN"
+  || evidence.publicationControl?.credentialRemediation?.productBootstrapSecret !== "NPM_PRODUCT_BOOTSTRAP_TOKEN"
+  || evidence.publicationControl?.credentialRemediation?.productBootstrapScope !== "environment:npm-products"
+  || evidence.publicationControl?.credentialRemediation?.sharedCredentialRemovedFromProductWorkflow !== true
+  || evidence.publicationControl?.credentialRemediation?.productBootstrapSecretPresentAtRecordedAt !== false
   || evidence.publicationControl?.authentication !== "granular-access-token-for-first-publication"
   || evidence.publicationControl?.distTag !== "alpha"
   || evidence.publicationControl?.provenance !== true
@@ -93,9 +98,9 @@ if (!Array.isArray(evidence.validatedConditions) || evidence.validatedConditions
   failures.push("product validation conditions are incomplete");
 }
 const bootstrap = evidence.bootstrapVerificationAttempt;
-if (bootstrap?.runId !== 35538420035
-  || bootstrap?.jobId !== 106151532383
-  || bootstrap?.runUrl !== "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035"
+if (bootstrap?.runId !== 35544680926
+  || bootstrap?.jobId !== 106168376815
+  || bootstrap?.runUrl !== "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35544680926"
   || !/^[a-f0-9]{40}$/.test(bootstrap?.sourceSha ?? "")
   || bootstrap?.environment !== "npm-products"
   || bootstrap?.environmentApproved !== true
@@ -108,7 +113,7 @@ if (bootstrap?.runId !== 35538420035
   failures.push("latest npm bootstrap verification evidence is incomplete");
 }
 if (evidence.blocker?.code !== "E403"
-  || !evidence.blocker?.causeBoundary?.includes("NPM_TOKEN")
+  || !evidence.blocker?.causeBoundary?.includes("NPM_PRODUCT_BOOTSTRAP_TOKEN")
   || !Array.isArray(evidence.blocker?.notCausedBy)
   || evidence.blocker.notCausedBy.length < 4) {
   failures.push("npm scope-access blocker must remain explicit and bounded by evidence");
@@ -140,7 +145,11 @@ for (const fragment of [
   if (!workflow.includes(fragment)) failures.push(`product publisher is missing ${fragment}`);
 }
 if ((workflow.match(/NODE_AUTH_TOKEN:/g)?.length ?? 0) !== 2) {
-  failures.push("NPM_TOKEN must be limited to bootstrap identity and first-publication steps");
+  failures.push("the product token must be limited to bootstrap identity and first-publication steps");
+}
+if ((workflow.match(/secrets\.NPM_PRODUCT_BOOTSTRAP_TOKEN/g)?.length ?? 0) !== 2
+  || workflow.includes("secrets.NPM_TOKEN")) {
+  failures.push("the product publisher must use only the isolated NPM_PRODUCT_BOOTSTRAP_TOKEN");
 }
 const trustedPublishStep = workflow.slice(
   workflow.indexOf("- name: Publish alpha with npm Trusted Publishing"),
@@ -157,6 +166,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `Product registry readiness validated (${evidence.products.map((product) => product.package).join(", ")}; ` +
-    "published: no, blocker: npm organization read access).",
+    "published: no, blockers: isolated environment secret and npm organization read access).",
   );
 }

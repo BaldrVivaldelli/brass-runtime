@@ -58,6 +58,12 @@ describe("companion product registry readiness", () => {
     changed.bootstrapVerificationAttempt.whoami = "failed";
     expect(validate(changed)).toMatchObject({ status: 1 });
   });
+
+  it("rejects evidence that reuses the stable release credential", () => {
+    const changed = structuredClone(committed);
+    changed.publicationControl.credentialRemediation.productBootstrapSecret = "NPM_TOKEN";
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
 });
 
 function validate(evidence) {
