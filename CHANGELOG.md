@@ -69,6 +69,9 @@
 - Routed beta publication through the npm-trusted `release.yml` caller so the
   protected `next` channel uses short-lived OIDC credentials instead of a
   long-lived npm write token.
+- Pinned and verified npm `11.5.1` in that publisher, satisfying npm's minimum
+  CLI version for the OIDC exchange instead of silently falling back to token
+  authentication with the npm 10 CLI bundled by Node 22.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.

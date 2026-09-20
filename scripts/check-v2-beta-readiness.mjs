@@ -72,6 +72,8 @@ if (!Array.isArray(evidence.reproduce) || !evidence.reproduce.includes("npm run 
 for (const fragment of [
   "github.ref == 'refs/heads/next' && inputs.publish",
   "environment: npm-next",
+  "npm install --global npm@11.5.1",
+  "test \"$(npm --version)\" = \"11.5.1\"",
   "npm run release:check",
   "--dry-run --access public --tag next --json",
   "--tag next",
