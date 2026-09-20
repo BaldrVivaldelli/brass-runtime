@@ -123,9 +123,12 @@ unchanged. This is a prepared route, not a claim that those packages are
 already public.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
-locally and compares package identity, exact version, file count, compressed
-size, and unpacked size with the committed readiness evidence. It also fails if
-npm would silently normalize a product manifest. The command runs inside
+locally and compares package identity, exact version, and file count with the
+committed readiness evidence. Compressed and unpacked byte counts are checked
+against the reviewed product budgets because optimized WASM bytes can differ
+slightly across supported build hosts; the recorded counts remain a dated
+measurement, not a cross-platform checksum. The validator also fails if npm
+would silently normalize a product manifest. The command runs inside
 `release:check` after packed-consumer validation has rebuilt each product.
 
 The 2026-09-20 remote-control audit found the repository-level `NPM_TOKEN`, but
