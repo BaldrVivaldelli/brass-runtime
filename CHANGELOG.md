@@ -63,6 +63,9 @@
   `@brass/engine-wasm` alpha candidates with self-contained declarations,
   packed-consumer smokes, individual size budgets, and protected manual
   publication that cannot move `latest`.
+- Recorded the three protected first-publication attempts and their bounded npm
+  `E404` scope-access failure, then added an early token identity/organization
+  membership preflight and a five-minute registry propagation window.
 - Added a protected manual `brass-runtime@2.0.0-beta.0` publisher for the
   `next` channel with exact-version rebuild, npm dry-run, provenance, retained
   artifact, v1 rollback, and post-publication tag verification.
