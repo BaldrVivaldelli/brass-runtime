@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { validateProductPublishReport } from "./product-publish-report.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const requested = process.argv[2];
@@ -17,6 +18,10 @@ const evidence = JSON.parse(readFileSync(
   "utf8",
 ));
 const evidenceById = new Map(evidence.products.map((product) => [product.id, product]));
+const productSizeBudgets = JSON.parse(readFileSync(
+  path.join(root, "scripts", "package-size-budget.json"),
+  "utf8",
+)).productTargets;
 const temporaryRoot = mkdtempSync(path.join(tmpdir(), "brass-product-publish-dry-run-"));
 
 try {
@@ -56,27 +61,16 @@ function validateProduct(product) {
   }
 
   const report = JSON.parse(result.stdout);
-  const actual = {
-    id: report.id,
-    name: report.name,
-    version: report.version,
-    files: report.entryCount ?? report.files?.length,
-    compressedBytes: report.size,
-    unpackedBytes: report.unpackedSize,
-  };
-  const expected = {
-    id: `${manifest.name}@${manifest.version}`,
-    name: manifest.name,
-    version: manifest.version,
-    files: recorded.publishDryRun.files,
-    compressedBytes: recorded.publishDryRun.compressedBytes,
-    unpackedBytes: recorded.publishDryRun.unpackedBytes,
-  };
-  for (const [key, value] of Object.entries(expected)) {
-    if (actual[key] !== value) {
-      throw new Error(`${manifest.name} dry-run ${key} changed: ${actual[key]} !== ${value}`);
-    }
-  }
+  const actual = validateProductPublishReport({
+    manifest,
+    recorded,
+    report,
+    budget: productSizeBudgets[product],
+  });
+  console.log(
+    `${manifest.name} dry-run: ${actual.files} files, ${actual.compressedBytes} compressed bytes, ` +
+    `${actual.unpackedBytes} unpacked bytes.`,
+  );
 }
 
 function npmCommand() {
