@@ -4,6 +4,8 @@ Nest wires Brass through an injectable service. Controllers receive the service,
 create inbound request observability contexts, and run Brass HTTP effects inside
 that request context.
 
+Requires Node `>=20`.
+
 ## Run
 
 From the repository root:
@@ -11,7 +13,7 @@ From the repository root:
 ```bash
 npm run build:ts
 cd examples/nestjs
-npm install
+npm ci
 npm run dev
 ```
 
@@ -21,4 +23,3 @@ Try:
 curl http://localhost:3002/users/42
 curl http://localhost:3002/metrics
 ```
-

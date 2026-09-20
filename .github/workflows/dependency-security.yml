@@ -1,0 +1,44 @@
+name: Dependency Security
+
+on:
+  pull_request:
+  push:
+    branches: [main, next]
+  schedule:
+    - cron: "30 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/angular/package-lock.json
+            examples/nestjs/package-lock.json
+            examples/nextjs/package-lock.json
+            examples/react/package-lock.json
+            extensions/vscode-brass-agent/package-lock.json
+
+      - run: npm run validate:dependency-security
+      - run: npm audit --package-lock-only --audit-level=high
+      - run: npm audit --package-lock-only --audit-level=high --prefix examples/angular
+      - run: npm audit --package-lock-only --audit-level=high --prefix examples/nestjs
+      - run: npm audit --package-lock-only --audit-level=high --prefix examples/nextjs
+      - run: npm audit --package-lock-only --audit-level=high --prefix examples/react
+      - run: npm audit --package-lock-only --audit-level=high --prefix extensions/vscode-brass-agent
