@@ -84,6 +84,38 @@ if (evidence.publication?.postPublishValidation?.source !== "npm registry tarbal
   || !evidence.publication?.postPublishValidation?.createBrass?.includes("React and vanilla")) {
   failures.push("post-publication registry consumer and rollback validation is incomplete");
 }
+
+const workflowValidation = evidence.workflowValidation;
+if (!/^[a-f0-9]{40}$/.test(workflowValidation?.sourceSha ?? "")
+  || workflowValidation?.branch !== "next"
+  || JSON.stringify(workflowValidation?.nodes) !== JSON.stringify([20, 22])
+  || !Array.isArray(workflowValidation?.checks)
+  || ![
+    "npm ci",
+    "npm run test:types",
+    "npm run build:wasm",
+    "npm run validate:v2-beta",
+    "npm run validate:example:v2-core",
+  ].every((command) => workflowValidation.checks.includes(command))) {
+  failures.push("v2 workflow verification must identify next, Node 20/22, and the complete validation path");
+}
+for (const [name, event] of [["automatic", "push"], ["manual", "workflow_dispatch"]]) {
+  const run = workflowValidation?.[name];
+  if (!Number.isInteger(run?.runId)
+    || !/^https:\/\/github\.com\//.test(run?.runUrl ?? "")
+    || run?.event !== event
+    || run?.conclusion !== "success"
+    || !Number.isInteger(run?.jobs?.["20"])
+    || !Number.isInteger(run?.jobs?.["22"])
+    || !Number.isInteger(run?.artifact?.id)
+    || run?.artifact?.name !== "brass-runtime-v2-beta-package"
+    || !Number.isInteger(run?.artifact?.archiveBytes)
+    || run.artifact.archiveBytes < 1
+    || !/^sha256:[a-f0-9]{64}$/.test(run?.artifact?.digest ?? "")
+    || !Number.isFinite(Date.parse(run?.artifact?.expiresAt))) {
+    failures.push(`${name} v2 workflow verification is incomplete or unsuccessful`);
+  }
+}
 for (const [key, maximum] of [
   ["compressedBytes", budget.compressedBytes],
   ["unpackedBytes", budget.unpackedBytes],

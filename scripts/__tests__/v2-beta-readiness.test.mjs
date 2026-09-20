@@ -57,6 +57,20 @@ describe("v2 beta readiness integrity", () => {
     const result = validate(changed);
     expect(result.status).toBe(1);
   });
+
+  it("rejects a failed manual workflow verification", () => {
+    const changed = structuredClone(committed);
+    changed.workflowValidation.manual.conclusion = "failure";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects a manual verification that was not dispatched manually", () => {
+    const changed = structuredClone(committed);
+    changed.workflowValidation.manual.event = "push";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
 });
 
 function validate(evidence) {

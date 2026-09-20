@@ -80,6 +80,52 @@
       "createBrass": "React and vanilla templates built against the v2 facade and /v1 bridge"
     }
   },
+  "workflowValidation": {
+    "sourceSha": "f09efbe18e5fa1123792fa47f7c1d8f69c0a5edd",
+    "branch": "next",
+    "nodes": [20, 22],
+    "checks": [
+      "npm ci",
+      "npm run test:types",
+      "npm run build:wasm",
+      "npm run validate:v2-beta",
+      "npm run validate:example:v2-core"
+    ],
+    "automatic": {
+      "runId": 35527101875,
+      "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35527101875",
+      "event": "push",
+      "conclusion": "success",
+      "jobs": {
+        "20": 106121064240,
+        "22": 106121064077
+      },
+      "artifact": {
+        "id": 10610522057,
+        "name": "brass-runtime-v2-beta-package",
+        "archiveBytes": 615798,
+        "digest": "sha256:03c2caf687547b470437bda4319807864d874f2b95ba2d5721909077a91ad5fd",
+        "expiresAt": "2026-12-19T17:49:47Z"
+      }
+    },
+    "manual": {
+      "runId": 35527266584,
+      "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35527266584",
+      "event": "workflow_dispatch",
+      "conclusion": "success",
+      "jobs": {
+        "20": 106121496074,
+        "22": 106121496173
+      },
+      "artifact": {
+        "id": 10609444599,
+        "name": "brass-runtime-v2-beta-package",
+        "archiveBytes": 615798,
+        "digest": "sha256:18d378f8ede991f75d5113600992e150b788447cba21aa6f68b74d2ac7c8886c",
+        "expiresAt": "2026-12-19T17:52:53Z"
+      }
+    }
+  },
   "rollback": {
     "stable": "1.22.0",
     "removeNext": "npm dist-tag rm brass-runtime next",
