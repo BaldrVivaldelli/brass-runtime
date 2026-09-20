@@ -1,0 +1,104 @@
+name: Publish V2 Beta
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact v2 beta version (for example, 2.0.0-beta.0)
+        required: true
+        default: 2.0.0-beta.0
+        type: string
+      publish:
+        description: Publish the validated package to npm with the next tag
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-v2-beta
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.ref == 'refs/heads/next' && inputs.publish
+    runs-on: ubuntu-latest
+    environment: npm-next
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: "https://registry.npmjs.org"
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run release:check
+
+      - name: Build and validate the exact beta candidate
+        env:
+          BRASS_BETA_VERSION: ${{ inputs.version }}
+        run: npm run validate:v2-beta -- --version "$BRASS_BETA_VERSION"
+
+      - name: Validate the core lighthouse against the exact beta candidate
+        env:
+          BRASS_BETA_VERSION: ${{ inputs.version }}
+        run: npm run validate:example:v2-core -- --beta-tarball "artifacts/v2-beta/brass-runtime-${BRASS_BETA_VERSION}.tgz"
+
+      - name: Dry-run the exact npm publication
+        run: npm publish ./artifacts/v2-beta/package --dry-run --access public --tag next --json
+
+      - name: Snapshot registry state and reject an existing version
+        id: registry-before
+        env:
+          BRASS_BETA_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          stable_latest="$(npm view brass-runtime dist-tags.latest)"
+          prior_next="$(npm view brass-runtime dist-tags.next 2>/dev/null || true)"
+          if npm view "brass-runtime@$BRASS_BETA_VERSION" version >/dev/null 2>&1; then
+            echo "brass-runtime@$BRASS_BETA_VERSION already exists; choose a new exact beta version" >&2
+            exit 1
+          fi
+          echo "stable_latest=$stable_latest" >> "$GITHUB_OUTPUT"
+          echo "prior_next=$prior_next" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: brass-runtime-${{ inputs.version }}
+          path: artifacts/v2-beta/*.tgz
+          if-no-files-found: error
+
+      - name: Publish only to the next channel
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish ./artifacts/v2-beta/package --access public --tag next --provenance
+
+      - name: Verify next changed and latest did not
+        env:
+          BRASS_BETA_VERSION: ${{ inputs.version }}
+          STABLE_LATEST_BEFORE: ${{ steps.registry-before.outputs.stable_latest }}
+        shell: bash
+        run: |
+          current_next=""
+          for attempt in 1 2 3 4 5 6; do
+            current_next="$(npm view brass-runtime dist-tags.next 2>/dev/null || true)"
+            if [ "$current_next" = "$BRASS_BETA_VERSION" ]; then
+              break
+            fi
+            sleep 5
+          done
+          current_latest="$(npm view brass-runtime dist-tags.latest)"
+          test "$current_next" = "$BRASS_BETA_VERSION"
+          test "$current_latest" = "$STABLE_LATEST_BEFORE"
+          echo "Published brass-runtime@$BRASS_BETA_VERSION on next; latest remains $current_latest." >> "$GITHUB_STEP_SUMMARY"

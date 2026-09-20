@@ -4,6 +4,17 @@
 applications exercise a smaller facade without breaking the v1 compatibility
 surface. The preview is experimental until a major release promotes it.
 
+The installable beta candidate promotes that same facade to the package root,
+keeps it aliased at `/next`, and moves the frozen root compatibility surface to
+`/v1`. It requires Node 20 or 22 and is built locally with:
+
+```bash
+npm run validate:v2-beta
+```
+
+The command leaves a validated `2.0.0-beta.0` tarball under
+`artifacts/v2-beta/`. It does not publish anything.
+
 ## Contract
 
 The v2 root should expose concepts, not every implementation helper. Its runtime
@@ -28,6 +39,7 @@ v2 migration is prepared.
 | --- | --- |
 | `succeed(value)` / `asyncSucceed(value)` | `Effect.succeed(value)` |
 | `flatMap(effect, next)` / `asyncFlatMap(...)` | `Effect.flatMap(effect, next)` |
+| `toPromise(effect, env)` | `runPromise(effect, env)` |
 | `sleep(ms)` | `Effect.sleep(ms)` |
 | `retry(effect, policy)` | `Effect.retry(effect, policy)` |
 | `layerValue(tag, value)` | `Layer.value(tag, value)` |
@@ -50,5 +62,11 @@ Before promotion to the v2 root:
 4. A packed-package smoke test validates Node, CJS, ESM, and browser imports.
 5. A migration guide covers every removed or renamed v1 root export.
 
+Gate 5 is machine-enforced by the generated
+[`v1-to-v2-export-map.json`](./v1-to-v2-export-map.json): a build fails if any
+v1 root symbol lacks either a v2 target or a stable `/core` compatibility
+owner.
+
 Agent, performance tooling, and editor integration are intentionally absent
-from this facade. They will move to independently versioned product surfaces.
+from this facade. Agent and performance tooling have independently built
+packages, and WASM is an optional `@brass/engine-wasm` peer in the beta.

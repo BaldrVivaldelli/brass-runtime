@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "consumerId": "internal-core-effect-stream-lighthouse-3",
+  "stage": "completed",
+  "consent": "granted",
+  "consentScope": "Internal repository example and anonymized migration evidence; no external adopter claim is made.",
+  "publishableCaseStudy": false,
+  "source": {
+    "kind": "internal-core-example",
+    "filesScanned": 1,
+    "workload": "Effect composition, Stream transformation, runtime execution, and package-entrypoint rollback"
+  },
+  "baseline": {
+    "entrypoint": "brass-runtime/next",
+    "filesWithV1Imports": 0,
+    "documentedMappings": 0,
+    "directMoves": 0,
+    "manualDecisions": 0,
+    "parseErrors": 0
+  },
+  "result": {
+    "entrypoint": "brass-runtime",
+    "filesWithV1Imports": 0,
+    "documentedMappings": 0,
+    "directMoves": 0,
+    "manualDecisions": 0,
+    "parseErrors": 0
+  },
+  "manualImports": [],
+  "experience": {
+    "unsupportedDistinctImports": 0,
+    "v1FallbackOccurrences": 0,
+    "applicationFacades": 0
+  },
+  "migration": {
+    "startedAt": "2026-09-20T14:48:17Z",
+    "finishedAt": "2026-09-20T14:48:21Z",
+    "durationSeconds": 4,
+    "rawExecutionDurationMilliseconds": 2914,
+    "includes": "installing the local beta, strict typecheck, execution, beta /next rollback, downloading published stable v1, and stable rollback execution"
+  },
+  "thresholds": [
+    { "name": "manual migration decisions", "expected": 0, "actual": 0, "passed": true },
+    { "name": "strict TypeScript checks", "expected": "3/3 pass", "actual": "3/3 pass", "passed": true },
+    { "name": "Effect result", "expected": 42, "actual": 42, "passed": true },
+    { "name": "Stream result", "expected": [6, 8, 10], "actual": [6, 8, 10], "passed": true },
+    { "name": "beta /next rollback", "expected": "pass", "actual": "pass", "passed": true },
+    { "name": "published stable-v1 rollback", "expected": "pass", "actual": "pass", "passed": true }
+  ],
+  "validation": {
+    "templateBuildsPassed": 1,
+    "templateBuildsTotal": 1,
+    "publishedPackageTemplateBuildsPassed": 1,
+    "publishedPackageTemplateBuildsTotal": 1,
+    "rollbackTemplateBuildsPassed": 2,
+    "rollbackTemplateBuildsTotal": 2,
+    "betaCandidateVersion": "2.0.0-beta.0",
+    "betaCandidateTarballSha256": "625ca6fdb6df772756f132c04657fb462d8f5110a5bb12098db8a72265dd2a22",
+    "publishedStableVersion": "1.22.0",
+    "publishedStableSource": "npm:brass-runtime@1.22.0",
+    "rawReportPath": "artifacts/stability/v2-core-lighthouse-local-2026-09-20.json",
+    "rawReportSha256": "54128e91b2ad6d3bedbaa29f7dff563bdc6196ed252a557dd76b8dd2e5d306ac"
+  },
+  "negativeFindings": [
+    "The static migration analyzer correctly reports no v1 imports because the baseline already uses /next; package-root promotion therefore requires installed-package type and execution checks rather than import counting alone.",
+    "The beta candidate is a local tarball and is not yet available through the npm next tag.",
+    "This small deterministic core example does not measure cancellation, concurrency, retained memory, latency, or HTTP behavior."
+  ],
+  "decision": "promote-the-documented-core-preview-to-the-v2-package-root",
+  "rollbackPath": "Change the import from brass-runtime to brass-runtime/next inside the beta, or pin npm:brass-runtime@1.22.0 and retain /next; both rollback paths passed strict types and identical execution results.",
+  "limitations": [
+    "This is an internal deterministic example, not an independent external production workload.",
+    "The run proves one Effect and one Stream program and does not represent the full core API.",
+    "The beta candidate was packed and installed locally; this record does not claim registry beta publication.",
+    "The published-v1 rollback was downloaded from npm during this run, but long-term registry availability is outside this evidence.",
+    "CPU, memory, latency, retention, upgrade lag, and operational reliability are outside this migration record."
+  ],
+  "reproduce": "node scripts/analyze-v2-migration.mjs --json examples/v2-preview; npm run validate:v2-beta -- --version 2.0.0-beta.0; npm run validate:example:v2-core -- --report artifacts/stability/v2-core-lighthouse-local-2026-09-20.json"
+}

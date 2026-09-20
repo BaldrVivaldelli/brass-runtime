@@ -6,13 +6,37 @@ const coverageThresholds = (() => {
   if (coverageGate === "off") return undefined;
   if (coverageGate === "100") return { 100: true, perFile: true } as const;
 
-  // Repository-wide gate across every shipped subsystem. Focused per-file
-  // regressions are handled by module tests and exact public API checks.
+  // Repository-wide floor plus independent floors for stable product surfaces.
+  // Experimental Agent/Perf coverage cannot mask a stable-module regression.
   return {
     statements: 80,
     branches: 65,
     functions: 80,
     lines: 80,
+    "src/core/**/*.ts": {
+      statements: 94,
+      branches: 85,
+      functions: 95,
+      lines: 95,
+    },
+    "src/http/**/*.ts": {
+      statements: 88,
+      branches: 82,
+      functions: 90,
+      lines: 91,
+    },
+    "src/schema/**/*.ts": {
+      statements: 88,
+      branches: 75,
+      functions: 85,
+      lines: 90,
+    },
+    "src/observability/**/*.ts": {
+      statements: 75,
+      branches: 63,
+      functions: 80,
+      lines: 78,
+    },
   };
 })();
 

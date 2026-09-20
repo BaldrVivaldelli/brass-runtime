@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { async, asyncFlatMap, asyncSucceed, type Async } from "../../types/asyncEffect";
+import { async, asyncFlatMap, asyncFold, asyncSucceed, asyncSync, type Async } from "../../types/asyncEffect";
 import { Cause, Exit, uninterruptible, type Exit as EffectExit } from "../../types/effect";
 import { registerEffectDirect } from "../directEffectRunner";
 import { makeFiberRef } from "../fiberRef";
@@ -60,6 +60,21 @@ describe("registerEffectDirect", () => {
 
     expect(registrationExits).toEqual([Exit.failCause(Cause.die(registrationError))]);
     expect(maskExits).toEqual([Exit.failCause(Cause.die(maskError))]);
+  });
+
+  it("routes Sync throws through the recoverable failure channel", () => {
+    const effect = asyncFold(
+      asyncSync(() => {
+        throw new Error("sync failed");
+      }),
+      (error) => asyncSucceed(error instanceof Error ? error.message : String(error)),
+      () => asyncSucceed("unexpected"),
+    );
+    const exits: EffectExit<never, string>[] = [];
+
+    registerEffectDirect(effect, undefined, (exit) => exits.push(exit as EffectExit<never, string>));
+
+    expect(exits).toEqual([Exit.succeed("sync failed")]);
   });
 
   it("reports interruption once even when the owned canceler throws", () => {

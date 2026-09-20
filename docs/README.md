@@ -1,5 +1,7 @@
 # Documentation
 
+- **[Next-level roadmap](./next-level-roadmap.md)** — adoption evidence, v2 promotion, and operational maturity exit criteria
+
 Start here:
 
 - **[Getting started](./getting-started.md)** — installation, first effects, and running examples
@@ -18,8 +20,10 @@ Start here:
 - **[Recipes](./recipes/README.md)** — copyable runtime, layer, HTTP server, testing, and performance paths
 - **[API polish notes](./api-polish.md)** — first-release DX audit and compatibility posture
 - **[Release checklist](./release.md)** — local release gate and perf evidence workflow
+- **[Support and maintenance](./support-and-maintenance.md)** — Node matrix, v1 LTS, v2 rollback, and release ownership
 - **[Production evidence](./production-evidence.md)** — evidence levels, reproducible baseline, and honest case-study path
 - **[Case studies](./case-studies/README.md)** — consent and evidence template for real adopters
+- **[Private adopter inventory](./adopter-inventory.md)** — consent-safe workload, retention, and upgrade-lag tracking
 - **[Modules overview](./modules.md)** — map of core modules and where things live
 - **[AI context pack](./ai/PROJECT_MAP.md)** — compact project map, invariants, validation matrix, and public API notes
 - **[Agent module boundaries](./agent-boundaries.md)** — rules for keeping `brass-agent` isolated from the core runtime

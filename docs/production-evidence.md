@@ -9,6 +9,48 @@ being oversold.
 | Production-like | Behavior under controlled runtime, HTTP, memory, and observability workloads | [`production-like-baseline-2026-09-19.json`](./evidence/production-like-baseline-2026-09-19.json) |
 | External production | Outcomes in an identifiable, consenting user workload | Not yet claimed |
 
+Public discovery signals are recorded in
+[`adoption-discovery-2026-09-20.json`](./evidence/adoption-discovery-2026-09-20.json).
+They show package reach and two GitHub dependency-graph repositories. Both are
+first-party: this repository and `create-brass`, the verified template consumer.
+No external public consumer is currently identifiable, and these signals must
+not be converted into active-user or production-workload counts.
+
+Users can provide a workload and choose an explicit evidence-consent level
+through the repository's **Brass adoption report** issue form. The form warns
+against posting private traces, credentials, or restricted customer data.
+
+The v2 package and registry state are captured in
+[`v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
+It records a fully validated local candidate while explicitly preserving the
+fact that npm has no `next` tag yet.
+
+The first v2 import inventory is recorded as
+[`v2-migration-assessment-2026-09-20.json`](./evidence/v2-migration-assessment-2026-09-20.json).
+Its completed, anonymized migration is recorded separately as
+[`v2-migration-lighthouse-1-2026-09-20.json`](./evidence/v2-migration-lighthouse-1-2026-09-20.json).
+The migration built both template variants against the packed 1.22.0 artifact
+and retained `zipPar` as its single distinct v1 fallback. Both variants also
+build unchanged after replacing only the local facade with its stable-v1
+adapter, proving the recorded rollback. Consent covers this internal anonymized
+evidence, not a public case study, and one consumer does not justify changing
+the v2 API.
+
+The second internal migration,
+[`v2-migration-lighthouse-2-2026-09-20.json`](./evidence/v2-migration-lighthouse-2-2026-09-20.json),
+moves the shared Express runtime, Layer, and LayerContext imports to the preview.
+Its packed smoke verifies types, HTTP, incoming trace propagation, health,
+metrics, and `SIGTERM` shutdown. `RuntimeService` and `makeConfigLayer` remain
+measured v1 fallbacks; this internal example is not external-production proof.
+
+The third internal migration,
+[`v2-migration-lighthouse-3-2026-09-20.json`](./evidence/v2-migration-lighthouse-3-2026-09-20.json),
+promotes the core Effect and Stream example from `/next` to the beta package
+root. It produces identical results after rollback to the beta `/next` facade
+and to the exact published `brass-runtime@1.22.0` tarball. This completes the
+three internal lighthouse records without changing the count of external
+adopters or publishable case studies.
+
 The committed production-like baseline was recorded on a Ryzen 9 8945HS with
 Node 22.23.2. It contains seven runtime measurements, eleven local HTTP
 variants with explicit GC and zero errors, and five observability measurements.
@@ -18,6 +60,14 @@ integrity check with:
 ```bash
 npm run validate:evidence
 ```
+
+A full local execution of the scheduled stability budgets is recorded in
+[`stability-local-2026-09-20.json`](./evidence/stability-local-2026-09-20.json):
+ten runtime retained-memory rounds, 100,000 observed HTTP calls with zero
+errors, and 100,000 samples each for stable and saturation/recovery limiter
+scenarios. The record includes hashes for the Git-ignored raw reports and is
+explicitly local production-like evidence; a retained scheduled CI run remains
+separate evidence.
 
 ## Reproduce the workloads
 

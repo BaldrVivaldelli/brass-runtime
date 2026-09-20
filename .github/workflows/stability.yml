@@ -1,0 +1,64 @@
+name: Stability
+
+on:
+  schedule:
+    - cron: "0 3 * * 6"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stability
+  cancel-in-progress: true
+
+jobs:
+  conformance-fault-and-soak:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run build:wasm
+
+      - name: Semantic conformance and bounded fault corpus
+        run: npm run test:stability
+
+      - name: Prepare diagnostic artifacts
+        run: mkdir -p artifacts/stability
+
+      - name: Runtime retained-memory soak
+        env:
+          BRASS_STABILITY_REPORT_PATH: artifacts/stability/runtime-soak.json
+        run: npm run perf:stability:soak | tee artifacts/stability/runtime-soak.log
+
+      - name: Observed HTTP sustained-load soak
+        env:
+          BRASS_STABILITY_REPORT_PATH: artifacts/stability/http-soak.json
+        run: npm run benchmark:http:stability | tee artifacts/stability/http-soak.log
+
+      - name: Adaptive limiter saturation/recovery soak
+        env:
+          BRASS_STABILITY_REPORT_PATH: artifacts/stability/adaptive-soak.json
+        run: npm run benchmark:adaptive:stability | tee artifacts/stability/adaptive-soak.log
+
+      - name: Upload stability diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brass-stability-${{ github.run_id }}
+          path: artifacts/stability/
+          if-no-files-found: warn
+          retention-days: 30

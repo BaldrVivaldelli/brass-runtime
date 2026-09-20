@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "kind": "adoption-discovery",
+  "recordedAt": "2026-09-20",
+  "package": "brass-runtime",
+  "npmDownloads": {
+    "source": "https://api.npmjs.org/downloads/point/{period}/brass-runtime",
+    "measurements": [
+      { "period": "last-week", "start": "2026-09-13", "end": "2026-09-19", "downloads": 1 },
+      { "period": "last-month", "start": "2026-08-21", "end": "2026-09-19", "downloads": 152 },
+      { "period": "last-year", "start": "2025-09-20", "end": "2026-09-19", "downloads": 8760 }
+    ]
+  },
+  "publicCodeSearch": {
+    "source": "GitHub legacy code search via gh",
+    "query": "brass-runtime filename:package.json",
+    "manifestHits": 11,
+    "repositories": 1,
+    "externalRepositories": 0
+  },
+  "githubDependencyGraph": {
+    "source": "https://github.com/BaldrVivaldelli/brass-runtime/network/dependents?dependent_type=REPOSITORY",
+    "reportedRepositories": 2,
+    "repositories": [
+      { "name": "BaldrVivaldelli/brass-runtime", "relationship": "source-and-examples" },
+      { "name": "BaldrVivaldelli/create-brass", "relationship": "first-party-template-consumer" }
+    ],
+    "externalRepositories": 0
+  },
+  "githubRepositorySignals": {
+    "stars": 6,
+    "forks": 0,
+    "subscribers": 0
+  },
+  "npmRegistry": {
+    "latest": "1.22.0",
+    "publishedVersions": 56,
+    "maintainers": 1
+  },
+  "workspaceScan": {
+    "declaredDependencyConsumers": 1,
+    "verifiedMigrationCandidates": 1,
+    "nameOnlyFalsePositives": 1
+  },
+  "verifiedConsumers": [
+    {
+      "id": "create-brass",
+      "relationship": "first-party-template-generator",
+      "visibility": "public",
+      "evidence": "v2-migration-lighthouse-1-2026-09-20.json"
+    }
+  ],
+  "inferredActiveUsers": null,
+  "inferredProductionWorkloads": null,
+  "decision": "outreach-and-consent-required",
+  "limitations": [
+    "npm downloads include installs from CI, caches, mirrors, maintainers, and bots and cannot identify people or active workloads.",
+    "GitHub code search and the dependency graph omit private repositories and may lag, miss, or de-duplicate public code.",
+    "The workspace scan covers only locally available projects and found no second package consumer.",
+    "No retention, upgrade-lag, deployment-stage, or production-reliability data can be derived from these signals."
+  ],
+  "reproduce": [
+    "curl -fsSL https://api.npmjs.org/downloads/point/last-week/brass-runtime",
+    "curl -fsSL https://api.npmjs.org/downloads/point/last-month/brass-runtime",
+    "curl -fsSL https://api.npmjs.org/downloads/point/last-year/brass-runtime",
+    "gh search code brass-runtime --filename package.json --limit 100 --json repository,path,url",
+    "curl -fsSL 'https://github.com/BaldrVivaldelli/brass-runtime/network/dependents?dependent_type=REPOSITORY'",
+    "gh api repos/BaldrVivaldelli/brass-runtime --jq '{forks_count,stargazers_count,subscribers_count}'",
+    "curl -fsSL https://registry.npmjs.org/brass-runtime | jq '{latest: .[\"dist-tags\"].latest, versions: (.versions | keys | length), maintainers: (.maintainers | length)}'"
+  ]
+}

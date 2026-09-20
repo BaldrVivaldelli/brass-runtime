@@ -1,0 +1,2760 @@
+{
+  "schemaVersion": 1,
+  "description": "Exhaustive generated disposition for every brass-runtime v1 root export before v2 promotion.",
+  "generatedFrom": {
+    "v1Root": {
+      "file": "dist/index.d.ts",
+      "sha256": "e085a67a5ec0e2504950130fa9a184010aba8967cbdc2d6eb2694ae2c4a3d9e0"
+    },
+    "v1Core": {
+      "file": "dist/core/index.d.ts",
+      "sha256": "2e641b5d20cecb1b7a73c13eda2a11a646f601829bb7e88fecbff62c3967a91a"
+    },
+    "v2Preview": {
+      "file": "dist/next.d.ts",
+      "sha256": "312e7beeefaf242db380cbb1d0662ea549809c79e8e6fcd9cc7f248afeb4038e"
+    }
+  },
+  "summary": {
+    "totalV1RootExports": 546,
+    "totalV2PreviewExports": 34,
+    "dispositions": {
+      "v1-compatibility-subpath": 413,
+      "v2-namespace": 103,
+      "v2-direct": 30
+    },
+    "uncovered": 0
+  },
+  "exports": {
+    "ABI_VERSION": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ABI_VERSION"
+    },
+    "AbortablePromiseFinish": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseFinish"
+    },
+    "AbortablePromiseLabelStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseLabelStats"
+    },
+    "AbortablePromiseOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseOptions"
+    },
+    "AbortablePromiseOutcome": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseOutcome"
+    },
+    "abortablePromiseStats": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#abortablePromiseStats"
+    },
+    "AbortablePromiseStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseStats"
+    },
+    "AbortablePromiseTimerWheel": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AbortablePromiseTimerWheel"
+    },
+    "acquireRelease": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#acquireRelease"
+    },
+    "andThen": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#andThen"
+    },
+    "andThenSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.andThen"
+    },
+    "applyFused": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#applyFused"
+    },
+    "assertAbiWordLimit": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertAbiWordLimit"
+    },
+    "assertCompletesWithin": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertCompletesWithin"
+    },
+    "assertFails": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertFails"
+    },
+    "assertFailsWith": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertFailsWith"
+    },
+    "assertNever": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertNever"
+    },
+    "assertSucceeds": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#assertSucceeds"
+    },
+    "asStream": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Stream.wrap"
+    },
+    "async": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.async"
+    },
+    "Async": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Async"
+    },
+    "asyncCatchAll": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.catchAll"
+    },
+    "asyncFail": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.fail"
+    },
+    "asyncFlatMap": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.flatMap"
+    },
+    "asyncFold": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#asyncFold"
+    },
+    "asyncInterruptible": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.interruptible"
+    },
+    "asyncMap": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.map"
+    },
+    "asyncMapError": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.mapError"
+    },
+    "AsyncRegisterRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AsyncRegisterRef"
+    },
+    "asyncSucceed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.succeed"
+    },
+    "asyncSync": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.sync"
+    },
+    "asyncTotal": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#asyncTotal"
+    },
+    "AsyncWithPromise": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#AsyncWithPromise"
+    },
+    "bounded": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#bounded"
+    },
+    "BoundedRingBuffer": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#BoundedRingBuffer"
+    },
+    "bracket": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#bracket"
+    },
+    "BrassEnv": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#BrassEnv"
+    },
+    "broadcast": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#broadcast"
+    },
+    "broadcastToHub": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#broadcastToHub"
+    },
+    "buffer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#buffer"
+    },
+    "bufferP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#bufferP"
+    },
+    "buildLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.build"
+    },
+    "BuiltLayer": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#BuiltLayer"
+    },
+    "Canceler": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Canceler"
+    },
+    "CancelToken": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CancelToken"
+    },
+    "catchAll": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.catchAll"
+    },
+    "catchTag": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#catchTag"
+    },
+    "catchTags": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#catchTags"
+    },
+    "Cause": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Cause"
+    },
+    "CausePrettyOptions": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#CausePrettyOptions"
+    },
+    "chunks": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#chunks"
+    },
+    "chunksP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#chunksP"
+    },
+    "CircuitBreaker": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CircuitBreaker"
+    },
+    "CircuitBreakerConfig": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CircuitBreakerConfig"
+    },
+    "CircuitBreakerError": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CircuitBreakerError"
+    },
+    "CircuitBreakerState": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CircuitBreakerState"
+    },
+    "CircuitBreakerStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CircuitBreakerStats"
+    },
+    "collectAllPar": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#collectAllPar"
+    },
+    "collectStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#collectStream"
+    },
+    "compose": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#compose"
+    },
+    "composeAll": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.composeAll"
+    },
+    "composeLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.compose"
+    },
+    "Concat": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Concat"
+    },
+    "concatStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#concatStream"
+    },
+    "ConfigLayerOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ConfigLayerOptions"
+    },
+    "ConfigLayerSource": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ConfigLayerSource"
+    },
+    "consoleJsonLogger": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#consoleJsonLogger"
+    },
+    "ContextNode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ContextNode"
+    },
+    "contramapSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.contramap"
+    },
+    "Counter": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Counter"
+    },
+    "ctxExtend": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ctxExtend"
+    },
+    "ctxToObject": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ctxToObject"
+    },
+    "CustomHostAction": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#CustomHostAction"
+    },
+    "DbHostAction": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#DbHostAction"
+    },
+    "debounce": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#debounce"
+    },
+    "decodeEvent": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#decodeEvent"
+    },
+    "decodeEventBatch": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#decodeEventBatch"
+    },
+    "decodeOpcodeNodes": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#decodeOpcodeNodes"
+    },
+    "decodeOpcodeProgram": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#decodeOpcodeProgram"
+    },
+    "DecodeRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#DecodeRef"
+    },
+    "DefaultHostExecutor": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#DefaultHostExecutor"
+    },
+    "defaultTracer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#defaultTracer"
+    },
+    "defineConfigLayer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#defineConfigLayer"
+    },
+    "defineLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.define"
+    },
+    "defineService": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#defineService"
+    },
+    "delayedEffect": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#delayedEffect"
+    },
+    "derivedRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#derivedRef"
+    },
+    "deserializeFusedPipeline": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#deserializeFusedPipeline"
+    },
+    "dropP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#dropP"
+    },
+    "dropStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#dropStream"
+    },
+    "dumpAllFibers": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#dumpAllFibers"
+    },
+    "EffectEnvironment": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EffectEnvironment"
+    },
+    "EffectFailure": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EffectFailure"
+    },
+    "EffectSuccess": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EffectSuccess"
+    },
+    "elapsed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.elapsed"
+    },
+    "Emit": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Emit"
+    },
+    "emitRuntimeBoundaryEvent": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#emitRuntimeBoundaryEvent"
+    },
+    "emitStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#emitStream"
+    },
+    "Empty": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Empty"
+    },
+    "emptyContext": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#emptyContext"
+    },
+    "emptyStream": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Stream.empty"
+    },
+    "encodeOpcodeNodes": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#encodeOpcodeNodes"
+    },
+    "encodeOpcodeProgram": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#encodeOpcodeProgram"
+    },
+    "end": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#end"
+    },
+    "ENGINE_ABI_CAPABILITIES": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ENGINE_ABI_CAPABILITIES"
+    },
+    "ENGINE_ABI_LIMITS": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ENGINE_ABI_LIMITS"
+    },
+    "ENGINE_ABI_MIN_COMPATIBLE_VERSION": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ENGINE_ABI_MIN_COMPATIBLE_VERSION"
+    },
+    "ENGINE_ABI_VERSION": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ENGINE_ABI_VERSION"
+    },
+    "EngineAbiCompatibilityError": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineAbiCompatibilityError"
+    },
+    "EngineAbiHandshake": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineAbiHandshake"
+    },
+    "EngineAbiProvider": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineAbiProvider"
+    },
+    "EngineEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineEvent"
+    },
+    "EngineFiberHandle": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineFiberHandle"
+    },
+    "EngineKind": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineKind"
+    },
+    "EngineSelection": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineSelection"
+    },
+    "EngineSelectionMode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineSelectionMode"
+    },
+    "engineStats": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#engineStats"
+    },
+    "EngineStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EngineStats"
+    },
+    "ensuring": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ensuring"
+    },
+    "EVENT_WORDS": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EVENT_WORDS"
+    },
+    "EventBus": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EventBus"
+    },
+    "EventBusOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EventBusOptions"
+    },
+    "EventHandler": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EventHandler"
+    },
+    "EventKindCode": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#EventKindCode"
+    },
+    "Exit": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Exit"
+    },
+    "exponential": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.exponential"
+    },
+    "fail": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.fail"
+    },
+    "Fiber": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Fiber"
+    },
+    "FiberContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberContext"
+    },
+    "FiberEngine": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberEngine"
+    },
+    "FiberEngineKind": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberEngineKind"
+    },
+    "FiberEngineStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberEngineStats"
+    },
+    "FiberId": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#FiberId"
+    },
+    "FiberInfo": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberInfo"
+    },
+    "FiberReadyQueue": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberReadyQueue"
+    },
+    "FiberReadyQueueOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberReadyQueueOptions"
+    },
+    "FiberReadyQueueStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberReadyQueueStats"
+    },
+    "FiberRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberRef"
+    },
+    "fiberRefSnapshot": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#fiberRefSnapshot"
+    },
+    "FiberRunState": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FiberRunState"
+    },
+    "FiberStatus": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#FiberStatus"
+    },
+    "fibonacci": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.fibonacci"
+    },
+    "filterMapP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#filterMapP"
+    },
+    "filterP": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Pipeline.filter"
+    },
+    "fixed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.fixed"
+    },
+    "flakyEffect": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#flakyEffect"
+    },
+    "flatMap": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.flatMap"
+    },
+    "FlatMapRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FlatMapRef"
+    },
+    "Flatten": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Flatten"
+    },
+    "flattenStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#flattenStream"
+    },
+    "FoldFailureRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FoldFailureRef"
+    },
+    "FoldSuccessRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FoldSuccessRef"
+    },
+    "foreachStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#foreachStream"
+    },
+    "forever": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.forever"
+    },
+    "fork": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#fork"
+    },
+    "formatCause": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#formatCause"
+    },
+    "formatLayerError": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#formatLayerError"
+    },
+    "fromArray": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Stream.from"
+    },
+    "FromArray": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FromArray"
+    },
+    "fromHub": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#fromHub"
+    },
+    "fromPromiseAbortable": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.fromPromiseAbortable"
+    },
+    "fromPull": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#fromPull"
+    },
+    "FromPull": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FromPull"
+    },
+    "fuse": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#fuse"
+    },
+    "FusedPipelineRepr": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FusedPipelineRepr"
+    },
+    "FusedPipelineStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FusedPipelineStats"
+    },
+    "FusedStep": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FusedStep"
+    },
+    "FuseResult": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FuseResult"
+    },
+    "FuseState": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FuseState"
+    },
+    "FusionOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#FusionOptions"
+    },
+    "Gauge": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Gauge"
+    },
+    "getBenchmarkBudget": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#getBenchmarkBudget"
+    },
+    "getCurrentFiber": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#getCurrentFiber"
+    },
+    "getFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#getFiberRef"
+    },
+    "getService": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.service"
+    },
+    "getServices": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.services"
+    },
+    "getStats": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#getStats"
+    },
+    "globalScheduler": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#globalScheduler"
+    },
+    "gracefulShutdown": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#gracefulShutdown"
+    },
+    "groupedP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#groupedP"
+    },
+    "Histogram": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Histogram"
+    },
+    "HistogramBuckets": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HistogramBuckets"
+    },
+    "HostAction": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostAction"
+    },
+    "HostActionKind": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostActionKind"
+    },
+    "HostActionResult": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostActionResult"
+    },
+    "HostExecutionContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostExecutionContext"
+    },
+    "HostExecutor": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostExecutor"
+    },
+    "HostRegistry": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostRegistry"
+    },
+    "HostRegistryStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HostRegistryStats"
+    },
+    "HttpHostAction": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HttpHostAction"
+    },
+    "Hub": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Hub"
+    },
+    "HubClosed": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HubClosed"
+    },
+    "HubStrategy": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#HubStrategy"
+    },
+    "identity": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#identity"
+    },
+    "inferCallerLaneFromStack": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#inferCallerLaneFromStack"
+    },
+    "initState": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#initState"
+    },
+    "InMemoryTracer": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#InMemoryTracer"
+    },
+    "InMemoryTracerOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#InMemoryTracerOptions"
+    },
+    "InMemoryTracerStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#InMemoryTracerStats"
+    },
+    "interleave": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#interleave"
+    },
+    "InternalFiberStatus": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#InternalFiberStatus"
+    },
+    "Interrupted": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Interrupted"
+    },
+    "InterruptibilityMode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#InterruptibilityMode"
+    },
+    "interruptible": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.interruptible"
+    },
+    "intersect": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.intersect"
+    },
+    "isCause": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#isCause"
+    },
+    "isFusionEnabled": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#isFusionEnabled"
+    },
+    "isFusionVerbose": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#isFusionVerbose"
+    },
+    "jitter": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.jitter"
+    },
+    "jittered": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.jittered"
+    },
+    "jitteredSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.jitteredSchedule"
+    },
+    "Joiner": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Joiner"
+    },
+    "joinSupervised": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#joinSupervised"
+    },
+    "JsFiberEngine": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#JsFiberEngine"
+    },
+    "JSONValue": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#JSONValue"
+    },
+    "LaneStatsData": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LaneStatsData"
+    },
+    "laneTag": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#laneTag"
+    },
+    "layer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.make"
+    },
+    "Layer": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Layer"
+    },
+    "LayerContext": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#LayerContext"
+    },
+    "layerEffect": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.effect"
+    },
+    "LayerErrorOf": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LayerErrorOf"
+    },
+    "layerFail": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.fail"
+    },
+    "layerFrom": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.from"
+    },
+    "layerFromContext": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.fromContext"
+    },
+    "LayerInputOf": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LayerInputOf"
+    },
+    "LayerOutputOf": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LayerOutputOf"
+    },
+    "LayerScope": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LayerScope"
+    },
+    "layerSucceed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.succeed"
+    },
+    "layerValue": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.value"
+    },
+    "linear": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.linear"
+    },
+    "linkAbortController": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#linkAbortController"
+    },
+    "liveClock": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#liveClock"
+    },
+    "locallyFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#locallyFiberRef"
+    },
+    "locallyFiberRefWith": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#locallyFiberRefWith"
+    },
+    "LogLevel": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#LogLevel"
+    },
+    "makeBoundedRingBuffer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeBoundedRingBuffer"
+    },
+    "makeCancelToken": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeCancelToken"
+    },
+    "makeCircuitBreaker": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeCircuitBreaker"
+    },
+    "makeConfigLayer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeConfigLayer"
+    },
+    "makeFiberReadyQueue": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeFiberReadyQueue"
+    },
+    "makeFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeFiberRef"
+    },
+    "makeHub": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeHub"
+    },
+    "makeLayerScope": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.scope"
+    },
+    "makeMetrics": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeMetrics"
+    },
+    "makeRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeRef"
+    },
+    "makeResource": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.make"
+    },
+    "makeRuntime": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#makeRuntime"
+    },
+    "makeRuntimeEventRecord": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeRuntimeEventRecord"
+    },
+    "makeRuntimeLayer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeRuntimeLayer"
+    },
+    "MakeRuntimeOptions": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#MakeRuntimeOptions"
+    },
+    "makeRuntimeRecorder": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeRuntimeRecorder"
+    },
+    "makeScheduleDriver": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.driver"
+    },
+    "makeSemaphore": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeSemaphore"
+    },
+    "makeServiceTag": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.tag"
+    },
+    "makeStreamChunker": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeStreamChunker"
+    },
+    "makeSupervisor": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeSupervisor"
+    },
+    "makeTestLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.test"
+    },
+    "makeTestLayers": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.tests"
+    },
+    "makeTestRuntime": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeTestRuntime"
+    },
+    "makeTracer": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeTracer"
+    },
+    "makeWorkerPool": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#makeWorkerPool"
+    },
+    "managed": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#managed"
+    },
+    "Managed": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Managed"
+    },
+    "managedAll": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#managedAll"
+    },
+    "ManagedResource": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ManagedResource"
+    },
+    "managedStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#managedStream"
+    },
+    "map": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.map"
+    },
+    "mapAsync": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapAsync"
+    },
+    "mapChunks": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapChunks"
+    },
+    "mapChunksEffect": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapChunksEffect"
+    },
+    "mapChunksEffectP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapChunksEffectP"
+    },
+    "mapEffectP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapEffectP"
+    },
+    "mapError": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.mapError"
+    },
+    "mapErrorTyped": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapErrorTyped"
+    },
+    "mapLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.map"
+    },
+    "mapP": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Pipeline.map"
+    },
+    "mapSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.map"
+    },
+    "mapStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapStream"
+    },
+    "mapTryAsync": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mapTryAsync"
+    },
+    "maxDelay": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.maxDelay"
+    },
+    "maxElapsed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.maxElapsed"
+    },
+    "merge": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#merge"
+    },
+    "Merge": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Merge"
+    },
+    "mergeAll": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.mergeAll"
+    },
+    "mergeLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.merge"
+    },
+    "mergeStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#mergeStream"
+    },
+    "MetricExemplar": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#MetricExemplar"
+    },
+    "MetricSnapshot": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#MetricSnapshot"
+    },
+    "MetricsRegistry": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#MetricsRegistry"
+    },
+    "MetricType": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#MetricType"
+    },
+    "MetricValue": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#MetricValue"
+    },
+    "MissingLayerServiceError": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#MissingLayerServiceError"
+    },
+    "modifyFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#modifyFiberRef"
+    },
+    "namedSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.named"
+    },
+    "negotiateEngineAbi": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#negotiateEngineAbi"
+    },
+    "never": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.never"
+    },
+    "neverEffect": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#neverEffect"
+    },
+    "NodeId": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#NodeId"
+    },
+    "none": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#none"
+    },
+    "None": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#None"
+    },
+    "NONE_U32": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#NONE_U32"
+    },
+    "NoopHooks": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#NoopHooks"
+    },
+    "Normalize": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Normalize"
+    },
+    "once": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.once"
+    },
+    "OpcodeNode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#OpcodeNode"
+    },
+    "OpcodeProgram": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#OpcodeProgram"
+    },
+    "OpcodeTagCode": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#OpcodeTagCode"
+    },
+    "Option": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Option"
+    },
+    "orElse": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#orElse"
+    },
+    "orElseOptional": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#orElseOptional"
+    },
+    "Pipeline": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Pipeline"
+    },
+    "pollWithSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.poll"
+    },
+    "prettyCause": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#prettyCause"
+    },
+    "ProgramBuilder": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ProgramBuilder"
+    },
+    "ProgramPatch": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ProgramPatch"
+    },
+    "provide": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.provide"
+    },
+    "provideContext": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.provideContext"
+    },
+    "provideLayer": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.provide"
+    },
+    "provideLayerContext": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.provideContext"
+    },
+    "PURE_PIPELINE_TAG": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#PURE_PIPELINE_TAG"
+    },
+    "PurePipelineMetadata": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#PurePipelineMetadata"
+    },
+    "PurePipelineTag": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#PurePipelineTag"
+    },
+    "PushStatus": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#PushStatus"
+    },
+    "Queue": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Queue"
+    },
+    "QueueClosed": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#QueueClosed"
+    },
+    "QueueHostAction": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#QueueHostAction"
+    },
+    "QueueOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#QueueOptions"
+    },
+    "QueueStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#QueueStats"
+    },
+    "race": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#race"
+    },
+    "raceWith": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#raceWith"
+    },
+    "rangeStream": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Stream.range"
+    },
+    "ReadableStreamOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ReadableStreamOptions"
+    },
+    "ReadyQueueScheduleKind": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ReadyQueueScheduleKind"
+    },
+    "recordAbortablePromiseFinish": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#recordAbortablePromiseFinish"
+    },
+    "recordAbortablePromiseStart": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#recordAbortablePromiseStart"
+    },
+    "recurs": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.recurs"
+    },
+    "Ref": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Ref"
+    },
+    "RefId": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RefId"
+    },
+    "registerShutdownHooks": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#registerShutdownHooks"
+    },
+    "repeatWithSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.repeat"
+    },
+    "repeatWithScheduleAlias": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.repeat"
+    },
+    "REQUIRED_ENGINE_ABI_CAPABILITIES": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#REQUIRED_ENGINE_ABI_CAPABILITIES"
+    },
+    "resetAbortablePromiseStats": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#resetAbortablePromiseStats"
+    },
+    "resource": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.make"
+    },
+    "Resource": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Resource"
+    },
+    "resourceAll": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.all"
+    },
+    "ResourceDescriptor": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ResourceDescriptor"
+    },
+    "resourceFromManaged": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.fromManaged"
+    },
+    "resourceSucceed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.succeed"
+    },
+    "RestoreInterruptibility": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RestoreInterruptibility"
+    },
+    "retry": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.retry"
+    },
+    "retryN": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.retryN"
+    },
+    "RetryPolicy": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RetryPolicy"
+    },
+    "RetryState": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RetryState"
+    },
+    "retryWithBackoff": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.retryWithBackoff"
+    },
+    "retryWithSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.retry"
+    },
+    "retryWithScheduleAlias": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.retry"
+    },
+    "RingBuffer": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RingBuffer"
+    },
+    "RingBufferEngine": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RingBufferEngine"
+    },
+    "RingBufferOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RingBufferOptions"
+    },
+    "RingBufferStatsData": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RingBufferStatsData"
+    },
+    "runEffect": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#runPromise"
+    },
+    "runExit": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#runExit"
+    },
+    "runFusedArray": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runFusedArray"
+    },
+    "runPromise": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#runPromise"
+    },
+    "runSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.run"
+    },
+    "Runtime": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Runtime"
+    },
+    "RUNTIME_BOUNDARY_EVENT_VERSION": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RUNTIME_BOUNDARY_EVENT_VERSION"
+    },
+    "RuntimeBoundary": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeBoundary"
+    },
+    "RuntimeBoundaryDiagnosticsOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeBoundaryDiagnosticsOptions"
+    },
+    "RuntimeBoundaryEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeBoundaryEvent"
+    },
+    "RuntimeBoundaryEventSink": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeBoundaryEventSink"
+    },
+    "RuntimeBoundaryResult": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeBoundaryResult"
+    },
+    "runtimeCapabilities": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runtimeCapabilities"
+    },
+    "RuntimeCapabilities": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeCapabilities"
+    },
+    "RuntimeClock": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeClock"
+    },
+    "RuntimeClockEnv": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeClockEnv"
+    },
+    "runtimeClockFromEnv": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runtimeClockFromEnv"
+    },
+    "RuntimeDiagnosticsSnapshot": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#RuntimeDiagnosticsSnapshot"
+    },
+    "RuntimeEmitContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeEmitContext"
+    },
+    "RuntimeEngineFallbackCode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeEngineFallbackCode"
+    },
+    "RuntimeEngineMode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeEngineMode"
+    },
+    "RuntimeEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeEvent"
+    },
+    "RuntimeEventRecord": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeEventRecord"
+    },
+    "runtimeEventRecordContext": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runtimeEventRecordContext"
+    },
+    "RuntimeFiber": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeFiber"
+    },
+    "runtimeForCaller": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runtimeForCaller"
+    },
+    "RuntimeHooks": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeHooks"
+    },
+    "runtimeHooksToEventHandler": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#runtimeHooksToEventHandler"
+    },
+    "RuntimeLayerEnv": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeLayerEnv"
+    },
+    "RuntimeLayerOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeLayerOptions"
+    },
+    "RuntimeOptions": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#RuntimeOptions"
+    },
+    "RuntimeRecorder": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeRecorder"
+    },
+    "RuntimeRecorderExplainOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeRecorderExplainOptions"
+    },
+    "RuntimeRecorderOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeRecorderOptions"
+    },
+    "RuntimeRecorderStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeRecorderStats"
+    },
+    "RuntimeRegistry": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeRegistry"
+    },
+    "RuntimeService": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeService"
+    },
+    "RuntimeSpan": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeSpan"
+    },
+    "RuntimeSpanEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeSpanEvent"
+    },
+    "RuntimeSpanLink": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeSpanLink"
+    },
+    "RuntimeTimerId": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeTimerId"
+    },
+    "RuntimeTraceIdGenerator": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#RuntimeTraceIdGenerator"
+    },
+    "sanitizeLaneKey": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#sanitizeLaneKey"
+    },
+    "scan": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#scan"
+    },
+    "Schedule": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Schedule"
+    },
+    "ScheduleDecision": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ScheduleDecision"
+    },
+    "scheduleDriver": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.driver"
+    },
+    "ScheduleDriver": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ScheduleDriver"
+    },
+    "ScheduleDriverDecision": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleDriverDecision"
+    },
+    "ScheduleDriverOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleDriverOptions"
+    },
+    "ScheduleDriverSnapshot": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleDriverSnapshot"
+    },
+    "ScheduleObserver": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleObserver"
+    },
+    "ScheduleObserverEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleObserverEvent"
+    },
+    "Scheduler": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Scheduler"
+    },
+    "SchedulerEngine": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SchedulerEngine"
+    },
+    "ScheduleResult": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleResult"
+    },
+    "SchedulerLaneMode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SchedulerLaneMode"
+    },
+    "SchedulerOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SchedulerOptions"
+    },
+    "SchedulerStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SchedulerStats"
+    },
+    "SchedulerStatsData": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SchedulerStatsData"
+    },
+    "ScheduleStepContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScheduleStepContext"
+    },
+    "Scope": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Scope"
+    },
+    "Scoped": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Scoped"
+    },
+    "ScopeFinalizerError": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ScopeFinalizerError"
+    },
+    "ScopeFinalizerFailure": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ScopeFinalizerFailure"
+    },
+    "ScopeId": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ScopeId"
+    },
+    "ScopeInfo": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ScopeInfo"
+    },
+    "selectedEngineStats": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#selectedEngineStats"
+    },
+    "Semaphore": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Semaphore"
+    },
+    "SemaphoreStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SemaphoreStats"
+    },
+    "SerializedFusedPipeline": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SerializedFusedPipeline"
+    },
+    "SerializedStep": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SerializedStep"
+    },
+    "serializeFusedPipeline": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#serializeFusedPipeline"
+    },
+    "ServicesOf": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ServicesOf"
+    },
+    "serviceTag": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.tag"
+    },
+    "ServiceTag": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#ServiceTag"
+    },
+    "ServiceTagMap": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ServiceTagMap"
+    },
+    "setAbortablePromisePerLabelTracking": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setAbortablePromisePerLabelTracking"
+    },
+    "setBenchmarkBudget": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setBenchmarkBudget"
+    },
+    "setCurrentFiber": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setCurrentFiber"
+    },
+    "setFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setFiberRef"
+    },
+    "setFusionEnabled": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setFusionEnabled"
+    },
+    "setFusionVerbose": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#setFusionVerbose"
+    },
+    "ShutdownConfig": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ShutdownConfig"
+    },
+    "ShutdownStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ShutdownStats"
+    },
+    "sleep": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.sleep"
+    },
+    "some": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#some"
+    },
+    "Some": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Some"
+    },
+    "spaced": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.spaced"
+    },
+    "Span": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Span"
+    },
+    "SpanContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SpanContext"
+    },
+    "SpanEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SpanEvent"
+    },
+    "SpanStatus": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SpanStatus"
+    },
+    "Strategy": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Strategy"
+    },
+    "Stream": {
+      "kind": "value-and-type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#Stream"
+    },
+    "StreamChunkEngine": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#StreamChunkEngine"
+    },
+    "StreamChunkOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#StreamChunkOptions"
+    },
+    "StreamChunkStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#StreamChunkStats"
+    },
+    "streamFromReadableStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#streamFromReadableStream"
+    },
+    "Subscription": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Subscription"
+    },
+    "succeed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.succeed"
+    },
+    "supervise": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#supervise"
+    },
+    "SupervisedChildSpec": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisedChildSpec"
+    },
+    "SupervisedChildStatus": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisedChildStatus"
+    },
+    "SupervisedFiber": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisedFiber"
+    },
+    "Supervisor": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Supervisor"
+    },
+    "SupervisorConfig": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorConfig"
+    },
+    "SupervisorEscalation": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorEscalation"
+    },
+    "SupervisorEvent": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorEvent"
+    },
+    "SupervisorRestartContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorRestartContext"
+    },
+    "SupervisorRestartMode": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorRestartMode"
+    },
+    "SupervisorRestartPolicy": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorRestartPolicy"
+    },
+    "SupervisorStrategy": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SupervisorStrategy"
+    },
+    "sync": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.sync"
+    },
+    "SyncRef": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#SyncRef"
+    },
+    "tagError": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#tagError"
+    },
+    "TaggedError": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TaggedError"
+    },
+    "takeP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#takeP"
+    },
+    "takeSchedule": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.take"
+    },
+    "takeStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#takeStream"
+    },
+    "tapDecision": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.tapDecision"
+    },
+    "tapEffectP": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#tapEffectP"
+    },
+    "Task": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Task"
+    },
+    "TestClock": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestClock"
+    },
+    "TestClockTimerSnapshot": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestClockTimerSnapshot"
+    },
+    "TestLayerProvider": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestLayerProvider"
+    },
+    "TestRuntime": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestRuntime"
+    },
+    "TestRuntimeOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestRuntimeOptions"
+    },
+    "TestScheduledTask": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestScheduledTask"
+    },
+    "TestScheduler": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TestScheduler"
+    },
+    "throttle": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#throttle"
+    },
+    "timeout": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.timeout"
+    },
+    "TimeoutError": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TimeoutError"
+    },
+    "toPromise": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#runPromise"
+    },
+    "toPromiseByCaller": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#toPromiseByCaller"
+    },
+    "TraceContext": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TraceContext"
+    },
+    "Tracer": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#Tracer"
+    },
+    "TracerConfig": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#TracerConfig"
+    },
+    "uncons": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#uncons"
+    },
+    "uninterruptible": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.uninterruptible"
+    },
+    "uninterruptibleMask": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Effect.uninterruptibleMask"
+    },
+    "union": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.union"
+    },
+    "unit": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unit"
+    },
+    "unsafeGetCurrentRuntime": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unsafeGetCurrentRuntime"
+    },
+    "unsafeGetFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unsafeGetFiberRef"
+    },
+    "unsafeRunAsync": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unsafeRunAsync"
+    },
+    "unsafeRunFoldWithEnv": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unsafeRunFoldWithEnv"
+    },
+    "unsafeSetFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unsafeSetFiberRef"
+    },
+    "untilInput": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.untilInput"
+    },
+    "untilOutput": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.untilOutput"
+    },
+    "unwrapScoped": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#unwrapScoped"
+    },
+    "updateFiberRef": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#updateFiberRef"
+    },
+    "upTo": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.upTo"
+    },
+    "useManaged": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#useManaged"
+    },
+    "useResource": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Resource.use"
+    },
+    "useService": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.use"
+    },
+    "useServices": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Layer.useAll"
+    },
+    "via": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#via"
+    },
+    "WasmBridge": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmBridge"
+    },
+    "WasmEngineRuntime": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmEngineRuntime"
+    },
+    "WasmFiberEngine": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmFiberEngine"
+    },
+    "WasmFiberEngineOptions": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmFiberEngineOptions"
+    },
+    "WasmFiberRegistryBridge": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmFiberRegistryBridge"
+    },
+    "WasmFiberRegistryStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmFiberRegistryStats"
+    },
+    "WasmPackFiberBridge": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WasmPackFiberBridge"
+    },
+    "whileInput": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.whileInput"
+    },
+    "whileOutput": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.whileOutput"
+    },
+    "widenOpt": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#widenOpt"
+    },
+    "windowed": {
+      "kind": "value",
+      "disposition": "v2-namespace",
+      "target": "brass-runtime/next#Schedule.windowed"
+    },
+    "withAsyncPromise": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#withAsyncPromise"
+    },
+    "withCurrentFiber": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#withCurrentFiber"
+    },
+    "withScope": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#withScope"
+    },
+    "withScopeAsync": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#withScopeAsync"
+    },
+    "WorkerPool": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WorkerPool"
+    },
+    "WorkerPoolConfig": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WorkerPoolConfig"
+    },
+    "WorkerPoolError": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WorkerPoolError"
+    },
+    "WorkerPoolStats": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#WorkerPoolStats"
+    },
+    "ZIO": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ZIO"
+    },
+    "zip": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#zip"
+    },
+    "zipPar": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#zipPar"
+    },
+    "zipStream": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#zipStream"
+    },
+    "zipWith": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#zipWith"
+    },
+    "ZPipeline": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ZPipeline"
+    },
+    "ZStream": {
+      "kind": "type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#ZStream"
+    }
+  }
+}

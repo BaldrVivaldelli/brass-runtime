@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "repository": "BaldrVivaldelli/brass-runtime",
+  "githubApiVersion": "2026-03-10",
+  "observedAt": "2026-09-20",
+  "requiredRepositorySecretNames": ["NPM_TOKEN"],
+  "branches": {
+    "main": {
+      "requiredStatusChecks": {
+        "strict": true,
+        "checks": [
+          { "context": "validate", "appId": 15368 },
+          { "context": "CodeQL", "appId": 57789 }
+        ]
+      },
+      "enforceAdmins": true,
+      "requirePullRequest": true,
+      "requiredApprovingReviewCount": 0,
+      "dismissStaleReviews": true,
+      "requireConversationResolution": true,
+      "allowForcePushes": false,
+      "allowDeletions": false
+    },
+    "next": {
+      "requiredStatusChecks": {
+        "strict": true,
+        "checks": [
+          { "context": "validate", "appId": 15368 },
+          { "context": "CodeQL", "appId": 57789 }
+        ]
+      },
+      "enforceAdmins": true,
+      "requirePullRequest": true,
+      "requiredApprovingReviewCount": 0,
+      "dismissStaleReviews": true,
+      "requireConversationResolution": true,
+      "allowForcePushes": false,
+      "allowDeletions": false
+    }
+  },
+  "environments": {
+    "npm-next": {
+      "reviewers": [
+        { "type": "User", "id": 18494121, "login": "BaldrVivaldelli" }
+      ],
+      "preventSelfReview": false,
+      "waitTimerMinutes": 0,
+      "protectedBranchesOnly": true
+    },
+    "npm-products": {
+      "reviewers": [
+        { "type": "User", "id": 18494121, "login": "BaldrVivaldelli" }
+      ],
+      "preventSelfReview": false,
+      "waitTimerMinutes": 0,
+      "protectedBranchesOnly": true
+    }
+  },
+  "limitations": [
+    "The repository currently has one release-capable maintainer, so environment self-review cannot be disabled yet.",
+    "A second qualified maintainer should replace the temporary zero-approval branch rule and enable environment self-review prevention.",
+    "This file is desired state only and does not claim that GitHub currently enforces it."
+  ]
+}

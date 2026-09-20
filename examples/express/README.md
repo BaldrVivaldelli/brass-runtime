@@ -23,3 +23,12 @@ curl http://localhost:3000/users/42
 curl http://localhost:3000/metrics
 ```
 
+The release-candidate lighthouse check stages this example, type-checks it,
+executes the user, health, and metrics routes, and sends `SIGTERM` to verify
+graceful shutdown:
+
+```bash
+npm run validate:example:express -- --runtime-tarball /path/to/brass-runtime.tgz
+```
+
+Omit `--runtime-tarball` to pack and validate the current built worktree.

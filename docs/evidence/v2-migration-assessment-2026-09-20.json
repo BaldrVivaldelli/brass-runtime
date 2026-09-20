@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "consumerId": "workspace-template-candidate-1",
+  "stage": "assessment",
+  "consent": "not-requested",
+  "publishableCaseStudy": false,
+  "source": {
+    "kind": "local-workspace-template",
+    "filesScanned": 15
+  },
+  "result": {
+    "filesWithV1Imports": 4,
+    "documentedMappings": 5,
+    "directMoves": 4,
+    "manualDecisions": 4,
+    "parseErrors": 0
+  },
+  "manualImports": [
+    { "name": "fork", "occurrences": 1 },
+    { "name": "withScope", "occurrences": 1 },
+    { "name": "zipPar", "occurrences": 2 }
+  ],
+  "decision": "migration-candidate",
+  "limitations": [
+    "This is an import inventory, not a completed migration or production case study.",
+    "No API addition is justified from a single consumer candidate.",
+    "Runtime, performance, and rollback measurements have not been collected."
+  ],
+  "reproduce": "node scripts/analyze-v2-migration.mjs --json <consumer-source>"
+}

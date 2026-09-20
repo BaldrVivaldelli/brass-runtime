@@ -2,7 +2,10 @@
 import { readFileSync } from "node:fs";
 
 const report = JSON.parse(readFileSync(0, "utf8"));
-const paths = new Set(report[0]?.files?.map((file) => file.path) ?? []);
+const packageReport = report[0] ?? {};
+const packageFiles = packageReport.files ?? [];
+const paths = new Set(packageFiles.map((file) => file.path));
+const sizeBudget = JSON.parse(readFileSync(new URL("./package-size-budget.json", import.meta.url), "utf8"));
 const required = [
   "CONTRIBUTING.md",
   "GOVERNANCE.md",
@@ -28,4 +31,38 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-console.log(`Package contents validated (${paths.size} files).`);
+const unpublishedDuplicateEsm = packageFiles
+  .map((file) => file.path)
+  .filter((path) => path.startsWith("dist/") && path.endsWith(".js"));
+if (unpublishedDuplicateEsm.length > 0) {
+  console.error(`Package contains unpublished duplicate ESM artifacts: ${unpublishedDuplicateEsm.join(", ")}`);
+  process.exit(1);
+}
+
+const groupBytes = (group) => packageFiles
+  .filter((file) => file.path === group || file.path.startsWith(`${group}/`))
+  .reduce((total, file) => total + file.size, 0);
+const actual = {
+  compressedBytes: Number(packageReport.size ?? 0),
+  unpackedBytes: Number(packageReport.unpackedSize ?? 0),
+  fileCount: packageFiles.length,
+  groups: Object.fromEntries(Object.keys(sizeBudget.maximum.groups).map((group) => [group, groupBytes(group)])),
+};
+const exceeded = [];
+for (const key of ["compressedBytes", "unpackedBytes", "fileCount"]) {
+  if (actual[key] > sizeBudget.maximum[key]) exceeded.push(`${key} ${actual[key]} > ${sizeBudget.maximum[key]}`);
+}
+for (const [group, maximum] of Object.entries(sizeBudget.maximum.groups)) {
+  if (actual.groups[group] > maximum) exceeded.push(`${group} bytes ${actual.groups[group]} > ${maximum}`);
+}
+if (exceeded.length > 0) {
+  console.error(`Package size budget exceeded: ${exceeded.join("; ")}`);
+  process.exit(1);
+}
+
+console.log(
+  `Package contents validated (${paths.size} files, ${actual.compressedBytes} compressed bytes, ` +
+  `${actual.unpackedBytes} unpacked bytes; ` +
+  Object.entries(actual.groups).map(([group, bytes]) => `${group}=${bytes}`).join(", ") +
+  ").",
+);

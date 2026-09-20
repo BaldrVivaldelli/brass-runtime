@@ -1,0 +1,71 @@
+name: Engine WASM
+
+on:
+  pull_request:
+    paths:
+      - "crates/brass-engine-core/**"
+      - "crates/brass-runtime-wasm-engine/**"
+      - "src/core/runtime/engine/**"
+      - "src/core/runtime/wasmModule.ts"
+      - "wasm/**"
+      - "packages/engine-wasm/**"
+      - "scripts/build-engine-wasm-package.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/engine-wasm.yml"
+  push:
+    branches: [main]
+    paths:
+      - "crates/brass-engine-core/**"
+      - "crates/brass-runtime-wasm-engine/**"
+      - "src/core/runtime/engine/**"
+      - "src/core/runtime/wasmModule.ts"
+      - "wasm/**"
+      - "packages/engine-wasm/**"
+      - "scripts/build-engine-wasm-package.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/engine-wasm.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engine-wasm-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run rust:check
+      - run: npm run build
+      - run: npm run validate:product:engine-wasm
+
+      - name: Pack WASM engine release candidate
+        run: |
+          mkdir -p artifacts/engine-wasm
+          npm pack --ignore-scripts --pack-destination artifacts/engine-wasm ./packages/engine-wasm
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: brass-engine-wasm-package
+          path: artifacts/engine-wasm/*.tgz
+          if-no-files-found: error

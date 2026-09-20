@@ -9,7 +9,7 @@ const runtimeExternal: Plugin = {
     build.onResolve({ filter: /^\.{1,2}\// }, (args) => {
       const resolved = path.resolve(args.resolveDir, args.path);
       if (resolved === runtimeRoot || resolved.startsWith(`${runtimeRoot}${path.sep}`)) {
-        return { path: "brass-runtime", external: true };
+        return { path: "brass-runtime/core", external: true };
       }
       return undefined;
     });
@@ -41,5 +41,19 @@ export default defineConfig([
     format: ["esm"],
     clean: false,
     outExtension: () => ({ js: ".mjs" }),
+  },
+  {
+    entry: {
+      index: "src/agent/index.ts",
+    },
+    platform: "node",
+    target: "node18",
+    format: ["esm"],
+    splitting: false,
+    sourcemap: false,
+    outDir: "packages/agent/dist",
+    clean: false,
+    dts: { only: true },
+    outExtension: () => ({ dts: ".d.ts" }),
   },
 ]);

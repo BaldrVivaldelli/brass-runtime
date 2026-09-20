@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "status": "candidates-validated-not-published",
+  "registry": "https://registry.npmjs.org",
+  "products": [
+    {
+      "id": "agent",
+      "package": "@brass/agent",
+      "candidateVersion": "0.1.0-alpha.0",
+      "registryPackageExists": false,
+      "runtimeCompatibility": ">=1.18.3 <2 || >=2.0.0-beta.0 <3",
+      "publishDryRun": {
+        "files": 8,
+        "compressedBytes": 270401,
+        "unpackedBytes": 1170526,
+        "distTag": "alpha",
+        "access": "public",
+        "registryMutation": false
+      }
+    },
+    {
+      "id": "perf",
+      "package": "@brass/perf",
+      "candidateVersion": "0.1.0-alpha.0",
+      "registryPackageExists": false,
+      "runtimeCompatibility": ">=1.18.3 <2 || >=2.0.0-beta.0 <3",
+      "publishDryRun": {
+        "files": 8,
+        "compressedBytes": 80373,
+        "unpackedBytes": 371317,
+        "distTag": "alpha",
+        "access": "public",
+        "registryMutation": false
+      }
+    },
+    {
+      "id": "engine-wasm",
+      "package": "@brass/engine-wasm",
+      "candidateVersion": "0.1.0-alpha.0",
+      "registryPackageExists": false,
+      "runtimeCompatibility": "optional runtime engine",
+      "publishDryRun": {
+        "files": 8,
+        "compressedBytes": 109169,
+        "unpackedBytes": 317046,
+        "distTag": "alpha",
+        "access": "public",
+        "registryMutation": false
+      }
+    }
+  ],
+  "validatedConditions": [
+    "independent manifests and versions",
+    "self-contained Agent and Perf declarations",
+    "ESM and CommonJS execution",
+    "strict TypeScript consumers",
+    "Agent and Perf CLI execution",
+    "WASM ABI and strict runtime loading",
+    "v1 compatibility entrypoint parity"
+  ],
+  "publicationControl": {
+    "workflow": ".github/workflows/publish-product-alpha.yml",
+    "branch": "main",
+    "branchExistsAtRecordedAt": true,
+    "branchProtectedAtRecordedAt": false,
+    "environment": "npm-products",
+    "environmentExistsAtRecordedAt": false,
+    "npmTokenSecretExistsAtRecordedAt": true,
+    "distTag": "alpha",
+    "provenance": true,
+    "automaticPublish": false
+  },
+  "remaining": [
+    "Review and commit the independent package candidates and publication workflow",
+    "Verify npm scope ownership and publish permission for @brass",
+    "Protect main and create the npm-products environment with required-reviewer approval",
+    "Explicitly approve each first publication",
+    "Verify each alpha tag and retain the uploaded tarball for rollback"
+  ],
+  "reproduce": [
+    "npm run release:check",
+    "npm run validate:products",
+    "npm run validate:product-publish-dry-run",
+    "npm view @brass/agent version dist-tags --json",
+    "npm view @brass/perf version dist-tags --json",
+    "npm view @brass/engine-wasm version dist-tags --json"
+  ]
+}

@@ -150,7 +150,7 @@ export function registerEffectDirect<E, A>(
             try {
               continueSuccess(current.thunk(env));
             } catch (error) {
-              continueFailure(Cause.die(error));
+              continueFailure(Cause.fail(error));
             }
             break;
           case "Async": {

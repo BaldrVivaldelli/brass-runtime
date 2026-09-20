@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "runtime": {
+    "rounds": 10,
+    "iterations": 5000,
+    "chainDepth": 100,
+    "minAggregateOpsPerSecond": 25000,
+    "maxHeapTrendMb": 8,
+    "maxTotalHeapDeltaMb": 16
+  },
+  "http": {
+    "calls": 100000,
+    "concurrency": 128,
+    "delayMs": 1,
+    "warmupCalls": 5000,
+    "maxErrors": 0,
+    "maxHeapDeltaMb": 24,
+    "minAdaptiveFinalLimit": 4,
+    "minAdaptiveServerInFlight": 4
+  },
+  "adaptive": {
+    "samples": 100000,
+    "keyCount": 64,
+    "scenarios": [
+      "stable",
+      "saturation-recovery"
+    ],
+    "minLimitChanges": 1,
+    "minSamplesPerSecond": 1000
+  }
+}

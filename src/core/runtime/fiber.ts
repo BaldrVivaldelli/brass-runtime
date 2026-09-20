@@ -666,8 +666,17 @@ export class RuntimeFiber<R, E, A> implements Fiber<E, A> {
 
                 case "Sync": {
                     // FlatMap(Sync(f), k) → k(f(env))
+                    let value: unknown;
                     try {
-                        const value = first.thunk(this.env);
+                        value = first.thunk(this.env);
+                    } catch (e) {
+                        // Sync thunks fail through the typed error channel. Do
+                        // not classify continuation throws the same way: those
+                        // remain defects, matching the general interpreter.
+                        this.onFailure(e);
+                        return this.result != null ? TRAMPOLINE.DONE : TRAMPOLINE.CONTINUE;
+                    }
+                    try {
                         this.current = andThen(value);
                     } catch (e) {
                         this.notify(Exit.failCause(Cause.die<E>(e)));

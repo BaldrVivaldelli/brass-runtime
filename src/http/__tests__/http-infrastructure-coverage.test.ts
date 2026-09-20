@@ -31,7 +31,7 @@ describe("registerHttpEffect", () => {
       registerHttpEffect(effect, env, resolve);
     });
 
-  it("runs succeed, fail, sync success, sync die, flatMap, fold, and fork variants", async () => {
+  it("runs succeed, fail, sync success, sync failure, flatMap, fold, and fork variants", async () => {
     await expect(runRegistered(asyncSucceed(1))).resolves.toEqual({ _tag: "Success", value: 1 });
     await expect(runRegistered(asyncFail("no"))).resolves.toEqual({
       _tag: "Failure",
@@ -41,9 +41,11 @@ describe("registerHttpEffect", () => {
       _tag: "Success",
       value: 3,
     });
-    const syncDie = await runRegistered(asyncSync(() => { throw new Error("boom"); }));
-    expect(syncDie._tag).toBe("Failure");
-    expect(syncDie._tag === "Failure" ? syncDie.cause._tag : "").toBe("Die");
+    const syncFailure = await runRegistered(asyncSync(() => { throw new Error("boom"); }));
+    expect(syncFailure).toMatchObject({
+      _tag: "Failure",
+      cause: { _tag: "Fail", error: expect.any(Error) },
+    });
 
     await expect(runRegistered(asyncFlatMap(asyncSucceed(2), (n) => asyncSucceed(n * 4)))).resolves.toEqual({
       _tag: "Success",

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Runtime } from "../../core/runtime/runtime";
-import { async, asyncSucceed, asyncSync } from "../../core/types/asyncEffect";
+import { async, asyncSucceed } from "../../core/types/asyncEffect";
 import { Cause } from "../../core/types/effect";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../client";
 import { withDedup } from "../lifecycle/dedup";
@@ -49,7 +49,7 @@ describe("lifecycle edge coverage", () => {
 
   it("maps dedup downstream defects to FetchError for initiator and waiters", async () => {
     const dedup = withDedup()(() =>
-      asyncSync(() => {
+      async(() => {
         throw new Error("defect");
       }) as any
     );

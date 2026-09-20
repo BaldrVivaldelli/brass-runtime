@@ -44,3 +44,7 @@ candidate owns its executable bundle and consumes `brass-runtime` as a peer.
 
 Bug reports should include a minimal reproduction, Node version, engine mode,
 and whether cancellation, scopes, HTTP middleware, or WASM are involved.
+
+Real adopters can use the **Brass adoption report** issue form to share a
+workload, migration gap, or redacted operational result with an explicit
+consent level. Never post secrets, proprietary payloads, or private traces.
