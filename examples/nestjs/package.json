@@ -6,17 +6,19 @@
     "dev": "tsx src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
-    "@nestjs/common": ">=10",
-    "@nestjs/core": ">=10",
-    "@nestjs/platform-express": ">=10",
+    "@nestjs/common": "^12.0.3",
+    "@nestjs/core": "^12.0.3",
+    "@nestjs/platform-express": "^12.0.3",
     "brass-runtime": "file:../..",
     "reflect-metadata": "^0.2.2",
-    "rxjs": ">=7"
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
-

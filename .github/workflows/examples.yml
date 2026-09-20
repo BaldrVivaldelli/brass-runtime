@@ -1,0 +1,67 @@
+name: Example Consumers
+
+on:
+  pull_request:
+  push:
+    branches: [main, next]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: example-consumers-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  examples:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/angular/package-lock.json
+            examples/nestjs/package-lock.json
+            examples/nextjs/package-lock.json
+            examples/react/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Angular consumer
+        working-directory: examples/angular
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run build
+
+      - name: NestJS consumer
+        working-directory: examples/nestjs
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+
+      - name: Next.js consumer
+        working-directory: examples/nextjs
+        run: |
+          npm ci --no-audit --no-fund
+          npm run build
+
+      - name: React consumer
+        working-directory: examples/react
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck
+          npm run build

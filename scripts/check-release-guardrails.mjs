@@ -24,8 +24,10 @@ for (const branchName of ["main", "next"]) {
   const checks = new Map(branch.requiredStatusChecks?.checks?.map((check) => [check.context, check.appId]));
   if (branch.requiredStatusChecks?.strict !== true
     || checks.get("validate") !== 15368
+    || checks.get("audit") !== 15368
+    || checks.get("examples") !== 15368
     || checks.get("CodeQL") !== 57789) {
-    failures.push(`${branchName} must require strict validate and CodeQL checks from their verified apps`);
+    failures.push(`${branchName} must require strict validate, audit, examples, and CodeQL checks from their verified apps`);
   }
   if (branch.enforceAdmins !== true
     || branch.requirePullRequest !== true

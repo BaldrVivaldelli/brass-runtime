@@ -1,14 +1,20 @@
 {
+  "compileOnSave": false,
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ES2022",
+    "module": "preserve",
     "moduleResolution": "Bundler",
     "strict": true,
     "skipLibCheck": true,
+    "isolatedModules": true,
     "experimentalDecorators": true,
-    "noEmit": true,
     "lib": ["DOM", "ES2022"]
   },
-  "include": ["src/**/*.ts", "../shared/src/**/*.ts"]
+  "angularCompilerOptions": {
+    "enableI18nLegacyMessageIdFormat": false,
+    "strictInjectionParameters": true,
+    "strictInputAccessModifiers": true,
+    "strictTemplates": true
+  },
+  "files": []
 }
-

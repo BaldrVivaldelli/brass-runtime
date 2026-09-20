@@ -143,7 +143,7 @@ would silently normalize a product manifest. The command runs inside
 `release:check` after packed-consumer validation has rebuilt each product.
 
 The 2026-09-20 remote-control audit now confirms protected `main` and `next`
-branches, enforced `validate` and `CodeQL` checks, and required-reviewer gates
+branches, enforced `validate`, `audit`, `examples`, and `CodeQL` checks, and required-reviewer gates
 on `npm-next` and `npm-products`. The beta was published through `npm-next`;
 the product attempts were explicitly approved through `npm-products`. The
 dated readiness records preserve both the enforced controls and the remaining

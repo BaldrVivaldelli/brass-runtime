@@ -62,6 +62,9 @@
 - Linked the first-party `create-brass` migration to its commit-pinned public
   readiness record, including 8/8 template builds and the retained candidate
   digest, without promoting it to an external-adoption claim.
+- Added reproducible framework-consumer lockfiles, high/critical dependency
+  audit gates, weekly Dependabot coverage, and protected Angular, NestJS,
+  Next.js, and React builds; retained the unfixed Angular moderate exception.
 - Added independently built `@brass/agent`, `@brass/perf`, and
   `@brass/engine-wasm` alpha candidates with self-contained declarations,
   packed-consumer smokes, individual size budgets, and protected manual
