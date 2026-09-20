@@ -708,10 +708,11 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package:vsix": "vsce package",
+    "package:vsix": "vsce package --no-dependencies",
     "vscode:prepublish": "npm run compile"
   },
   "devDependencies": {
+    "@types/node": "^22.15.0",
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.9.2",
     "typescript": "^5.9.3"

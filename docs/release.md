@@ -1,6 +1,6 @@
-# First Release Checklist
+# Release checklist
 
-This is the release gate for the first public `brass-runtime` release.
+This is the release gate for public `brass-runtime` releases.
 
 ## Release command
 
@@ -19,6 +19,9 @@ npm run release:check
 - CJS compatibility validation.
 - Conditional browser bundle validation.
 - npm tarball validation for Node, browser, declaration, and WASM artifacts.
+- Installed-tarball validation for `@brass/agent` and `@brass/perf`, covering
+  ESM, CJS, declarations, v1 export parity, real execution, and CLI startup.
+- Integrity validation for the committed production-like evidence record.
 - Runtime profiler budget.
 - Runtime benchmark budget.
 - Versioned fork/suspend/resume/fairness/suspended-heap budget.
@@ -44,6 +47,8 @@ npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-h
 ```
 
 - Confirm `npm run validate:package` reports the expected tarball contents.
+- Confirm `npm run validate:evidence` passes and rerun the relevant benchmark
+  budget when a hot path or threshold changed.
 - The committed `package.json` version may lag the latest Git tag because
   semantic-release assigns the publish version in CI. Never publish a local
   dry-run tarball as a release artifact.
@@ -67,7 +72,7 @@ is editor-specific. Its promotion result is `adopt-native-search`; the default
 - Check `docs/native-compatibility-changelog.md` whenever ABI, IPC, boundary
   event, host, or persistence contracts change.
 
-## First-release scope
+## Current release scope
 
 - Core runtime, fibers, scopes, `Cause`, interruptibility, `FiberRef`.
 - Layer 2.0 and Schedule 2.0.
@@ -76,5 +81,18 @@ is editor-specific. Its promotion result is `adopt-native-search`; the default
 - Observability and runtime health/readiness.
 - Performance profiler, budgets, history, and baselines.
 - Brass Agent CLI/library surface.
+
+## Companion product candidates
+
+Agent, Perf, and VS Code have separate path-scoped workflows. They validate
+their own type/test lane and upload a package candidate without publishing it:
+
+- `Agent` produces the `@brass/agent` tarball.
+- `Perf` produces the `@brass/perf` tarball.
+- `VS Code` compiles the extension and produces a VSIX.
+
+For a local Agent or Perf candidate, build the runtime first and then run
+`npm run validate:product:agent` or `npm run validate:product:perf`. The v1
+runtime entrypoints and bin names remain supported throughout this transition.
 
 Do not publish `.brass/perf-history`; it is intentionally local evidence.

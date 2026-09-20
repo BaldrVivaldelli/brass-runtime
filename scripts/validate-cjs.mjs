@@ -7,6 +7,7 @@ const require = createRequire(import.meta.url);
 
 const requiredFiles = [
   "dist/index.cjs",
+  "dist/next.cjs",
   "dist/http/index.cjs",
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
@@ -28,6 +29,7 @@ for (const file of requiredFiles) {
 
 const cjsFiles = [
   "dist/index.cjs",
+  "dist/next.cjs",
   "dist/http/index.cjs",
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
@@ -47,6 +49,20 @@ for (const file of cjsFiles) {
     console.error(error);
     process.exitCode = 1;
   }
+}
+
+try {
+  const next = require(path.join(root, "dist/next.cjs"));
+
+  if (!next.Effect || Object.keys(next).length > 40) {
+    throw new Error("Invalid brass-runtime/next surface");
+  }
+
+  console.log("✅ Small v2 preview surface loads correctly from CJS");
+} catch (error) {
+  console.error("❌ v2 preview CJS validation failed");
+  console.error(error);
+  process.exitCode = 1;
 }
 
 try {

@@ -33,6 +33,7 @@ npm run dev
 
 | Example | Focus |
 | --- | --- |
+| [v2-preview](./v2-preview/README.md) | Minimal proposed v2 root with `Effect` and `Stream` namespaces |
 | [vanilla](./vanilla/README.md) | Plain TypeScript service wiring with Brass Layer/DI |
 | [express](./express/README.md) | Express middleware style, inbound request context, metrics endpoint |
 | [nestjs](./nestjs/README.md) | Nest providers, controller injection, application shutdown |
@@ -53,4 +54,3 @@ OTEL_SERVICE_NAME=my-service
 
 Browser examples should send OTLP traffic to a same-origin backend route such
 as `/api/otel`; do not ship collector credentials in client bundles.
-

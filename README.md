@@ -13,6 +13,10 @@ Runnable framework examples live in the
 [repository examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples).
 They are kept out of the npm package so installs stay small.
 
+Project status, API change rules, and evidence requirements are defined in
+[GOVERNANCE.md](./GOVERNANCE.md). Contributions start in
+[CONTRIBUTING.md](./CONTRIBUTING.md).
+
 ---
 
 ## What it does
@@ -53,6 +57,27 @@ index/search pilot with TypeScript fallback.
 ---
 
 ## Quick start
+
+### Preview the smaller v2 API
+
+The additive `brass-runtime/next` entrypoint reduces the root to 18 runtime
+values while v1 remains compatible. It is experimental until the next major
+release:
+
+```ts
+import { Effect, runPromise } from "brass-runtime/next";
+
+const program = Effect.flatMap(
+  Effect.succeed(20),
+  (left) => Effect.map(Effect.succeed(22), (right) => left + right),
+);
+
+console.log(await runPromise(program)); // 42
+```
+
+See the [v2 contract](./docs/api-v2.md) and
+[incremental migration guide](./docs/migration-v1-to-v2.md) before adopting the
+preview.
 
 ### Run an effect
 
@@ -588,8 +613,13 @@ const result = await Stream
 | `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
 | `brass-runtime/perf` | Runtime, HTTP, observability, memory, and baseline performance profiler |
 | `brass-runtime/agent` | Brass Agent core (experimental) |
+| `@brass/perf` | Independently built Perf candidate with v1 export/type parity |
+| `@brass/agent` | Independently built Agent library/CLI candidate with v1 export/type parity |
 
-CLI: `brass-agent`
+The `brass-runtime/perf` and `brass-runtime/agent` paths remain supported
+through v1. `@brass/perf` and `@brass/agent` are release-candidate packages,
+not an assertion that the npm namespace has already been published. Their CI
+artifacts install next to `brass-runtime`. CLI: `brass-agent` and `brass-perf`.
 
 ### Platform support
 
@@ -693,6 +723,7 @@ npm run test:coverage # coverage with baseline gate
 npm run validate:browser # rebundle browser entrypoints without Node built-ins
 npm run validate:wasm # reject missing/stale strict-WASM artifacts
 npm run validate:package # require all Node/browser/WASM tarball artifacts
+npm run validate:products # install packed Agent/Perf adapters and smoke ESM/CJS/types/CLI
 npm run release:check # full release gate: types, tests, build, CJS, perf budgets
 npm run benchmark     # runtime, HTTP lifecycle, and 100k local HTTP concurrency
 npm run benchmark:runtime        # Runtime Performance Track
@@ -731,6 +762,7 @@ Property-based tests use `fast-check` with 100+ iterations per property. Each HT
 - [Observability collector smoke](./docs/observability-collector-smoke.md)
 - [HTTP module](./docs/http.md)
 - [Production readiness](./docs/production-readiness.md)
+- [Production evidence and reproduction](./docs/production-evidence.md)
 - [Streams guide](./docs/guides/streams.md)
 - [Testing guide](./docs/guides/testing.md)
 - [WASM engine](./docs/wasm-fiber-engine.md)

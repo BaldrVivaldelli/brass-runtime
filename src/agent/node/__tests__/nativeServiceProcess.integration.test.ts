@@ -105,6 +105,10 @@ describe.runIf(existsSync(binary))("real native search service process", () => {
       outcome: "cancelled",
       errorCode: "CANCELLED",
     }));
+    await expect(waitUntil(
+      async () => (await client.health()).activeRequests === 0,
+      1_000,
+    )).resolves.toBe(true);
     await expect(client.health()).resolves.toMatchObject({ ok: true, activeRequests: 0, readOnly: true });
     await client.shutdown();
   }, 45_000);
@@ -149,10 +153,10 @@ function isProcessAlive(pid: number): boolean {
   }
 }
 
-async function waitUntil(predicate: () => boolean, timeoutMs: number): Promise<boolean> {
+async function waitUntil(predicate: () => boolean | Promise<boolean>, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (predicate()) return true;
+    if (await predicate()) return true;
     await new Promise((resolveWait) => setTimeout(resolveWait, 5));
   }
   return predicate();

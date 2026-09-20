@@ -1,21 +1,29 @@
 # Project Map
 
+Product dependency and extraction rules are documented in
+`docs/product-boundaries.md` and enforced by `npm run validate:boundaries`.
+
 This is the compact map for understanding `brass-runtime` quickly.
 
 ## Package entry points
 
 - `src/index.ts` -> package root export `brass-runtime`.
+- `src/next.ts` -> experimental small v2 facade `brass-runtime/next`.
 - `src/http/index.ts` -> subpath export `brass-runtime/http`.
 - `src/observability/index.ts` -> subpath export `brass-runtime/observability`.
 - `src/perf/index.ts` -> subpath export `brass-runtime/perf`.
 - `src/perf/cli.ts` -> CLI binary `brass-perf`.
 - `src/agent/index.ts` -> subpath export `brass-runtime/agent`.
 - `src/agent/cli/main.ts` -> CLI binary `brass-agent`.
+- `packages/agent` -> independently versioned `@brass/agent` candidate adapter.
+- `packages/perf` -> independently versioned `@brass/perf` candidate adapter.
+- `extensions/vscode-brass-agent` -> separately packaged VS Code candidate.
 - `src/agent/native` -> protocol-v1 client and deterministic search pilot.
 - `src/agent/node/nativeServiceProcess.ts` -> private child-process transport.
 - `crates/brass-native-service` -> promoted read-only Rust editor-search service.
 - `tsup.config.ts` -> CJS, ESM, and JS bundle entries.
 - `package.json` -> scripts, exports, package files, CLI bin.
+- `scripts/check-production-evidence.mjs` -> committed evidence integrity gate.
 
 ## Core runtime
 

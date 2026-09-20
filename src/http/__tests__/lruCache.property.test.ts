@@ -50,11 +50,7 @@ describe("LRUCache property tests", () => {
       fc.assert(
         fc.property(
           arbMaxEntries,
-          fc.array(arbKey, { minLength: 2, maxLength: 30 }).chain((keys) => {
-            // Ensure we have at least M+1 unique keys
-            const uniqueKeys = [...new Set(keys)];
-            return fc.constant(uniqueKeys).filter((ks) => ks.length >= 2);
-          }),
+          fc.uniqueArray(arbKey, { minLength: 2, maxLength: 30 }),
           arbValue,
           (maxEntries, uniqueKeys, value) => {
             // Ensure we have enough unique keys to fill the cache + 1
@@ -101,10 +97,7 @@ describe("LRUCache property tests", () => {
       fc.assert(
         fc.property(
           fc.integer({ min: 2, max: 15 }),
-          fc.array(arbKey, { minLength: 5, maxLength: 30 }).chain((keys) => {
-            const uniqueKeys = [...new Set(keys)];
-            return fc.constant(uniqueKeys).filter((ks) => ks.length >= 5);
-          }),
+          fc.uniqueArray(arbKey, { minLength: 5, maxLength: 30 }),
           arbValue,
           (maxEntries, uniqueKeys, value) => {
             if (uniqueKeys.length <= maxEntries) return;

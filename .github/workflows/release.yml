@@ -46,17 +46,21 @@ jobs:
         run: cargo install cargo-fuzz --version 0.13.1 --locked
 
       - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run validate:evidence
       - run: npm run test:types
       - run: npm run rust:check
       - run: npm run native:build:debug
       - if: matrix.node-version == 22
         run: npm run rust:fuzz:check
       - run: npm run build
+      - run: npm run validate:api
       - run: npm run validate:wasm
       - run: npm run test:coverage
       - run: npm run validate:cjs
       - run: npm run validate:browser
       - run: npm run validate:package
+      - run: npm run validate:products
       - if: matrix.node-version == 22
         run: npm run perf:runtime:budget
       - if: matrix.node-version == 22
@@ -93,14 +97,18 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run validate:evidence
       - run: npm run rust:check
       - run: npm run native:build:debug
       - run: npm run build:wasm
       - run: npm run build
+      - run: npm run validate:api
       - run: npm run validate:wasm
       - run: npm run validate:cjs
       - run: npm run validate:browser
       - run: npm run validate:package
+      - run: npm run validate:products
 
       - name: Verify generated WASM files exist
         run: |
@@ -160,12 +168,16 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run validate:evidence
       - run: npm run rust:check
       - run: npm run build
+      - run: npm run validate:api
       - run: npm run validate:wasm
       - run: npm run validate:cjs
       - run: npm run validate:browser
       - run: npm run validate:package
+      - run: npm run validate:products
       - run: npm run native:build
       - run: npm run native:package
       - name: Verify WASM files are packed

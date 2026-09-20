@@ -2,9 +2,10 @@
 
 > For the end-to-end setup flow, see [Brass Agent install and configure](./agent-install-and-configure.md).
 
-P23 intentionally avoids CI/release automation. It focuses on making local DX
-boring: build the CLI, package/install the VS Code extension, point the extension
-at the local CLI, and diagnose the setup.
+The local flow remains the fastest dogfood path: build the CLI, package/install
+the VS Code extension, point the extension at the local CLI, and diagnose the
+setup. Path-scoped CI now repeats compilation and packaging to create candidate
+artifacts, but does not install into a developer's editor or auto-publish.
 
 ## One-command local VS Code install
 
@@ -156,18 +157,18 @@ JSON output is available for scripts:
 brass-agent --doctor --json
 ```
 
-## Why this is not CI
+## Local flow versus CI
 
-This is deliberately local-first. It gives us repeatable commands that a person
-can run before we add workflows:
+These commands are deliberately local-first:
 
 ```bash
 npm run agent:vscode:install
 npm run agent:doctor
 ```
 
-Later, CI can reuse the same install/build/doctor concepts, but P23 does not add
-GitHub Actions or release automation.
+CI reuses the build/package concepts in `.github/workflows/agent.yml` and
+`.github/workflows/vscode.yml`. Doctor, editor installation, settings changes,
+and model credentials remain local responsibilities.
 
 ## Initialize a workspace first
 

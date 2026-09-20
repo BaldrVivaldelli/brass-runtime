@@ -9,6 +9,7 @@ import {
 } from "../../core/types/asyncEffect";
 import { interruptible, uninterruptible, uninterruptibleMask, type Exit } from "../../core/types/effect";
 import { makeFiberRef } from "../../core/runtime/fiberRef";
+import type { Fiber } from "../../core/runtime/fiber";
 import { Runtime } from "../../core/runtime/runtime";
 import { withCircuitBreaker } from "../circuitBreaker";
 import type { HttpClientFn, HttpError, HttpRequest, HttpWireResponse } from "../client";
@@ -52,10 +53,15 @@ describe("registerHttpEffect", () => {
       _tag: "Success",
       value: "handled:x",
     });
-    await expect(runRegistered({ _tag: "Fork", effect: asyncSucceed("child") })).resolves.toEqual({
-      _tag: "Success",
-      value: undefined,
+    const forked = await runRegistered<never, Fiber<never, string>>({
+      _tag: "Fork",
+      effect: asyncSucceed("child"),
     });
+    expect(forked._tag).toBe("Success");
+    if (forked._tag === "Success") {
+      const childExit = await new Promise<Exit<never, string>>((resolve) => forked.value.join(resolve));
+      expect(childExit).toEqual({ _tag: "Success", value: "child" });
+    }
   });
 
   it("runs interruptibility wrapper opcodes transparently", async () => {

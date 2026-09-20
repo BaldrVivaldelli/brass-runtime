@@ -13,9 +13,12 @@ describe("HTTP lifecycle timing", () => {
     vi.resetModules();
 
     const timing = await import("../lifecycle/timing");
+    const callsBefore = nowFn.mock.calls.length;
+    const value = timing.now();
+    const callsAfter = nowFn.mock.calls.length;
 
-    expect(timing.now()).toBe(12.5);
-    expect(nowFn).toHaveBeenCalledTimes(1);
+    expect(value).toBe(12.5);
+    expect(callsAfter - callsBefore).toBe(1);
   });
 
   it("falls back to Date.now when performance.now is unavailable", async () => {

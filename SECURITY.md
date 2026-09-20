@@ -1,7 +1,8 @@
 # Security Policy
 
-`brass-runtime` is an experimental TypeScript effect runtime. `brass-agent`, the
-CLI and VS Code extension built on top of it, is also experimental and should be
+The v1 core, schema, HTTP, and observability entrypoints are supported package
+surfaces. `brass-runtime/next`, `brass-agent`, the CLI, native editor search,
+and the VS Code extension are experimental; Agent write workflows should be
 used on a Git branch with patch review enabled.
 
 ## Supported versions
@@ -9,6 +10,8 @@ used on a Git branch with patch review enabled.
 | Component | Status |
 | --- | --- |
 | `brass-runtime` source on `main` | Supported for fixes and reports |
+| Stable v1 package entrypoints | Supported on the latest published major line |
+| `brass-runtime/next` | Experimental preview; supported for reports |
 | `brass-agent` experimental preview | Supported for reports; not production-stable |
 | Older downloaded ZIPs / local VSIX builds | Not supported |
 

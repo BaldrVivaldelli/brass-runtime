@@ -4,10 +4,16 @@ import { readFileSync } from "node:fs";
 const report = JSON.parse(readFileSync(0, "utf8"));
 const paths = new Set(report[0]?.files?.map((file) => file.path) ?? []);
 const required = [
+  "CONTRIBUTING.md",
+  "GOVERNANCE.md",
   "dist/index.cjs",
   "dist/index.mjs",
   "dist/index.d.ts",
+  "dist/next.cjs",
+  "dist/next.mjs",
+  "dist/next.d.ts",
   "dist/browser/index.mjs",
+  "dist/browser/next.mjs",
   "dist/browser/core/index.mjs",
   "dist/browser/http/index.mjs",
   "dist/browser/observability/index.mjs",

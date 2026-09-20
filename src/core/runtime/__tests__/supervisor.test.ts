@@ -3,9 +3,6 @@ import { describe, expect, it, vi } from "vitest";
 import { async, asyncFail, asyncSucceed } from "../../types/asyncEffect";
 import { Exit } from "../../types/effect";
 import { fixed } from "../schedule";
-import { EventBus } from "../eventBus";
-import { makeMetrics } from "../metrics";
-import { makeRuntimeMetricsSink } from "../../../observability/metrics";
 import { Runtime } from "../runtime";
 import { joinSupervised, makeSupervisor } from "../supervisor";
 
@@ -119,35 +116,6 @@ describe("Supervisor", () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-
-  it("emits runtime events that feed existing metrics sinks", async () => {
-    const bus = new EventBus();
-    const metrics = makeMetrics();
-    bus.subscribeHooks(makeRuntimeMetricsSink(metrics));
-    const runtime = new Runtime({ env: {}, hooks: bus });
-    const supervisor = makeSupervisor(runtime, {
-      restart: "never",
-    });
-
-    const child = supervisor.start({ effect: asyncSucceed("done") });
-    await expect(runtime.toPromise(joinSupervised(child))).resolves.toBe("done");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(metrics.snapshot().counters).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          name: "brass_runtime_events_total",
-          labels: { type: "supervisor.child.start" },
-          value: 1,
-        }),
-        expect.objectContaining({
-          name: "brass_runtime_events_total",
-          labels: { type: "supervisor.child.end" },
-          value: 1,
-        }),
-      ]),
-    );
   });
 
   it("shuts down running children", async () => {

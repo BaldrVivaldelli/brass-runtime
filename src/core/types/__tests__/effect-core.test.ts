@@ -102,11 +102,16 @@ describe("Async core constructors and combinators", () => {
     await expect(run(mapTryAsync(asyncSucceed(1), () => { throw "thrown"; }))).rejects.toBe("thrown");
   });
 
-  it("withAsyncPromise attaches promise helpers only once", async () => {
+  it("withAsyncPromise decorates without mutating the effect and only wraps once", async () => {
     const runner = withAsyncPromise<unknown, never, number>((eff, env) => Runtime.make(env).toPromise(eff));
-    const eff = runner(asyncSucceed(123));
+    const original = asyncSucceed(123);
+    const eff = runner(original);
     const same = runner(eff);
 
+    expect(eff).not.toBe(original);
+    expect("toPromise" in original).toBe(false);
+    expect("unsafeRunPromise" in original).toBe(false);
+    expect(Object.keys(eff)).toEqual(Object.keys(original));
     expect(same).toBe(eff);
     await expect(eff.toPromise({})).resolves.toBe(123);
     await expect(eff.unsafeRunPromise()).resolves.toBe(123);
