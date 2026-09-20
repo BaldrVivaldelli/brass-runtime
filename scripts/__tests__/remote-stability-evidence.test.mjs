@@ -57,6 +57,24 @@ describe("remote stability evidence integrity", () => {
     changed.comparison.weeklyTrendEstablished = true;
     expect(validate(changed)).toMatchObject({ status: 1 });
   });
+
+  it("rejects a mutated post-merge manifest digest", () => {
+    const changed = structuredClone(committed);
+    changed.manifestValidation.artifact.files["stability-run-manifest.json"].sha256 = "not-a-digest";
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects post-merge artifact retention below 90 days", () => {
+    const changed = structuredClone(committed);
+    changed.manifestValidation.artifact.retentionDays = 30;
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("does not promote a manual manifest run into the weekly trend", () => {
+    const changed = structuredClone(committed);
+    changed.manifestValidation.manifest.weeklyTrendEligible = true;
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
 });
 
 function validate(evidence) {
