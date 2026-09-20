@@ -1,4 +1,10 @@
-import { Runtime } from "brass-runtime/core";
+import {
+  Layer,
+  LayerContext,
+  Runtime,
+  RuntimeService,
+  makeConfigLayer,
+} from "./brass";
 import {
   HttpClientService,
   defineHttpPolicyPresets,
@@ -18,13 +24,6 @@ import {
   type Observability,
   type ObservabilityOptions,
 } from "brass-runtime/observability";
-import {
-  Layer,
-  LayerContext,
-  RuntimeService,
-  makeConfigLayer,
-} from "brass-runtime/core";
-
 export const ExampleConfigService = Layer.tag<ExampleConfig>("ExampleConfig");
 
 export const ExampleConfigSchema = s.object({

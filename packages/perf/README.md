@@ -13,8 +13,8 @@ npm install brass-runtime ./brass-perf-0.1.0-alpha.0.tgz
 import { runBrassPerformanceProfile } from "@brass/perf";
 ```
 
-The `brass-perf` executable is included. The package owns its ESM, CJS, and CLI
-bundles while consuming the runtime, HTTP, and observability entrypoints from
-`brass-runtime` as a peer. During the v1 compatibility period, its exports and
-declarations stay in parity with `brass-runtime/perf`. It remains alpha while
-that contract is exercised in real projects.
+The `brass-perf` executable is included. The package owns its ESM, CJS, CLI,
+and bundled TypeScript declarations while consuming the runtime, HTTP, and
+observability entrypoints from `brass-runtime` as peers. During the v1
+compatibility period, its exports stay in parity with `brass-runtime/perf`. It
+remains alpha while that contract is exercised in real projects.

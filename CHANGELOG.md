@@ -53,6 +53,19 @@
 
 ### Distribution and Documentation
 
+- Added the additive small v2 API candidate: v2 owns the beta package root,
+  `/next` remains an alias, `/v1` and `/core` preserve explicit compatibility,
+  and the generated 546-symbol disposition leaves no unmapped v1 export.
+- Added read-only migration analysis, three measured internal lighthouse
+  migrations, reproducible adoption/readiness evidence, and explicit
+  non-claims for external production adoption and unpublished registry state.
+- Added independently built `@brass/agent`, `@brass/perf`, and
+  `@brass/engine-wasm` alpha candidates with self-contained declarations,
+  packed-consumer smokes, individual size budgets, and protected manual
+  publication that cannot move `latest`.
+- Added a protected manual `brass-runtime@2.0.0-beta.0` publisher for the
+  `next` channel with exact-version rebuild, npm dry-run, provenance, retained
+  artifact, v1 rollback, and post-publication tag verification.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.
@@ -78,8 +91,12 @@
 ### Validation
 
 - `npm run release:check` passes, including Rust fmt/Clippy/tests, a real WASM
-  build, TypeScript types, 2,151 tests across 243 files, ESM/CJS/DTS builds, CJS
-  validation, and runtime/HTTP/observability performance budgets.
+  build, TypeScript types, 2,224 tests across 256 files, ESM/CJS/DTS builds,
+  packed Express and companion-product consumers, CJS/browser validation, and
+  runtime/HTTP/observability performance budgets.
+- The v1 compatibility tarball remains below its 245-file, 1.18 MB compressed,
+  and 4.9 MB unpacked ceilings. The local v2 candidate passes at 75 files,
+  618,922 compressed bytes, and 2,974,785 unpacked bytes.
 - `npm pack --dry-run` passes; release metadata covers 232 packages with zero
   missing license assertions and four checksummed local artifacts.
 

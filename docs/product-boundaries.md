@@ -37,10 +37,39 @@ automated `npm run validate:boundaries` gate enforces the important absences:
 4. **Done:** make each candidate own its executable ESM, CJS, and CLI bundles.
    Builds externalize the stable runtime/HTTP/observability surfaces to the
    `brass-runtime` peer, so Agent or Perf candidates can be produced without a
-   new runtime artifact. Source remains co-located in this repository to avoid
-   duplicate implementations.
+   new runtime artifact. Their bundled declarations no longer forward through
+   the monolith's `/agent` or `/perf` paths. Source remains co-located in this
+   repository to avoid duplicate implementations.
 5. Keep `brass-runtime/agent` and `brass-runtime/perf` supported for all of v1;
    deprecate or remove them only with a documented major-version migration.
+6. **Done:** add the independently versioned `@brass/engine-wasm` alpha
+   candidate. The v1 package retains its embedded WASM paths for compatibility;
+   the loader prefers the optional package when both are installed.
+7. **Done:** build a separate v2 beta package shape. Its root owns the small v2
+   facade, `/v1` is an explicit bridge, Agent/Perf subpaths and bins are absent,
+   and WASM is an optional peer rather than embedded payload.
+
+The v1 compatibility package no longer produces an unused second ESM build
+with `.js` extensions. All public Node imports already resolve to `.mjs`, all
+CommonJS imports and bins resolve to `.cjs`, and browser exports resolve to
+browser `.mjs` files. Removing the unpublished duplicate reduced the packed v1
+artifact from its 269-file, approximately 1.392 MB compressed and 5.973 MB
+unpacked baseline. It remains below the versioned 245-file, 1.18 MB compressed,
+and 4.9 MB unpacked ceilings, including generated migration and readiness
+evidence. Packed consumer tests prove that the legacy Agent/Perf entrypoints and
+independent candidates still execute.
+
+The generated 546-symbol v1-to-v2 disposition is intentionally shipped as
+migration documentation. Its repetitive JSON adds documentation bytes without
+restoring executable duplication; the separate docs ceiling accounts for it
+while the total compressed, unpacked, file-count, dist, and WASM ceilings stay
+unchanged.
+
+The v2 beta candidate is smaller still and remains below the versioned 180-file,
+900,000-byte compressed, and 4,000,000-byte unpacked targets.
+Agent, Perf, and Engine WASM also have individual compressed, unpacked, and
+file-count ceilings in the same budget file. Their first npm publication
+dry-runs are retained in the product-registry readiness evidence.
 
 Physical extraction must not begin until the dependency gate passes and packed
 package smoke tests exist for both the old and new import paths.
@@ -55,12 +84,16 @@ npm run validate:product:agent
 npm run validate:product:perf
 ```
 
-The package build configs are `tsup.agent.config.ts` and
-`tsup.perf.config.ts`. Packed-consumer validation requires exact runtime export
-parity, type resolution against the v1 declarations, real library execution,
-and CLI startup.
+The package build configs are `tsup.agent.config.ts`, `tsup.perf.config.ts`, and
+`tsup.v2-beta.config.ts`. Packed-consumer validation requires exact v1 runtime
+export parity where promised, self-contained type resolution, real library
+execution, CLI startup, and all documented beta package conditions.
 
-The repository intentionally does not auto-publish any of the three companion
-products. The `Agent`, `Perf`, and `VS Code` workflows create independently
-downloadable release-candidate artifacts; publishing requires a deliberate
-maintainer action after namespace, changelog, and compatibility review.
+The repository intentionally does not auto-publish any companion product. The
+`Agent`, `Perf`, `Engine WASM`, and `VS Code` workflows create independently
+downloadable release-candidate artifacts. A separate manual workflow can
+publish one reviewed npm product at a time from `main`, only under the `alpha`
+tag and after approval of the `npm-products` environment. It rejects reused
+versions, retains the tarball, uses provenance, and verifies that `latest` did
+not move. Namespace ownership, changelog, and compatibility review remain
+required before each first publication.

@@ -7,22 +7,21 @@
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.mjs",
-  "types": "./index.d.ts",
+  "types": "./dist/index.d.mts",
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./index.d.ts",
+      "types": "./dist/index.d.mts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
     },
     "./package.json": "./package.json"
   },
   "bin": {
-    "brass-perf": "./dist/cli.cjs"
+    "brass-perf": "dist/cli.cjs"
   },
   "files": [
     "dist",
-    "index.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -30,7 +29,7 @@
     "prepack": "npm --prefix ../.. run build:product:perf"
   },
   "peerDependencies": {
-    "brass-runtime": ">=1.18.3 <2"
+    "brass-runtime": ">=1.18.3 <2 || >=2.0.0-beta.0 <3"
   },
   "engines": {
     "node": ">=18"

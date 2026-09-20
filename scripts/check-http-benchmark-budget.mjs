@@ -1,10 +1,13 @@
 #!/usr/bin/env node
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const calls = process.env.BRASS_HTTP_BENCH_CALLS ?? "1000";
 const concurrency = process.env.BRASS_HTTP_BENCH_CONCURRENCY ?? "64";
 const delayMs = process.env.BRASS_HTTP_BENCH_DELAY_MS ?? "1";
+const maxErrors = Number(process.env.BRASS_HTTP_BENCH_MAX_ERRORS ?? "0");
 const maxHeapDeltaMb = Number(process.env.BRASS_HTTP_BENCH_MAX_HEAP_DELTA_MB ?? "24");
 const minAdaptiveFinalLimit = Number(process.env.BRASS_HTTP_BENCH_MIN_ADAPTIVE_FINAL_LIMIT ?? "4");
 const minAdaptiveServerInFlight = Number(process.env.BRASS_HTTP_BENCH_MIN_ADAPTIVE_SERVER_IN_FLIGHT ?? "4");
@@ -17,7 +20,7 @@ const run = spawnSync(
     env: {
       ...process.env,
       FORCE_COLOR: "0",
-      BRASS_HTTP_BENCH_MODE: "compare",
+      BRASS_HTTP_BENCH_MODE: process.env.BRASS_HTTP_BENCH_MODE ?? "compare",
       BRASS_HTTP_BENCH_CALLS: calls,
       BRASS_HTTP_BENCH_CONCURRENCY: concurrency,
       BRASS_HTTP_BENCH_DELAY_MS: delayMs,
@@ -25,6 +28,9 @@ const run = spawnSync(
   },
 );
 
+if (run.error) {
+  throw run.error;
+}
 if (run.status !== 0) {
   process.stderr.write(run.stderr);
   process.stderr.write(run.stdout);
@@ -40,13 +46,19 @@ try {
   throw error;
 }
 
+const reportPath = process.env.BRASS_STABILITY_REPORT_PATH;
+if (reportPath) {
+  mkdirSync(dirname(reportPath), { recursive: true });
+  writeFileSync(reportPath, run.stdout);
+}
+
 const results = report.suites.flatMap((suite) => suite.results);
 const failures = [];
 
 for (const result of results) {
   const details = result.details ?? {};
-  if ((details.errorCount ?? 0) > 0) {
-    failures.push(`${result.operation}: ${details.errorCount} HTTP errors`);
+  if ((details.errorCount ?? 0) > maxErrors) {
+    failures.push(`${result.operation}: ${details.errorCount} HTTP errors > ${maxErrors}`);
   }
   if (details.gcAvailable === true && typeof details.heapDeltaMb === "number" && details.heapDeltaMb > maxHeapDeltaMb) {
     failures.push(`${result.operation}: heapDeltaMb ${details.heapDeltaMb} > ${maxHeapDeltaMb}`);

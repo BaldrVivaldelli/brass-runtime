@@ -30,10 +30,14 @@ jobs:
       - run: npm ci
       - run: npm run validate:boundaries
       - run: npm run validate:evidence
+      - run: npm run validate:adoption-evidence
+      - run: npm run validate:release-policy
       - run: npm run test:types
       - run: npm run rust:check
       - run: npm run build
+      - run: npm run validate:example:express
       - run: npm run validate:api
+      - run: npm run validate:v2-map
       - run: npm run validate:wasm
       - run: npm run test:coverage
       - run: npm run validate:cjs

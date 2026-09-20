@@ -14,3 +14,6 @@ framework examples:
 The helpers intentionally avoid framework dependencies. Each framework example
 imports from `../../shared/src`.
 
+Runtime, Layer, and LayerContext come from the v2 preview through
+`src/brass.ts`. The two Layer/DI bootstrap concepts not yet in the preview stay
+on the supported v1 core entrypoint behind that same reversible facade.

@@ -1,42 +1,52 @@
 {
-  "schemaVersion": 1,
-  "description": "Generated declaration fingerprints for the frozen v1 API and additive v2 preview.",
+  "schemaVersion": 2,
+  "description": "Generated declaration fingerprints and export counts for the frozen v1 API and additive v2 preview.",
+  "normalization": "line-endings-and-tsup-content-hashes-v1",
   "entrypoints": {
     ".": {
       "file": "dist/index.d.ts",
-      "sha256": "7061cdd9c49cb076393b3c360bc50e5a4b5480f6fd8a773852e897c2ce0d1f97"
+      "sha256": "e085a67a5ec0e2504950130fa9a184010aba8967cbdc2d6eb2694ae2c4a3d9e0",
+      "exportCount": 546
     },
     "./agent": {
       "file": "dist/agent/index.d.ts",
-      "sha256": "1ef8aeab0a1e2cc0a40893d4c82a3266a4c466ea97fd1368fa8eef1027db5ada"
+      "sha256": "4ebce38163b0889c7336e42004b2565d4cf0cc776d2923365b65a8345fa910d0",
+      "exportCount": 243
     },
     "./core": {
       "file": "dist/core/index.d.ts",
-      "sha256": "c51ea32b6eaf79ee7d4172415a6ffa00daa88cc1d8f3e79f99d84fcc199f03a6"
+      "sha256": "2e641b5d20cecb1b7a73c13eda2a11a646f601829bb7e88fecbff62c3967a91a",
+      "exportCount": 546
     },
     "./http": {
       "file": "dist/http/index.d.ts",
-      "sha256": "a43009eddad6524209df2a2e7cad7cf7ec6e549f04e6135d7e07967ef4c20a8e"
+      "sha256": "87b41e68fb7ebc243638336d3f8ef57ee9a4c89c14f8e807345bfa45dd4e98ef",
+      "exportCount": 335
     },
     "./http/testing": {
       "file": "dist/http/testing.d.ts",
-      "sha256": "786aad84174a62a0e038d2843d052847a1ca790675cffc73cc7efa7fd7170e67"
+      "sha256": "a8150c31d1a3b893fc6062f9f8040ebc8de3f773c60a96bed17343b53a457e2b",
+      "exportCount": 20
     },
     "./next": {
       "file": "dist/next.d.ts",
-      "sha256": "88505907371499cd07cf88fe7f3d35d7d36b177e5a7597aeec29f8475cb99fa1"
+      "sha256": "312e7beeefaf242db380cbb1d0662ea549809c79e8e6fcd9cc7f248afeb4038e",
+      "exportCount": 34
     },
     "./observability": {
       "file": "dist/observability/index.d.ts",
-      "sha256": "baa67b5945fb589dbf843bb65e37c4cb2030ad49389882935bdafb3741ca893f"
+      "sha256": "f3b1ac2cba3419d34a648468acce7d1ea9780c3d61534cf4ea60f79ffb0799a9",
+      "exportCount": 163
     },
     "./perf": {
       "file": "dist/perf/index.d.ts",
-      "sha256": "d128814a875785467d82d5dd57f870892c0ea9d69efa14a5778fdd4f8fada49c"
+      "sha256": "d128814a875785467d82d5dd57f870892c0ea9d69efa14a5778fdd4f8fada49c",
+      "exportCount": 88
     },
     "./schema": {
       "file": "dist/schema/index.d.ts",
-      "sha256": "9d099339434cd5ff8e7f8876f7b4c9ac39d43822f8e253680efdee4fb3641ca9"
+      "sha256": "9d099339434cd5ff8e7f8876f7b4c9ac39d43822f8e253680efdee4fb3641ca9",
+      "exportCount": 27
     }
   }
 }

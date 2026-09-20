@@ -1,0 +1,40 @@
+{
+  "name": "@brass/engine-wasm",
+  "version": "0.1.0-alpha.0",
+  "description": "Optional independently versioned WASM engine for Brass Runtime",
+  "license": "MIT",
+  "author": "Augusto Vivaldelli",
+  "main": "./dist/brass_runtime_wasm_engine.js",
+  "types": "./dist/brass_runtime_wasm_engine.d.ts",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/brass_runtime_wasm_engine.d.ts",
+      "import": "./dist/brass_runtime_wasm_engine.js",
+      "require": "./dist/brass_runtime_wasm_engine.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "prepack": "npm --prefix ../.. run build:product:engine-wasm"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BaldrVivaldelli/brass-runtime.git",
+    "directory": "packages/engine-wasm"
+  },
+  "bugs": {
+    "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
+  }
+}

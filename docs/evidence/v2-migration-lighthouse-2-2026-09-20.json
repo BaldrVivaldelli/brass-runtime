@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "consumerId": "internal-express-observability-lighthouse-2",
+  "stage": "completed",
+  "consent": "granted",
+  "consentScope": "Internal repository example and anonymized migration evidence; no external adopter claim is made.",
+  "publishableCaseStudy": false,
+  "source": {
+    "kind": "internal-framework-example",
+    "filesScanned": 20,
+    "framework": "express",
+    "workload": "HTTP client, inbound trace propagation, metrics, health, and graceful shutdown"
+  },
+  "baseline": {
+    "filesScanned": 19,
+    "filesWithV1Imports": 1,
+    "documentedMappings": 0,
+    "directMoves": 3,
+    "manualDecisions": 2,
+    "parseErrors": 0
+  },
+  "result": {
+    "filesWithV1Imports": 1,
+    "documentedMappings": 0,
+    "directMoves": 0,
+    "manualDecisions": 2,
+    "parseErrors": 0
+  },
+  "manualImports": [
+    { "name": "RuntimeService", "occurrences": 1 },
+    { "name": "makeConfigLayer", "occurrences": 1 }
+  ],
+  "experience": {
+    "unsupportedDistinctImports": 2,
+    "v1FallbackOccurrences": 2,
+    "applicationFacades": 1
+  },
+  "migration": {
+    "startedAt": "2026-09-20T10:44:06-03:00",
+    "finishedAt": "2026-09-20T10:47:08-03:00",
+    "durationSeconds": 182,
+    "includes": "facade migration, packed install harness, two failed smoke diagnoses, correction, and successful end-to-end run"
+  },
+  "thresholds": [
+    { "name": "remaining v1 reference files", "expected": "at most 1", "actual": 1, "passed": true },
+    { "name": "manual migration decisions", "expected": "at most 2", "actual": 2, "passed": true },
+    { "name": "parse errors", "expected": 0, "actual": 0, "passed": true },
+    { "name": "Express typecheck", "expected": "pass", "actual": "pass", "passed": true },
+    { "name": "HTTP smoke routes", "expected": "3/3 pass", "actual": "3/3 pass", "passed": true },
+    { "name": "graceful shutdown", "expected": "SIGTERM exit 0", "actual": "SIGTERM exit 0", "passed": true },
+    { "name": "v2 beta Express rehearsal", "expected": "typecheck, 3 routes, SIGTERM pass", "actual": "pass", "passed": true }
+  ],
+  "validation": {
+    "runtimeVersion": "1.22.0",
+    "runtimeTarballSha256": "62cb331c844e0d9b6afa2f282bfa9b285c04163cd4337f63379504292bf3004e",
+    "templateBuildsPassed": 1,
+    "templateBuildsTotal": 1,
+    "betaCandidateVersion": "2.0.0-beta.0",
+    "betaCandidateTarballSha256": "625ca6fdb6df772756f132c04657fb462d8f5110a5bb12098db8a72265dd2a22",
+    "betaCandidateTemplateBuildsPassed": 1,
+    "betaCandidateTemplateBuildsTotal": 1,
+    "checks": [
+      "strict TypeScript typecheck",
+      "GET /users/42 with incoming W3C traceparent",
+      "GET /health readiness",
+      "GET /metrics after an observed request",
+      "SIGTERM cleanup and exit 0"
+    ]
+  },
+  "negativeFindings": [
+    "The first harness layout installed dependencies below the shared source, so module resolution failed; staging now mirrors the examples-level dependency boundary.",
+    "The initial smoke expected a generated span ID in the immutable inbound trace field; it now supplies a W3C traceparent and verifies propagation of that exact trace ID.",
+    "RuntimeService and makeConfigLayer are absent from the documented v2 preview and remain isolated on the supported v1 core entrypoint.",
+    "The beta rehearsal passed without adding root exports, confirming that the two bootstrap gaps belong on /core for now."
+  ],
+  "decision": "adopt-next-preview-with-two-layer-bootstrap-fallbacks",
+  "rollbackPath": "Change examples/shared/src/brass.ts back to brass-runtime/core and restore the former direct imports; the example persists no application data.",
+  "limitations": [
+    "This is an internal offline example with a fake upstream transport, not an external deployment.",
+    "The smoke proves request behavior and graceful shutdown once; it is not a load, soak, or fault-injection result.",
+    "CPU, heap, RSS, latency percentiles, retention, and upgrade lag are outside this migration record.",
+    "The shared facade serves several framework examples, but only the Express consumer was installed and executed in this run.",
+    "The beta candidate was packed and installed locally; this is not registry or external-production evidence."
+  ],
+  "reproduce": "node scripts/analyze-v2-migration.mjs --json examples; npm run validate:example:express -- --runtime-tarball <brass-runtime-1.22.0.tgz>; npm run validate:example:express -- --runtime-tarball <brass-runtime-2.0.0-beta.0.tgz>"
+}

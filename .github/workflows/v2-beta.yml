@@ -1,0 +1,103 @@
+name: V2 Beta
+
+on:
+  pull_request:
+    paths:
+      - "src/core/**"
+      - "src/http/**"
+      - "src/schema/**"
+      - "src/observability/**"
+      - "src/next.ts"
+      - "packages/agent/**"
+      - "packages/perf/**"
+      - "packages/engine-wasm/**"
+      - "wasm/**"
+      - "docs/api-v2.md"
+      - "docs/migration-v1-to-v2.md"
+      - "docs/product-boundaries.md"
+      - "docs/support-and-maintenance.md"
+      - "docs/v1-to-v2-export-map.json"
+      - "scripts/validate-v2-beta.mjs"
+      - "scripts/validate-v2-core-lighthouse.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "scripts/build-engine-wasm-package.mjs"
+      - "scripts/package-size-budget.json"
+      - "tsup.v2-beta.config.ts"
+      - "tsup.agent.config.ts"
+      - "tsup.perf.config.ts"
+      - ".releaserc.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/v2-beta.yml"
+  push:
+    branches: [main, next]
+    paths:
+      - "src/core/**"
+      - "src/http/**"
+      - "src/schema/**"
+      - "src/observability/**"
+      - "src/next.ts"
+      - "packages/agent/**"
+      - "packages/perf/**"
+      - "packages/engine-wasm/**"
+      - "wasm/**"
+      - "docs/api-v2.md"
+      - "docs/migration-v1-to-v2.md"
+      - "docs/product-boundaries.md"
+      - "docs/support-and-maintenance.md"
+      - "docs/v1-to-v2-export-map.json"
+      - "scripts/validate-v2-beta.mjs"
+      - "scripts/validate-v2-core-lighthouse.mjs"
+      - "scripts/validate-product-packages.mjs"
+      - "scripts/build-engine-wasm-package.mjs"
+      - "scripts/package-size-budget.json"
+      - "tsup.v2-beta.config.ts"
+      - "tsup.agent.config.ts"
+      - "tsup.perf.config.ts"
+      - ".releaserc.json"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/v2-beta.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-beta-${{ github.ref }}-${{ matrix.node-version }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-pack:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@1.94.0
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.14.0 --locked
+
+      - run: npm ci
+      - run: npm run test:types
+      - run: npm run build:wasm
+      - run: npm run validate:v2-beta
+      - run: npm run validate:example:v2-core
+
+      - uses: actions/upload-artifact@v7
+        if: matrix.node-version == 22
+        with:
+          name: brass-runtime-v2-beta-package
+          path: artifacts/v2-beta/*.tgz
+          if-no-files-found: error

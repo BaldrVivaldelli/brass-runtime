@@ -111,6 +111,7 @@ export function wasmModuleCandidates(modulePath?: string): string[] {
   if (modulePath) return [modulePath];
 
   return [
+    "@brass/engine-wasm",
     "brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js",
     "../wasm/pkg/brass_runtime_wasm_engine.js",
     "../../../wasm/pkg/brass_runtime_wasm_engine.js",

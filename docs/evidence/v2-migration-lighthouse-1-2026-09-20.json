@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "consumerId": "workspace-template-lighthouse-1",
+  "stage": "completed",
+  "consent": "granted",
+  "consentScope": "Anonymized internal migration evidence and changes to the consumer repository; public case-study publication is not authorized.",
+  "publishableCaseStudy": false,
+  "source": {
+    "kind": "local-workspace-template",
+    "filesScanned": 15,
+    "templateVariants": 2
+  },
+  "baseline": {
+    "filesWithV1Imports": 4,
+    "documentedMappings": 5,
+    "directMoves": 4,
+    "manualDecisions": 4,
+    "parseErrors": 0
+  },
+  "result": {
+    "filesWithV1Imports": 2,
+    "documentedMappings": 0,
+    "directMoves": 0,
+    "manualDecisions": 2,
+    "parseErrors": 0
+  },
+  "manualImports": [
+    { "name": "zipPar", "occurrences": 2 }
+  ],
+  "experience": {
+    "unsupportedDistinctImports": 1,
+    "v1FallbackOccurrences": 2,
+    "applicationFacades": 2
+  },
+  "migration": {
+    "startedAt": "2026-09-20T10:30:03-03:00",
+    "finishedAt": "2026-09-20T10:36:22-03:00",
+    "durationSeconds": 379,
+    "includes": "implementation, analyzer repair, dependency installation, one failed build diagnosis, correction, and successful rebuild"
+  },
+  "thresholds": [
+    { "name": "template builds", "expected": "2/2 pass", "actual": "2/2 pass", "passed": true },
+    { "name": "remaining v1 references", "expected": "at most 2", "actual": 2, "passed": true },
+    { "name": "manual migration decisions", "expected": "at most 2", "actual": 2, "passed": true },
+    { "name": "parse errors", "expected": 0, "actual": 0, "passed": true },
+    { "name": "stable-v1 rollback builds", "expected": "2/2 pass", "actual": "2/2 pass", "passed": true },
+    { "name": "v2 beta candidate builds", "expected": "2/2 pass", "actual": "2/2 pass", "passed": true },
+    { "name": "v2 beta /v1 bridge rollback builds", "expected": "2/2 pass", "actual": "2/2 pass", "passed": true }
+  ],
+  "validation": {
+    "runtimeVersion": "1.22.0",
+    "runtimeTarballSha256": "62cb331c844e0d9b6afa2f282bfa9b285c04163cd4337f63379504292bf3004e",
+    "templateBuildsPassed": 2,
+    "templateBuildsTotal": 2,
+    "registryLatestVersion": "1.22.0",
+    "publishedPackageTemplateBuildsPassed": 2,
+    "publishedPackageTemplateBuildsTotal": 2,
+    "rollbackTemplateBuildsPassed": 2,
+    "rollbackTemplateBuildsTotal": 2,
+    "betaCandidateVersion": "2.0.0-beta.0",
+    "betaCandidateTarballSha256": "625ca6fdb6df772756f132c04657fb462d8f5110a5bb12098db8a72265dd2a22",
+    "betaCandidateTemplateBuildsPassed": 2,
+    "betaCandidateTemplateBuildsTotal": 2,
+    "betaV1BridgeBuildsPassed": 2,
+    "betaV1BridgeBuildsTotal": 2,
+    "reactProductionBundleBytes": 319320,
+    "vanillaProductionBundleBytes": 175050
+  },
+  "negativeFindings": [
+    "The migration analyzer initially missed v1 re-exports; support and tests for named, aliased, type-only, namespace, and star re-exports were added before accepting the result.",
+    "The v1 zipPar bridge erased tuple inference in the vanilla template and required an explicit tuple assertion at the facade boundary.",
+    "zipPar is absent from the documented v2 preview. Stable 1.22.0 keeps it on the root; the beta rehearsal moves only that fallback to supported /core. One consumer is insufficient evidence for a new v2 API.",
+    "The first beta install exposed two distribution defects before this record passed: prerelease peer ranges rejected the beta, and Agent/Perf linked to the shrinking package root instead of /core."
+  ],
+  "decision": "adopt-next-preview-with-one-compatibility-fallback",
+  "rollbackPath": "Inside the beta, replace each local facade with /v1 exports plus a one-line Effect.fromPromiseAbortable adapter; for full reversal restore the stable-v1 lockfile and stable-root facade. Both variants build and no persisted data or runtime-state migration is involved.",
+  "limitations": [
+    "This is one template consumer with two framework variants, not an independent external production workload.",
+    "The validation proves type-checking and production bundling but does not execute the demo's external HTTP requests.",
+    "Latency, CPU, memory, retention, upgrade lag, and operational reliability are not represented by this migration.",
+    "Consent covers anonymized internal evidence only, so this record is not a publishable case study.",
+    "The beta candidate was packed and installed locally; this record does not claim registry publication or external production use."
+  ],
+  "reproduce": "node scripts/analyze-v2-migration.mjs --json <authorized-consumer-source>/templates; npm run test:templates -- --runtime-tarball <brass-runtime-1.22.0.tgz>; npm run test:templates:rollback -- --runtime-tarball <brass-runtime-1.22.0.tgz>; npm run test:templates -- --runtime-tarball <brass-runtime-2.0.0-beta.0.tgz>; npm run test:templates:v1-bridge -- --runtime-tarball <brass-runtime-2.0.0-beta.0.tgz>"
+}

@@ -3,7 +3,7 @@ import type { Plugin } from "esbuild";
 import path from "node:path";
 
 const productExternals: ReadonlyArray<readonly [string, string]> = [
-  [path.resolve("src/core"), "brass-runtime"],
+  [path.resolve("src/core"), "brass-runtime/core"],
   [path.resolve("src/http"), "brass-runtime/http"],
   [path.resolve("src/observability"), "brass-runtime/observability"],
 ];
@@ -47,5 +47,19 @@ export default defineConfig([
     format: ["esm"],
     clean: false,
     outExtension: () => ({ js: ".mjs" }),
+  },
+  {
+    entry: {
+      index: "src/perf/index.ts",
+    },
+    platform: "node",
+    target: "node18",
+    format: ["esm"],
+    splitting: false,
+    sourcemap: false,
+    outDir: "packages/perf/dist",
+    clean: false,
+    dts: { only: true },
+    outExtension: () => ({ dts: ".d.ts" }),
   },
 ]);

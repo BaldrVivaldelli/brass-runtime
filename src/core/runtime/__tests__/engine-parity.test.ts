@@ -10,6 +10,7 @@ import {
   type Async,
 } from "../../types/asyncEffect";
 import type { Exit } from "../../types/effect";
+import { registerEffectDirect } from "../directEffectRunner";
 import { Runtime } from "../runtime";
 import { Scheduler } from "../scheduler";
 import type { RuntimeEngineMode } from "../engine/types";
@@ -29,7 +30,7 @@ function supportedParityModes(): RuntimeEngineMode[] {
   });
 }
 
-function runToExit<A>(engine: RuntimeEngineMode, effect: Async<unknown, unknown, A>): Promise<Exit<unknown, A>> {
+function runEngineToExit<A>(engine: RuntimeEngineMode, effect: Async<unknown, unknown, A>): Promise<Exit<unknown, A>> {
   return new Promise((resolve) => {
     const rt = Runtime.makeWithEngine({}, engine, { scheduler: new Scheduler({ engine: "ts" }) });
     rt.unsafeRunAsync(effect, (exit) => {
@@ -39,37 +40,53 @@ function runToExit<A>(engine: RuntimeEngineMode, effect: Async<unknown, unknown,
   });
 }
 
+function runNativeTopLevelToExit<A>(effect: Async<unknown, unknown, A>): Promise<Exit<unknown, A>> {
+  return new Promise((resolve) => {
+    const rt = Runtime.makeWithEngine({}, "ts", { inferLane: false });
+    rt.unsafeRunAsync(effect, (exit) => {
+      rt.shutdown();
+      resolve(exit);
+    });
+  });
+}
+
+function runDirectToExit<A>(effect: Async<unknown, unknown, A>): Promise<Exit<unknown, A>> {
+  return new Promise((resolve) => {
+    registerEffectDirect(effect, {}, resolve);
+  });
+}
+
 function expectSameExit(actual: Exit<unknown, unknown>, expected: Exit<unknown, unknown>) {
   expect(actual).toEqual(expected);
 }
 
 type Case = {
   readonly name: string;
-  readonly effect: Async<unknown, unknown, unknown>;
+  readonly makeEffect: () => Async<unknown, unknown, unknown>;
 };
 
 const cases: Case[] = [
   {
     name: "succeed",
-    effect: asyncSucceed({ ok: true, n: 1 }),
+    makeEffect: () => asyncSucceed({ ok: true, n: 1 }),
   },
   {
     name: "fail",
-    effect: asyncFail({ code: "boom" }),
+    makeEffect: () => asyncFail({ code: "boom" }),
   },
   {
     name: "sync",
-    effect: asyncSync(() => 41 + 1),
+    makeEffect: () => asyncSync(() => 41 + 1),
   },
   {
     name: "flatMap chain",
-    effect: asyncFlatMap(asyncSucceed(10), (n) =>
+    makeEffect: () => asyncFlatMap(asyncSucceed(10), (n) =>
       asyncFlatMap(asyncSucceed(n + 1), (m) => asyncSucceed(m * 2)),
     ),
   },
   {
     name: "fold recovers failure",
-    effect: asyncFold(
+    makeEffect: () => asyncFold(
       asyncFail("bad"),
       (error) => asyncSucceed(`recovered:${error}`),
       (value) => asyncSucceed(value),
@@ -77,7 +94,7 @@ const cases: Case[] = [
   },
   {
     name: "fold maps success",
-    effect: asyncFold(
+    makeEffect: () => asyncFold(
       asyncSucceed("ok"),
       (error) => asyncSucceed(`bad:${error}`),
       (value) => asyncSucceed(`${value}:mapped`),
@@ -85,7 +102,7 @@ const cases: Case[] = [
   },
   {
     name: "sync exception becomes failure",
-    effect: asyncFold(
+    makeEffect: () => asyncFold(
       asyncSync(() => {
         throw new Error("sync-error");
       }),
@@ -94,21 +111,34 @@ const cases: Case[] = [
     ),
   },
   {
+    name: "nested sync exception remains recoverable",
+    makeEffect: () => asyncFold(
+      asyncFlatMap(
+        asyncSync(() => {
+          throw new Error("nested-sync-error");
+        }),
+        () => asyncSucceed("unexpected"),
+      ),
+      (error) => asyncSucceed(error instanceof Error ? error.message : String(error)),
+      (value) => asyncSucceed(value),
+    ),
+  },
+  {
     name: "synchronous async callback",
-    effect: async((_env, cb) => {
+    makeEffect: () => async((_env, cb) => {
       cb({ _tag: "Success", value: "inline" });
     }),
   },
   {
     name: "deferred async callback",
-    effect: async((_env, cb) => {
+    makeEffect: () => async((_env, cb) => {
       const handle = setTimeout(() => cb({ _tag: "Success", value: "later" }), 0);
       return () => clearTimeout(handle);
     }),
   },
   {
     name: "map over async",
-    effect: asyncMap(
+    makeEffect: () => asyncMap(
       async((_env, cb) => cb({ _tag: "Success", value: 5 })),
       (n) => n * 3,
     ),
@@ -116,12 +146,24 @@ const cases: Case[] = [
 ];
 
 describe("Runtime engine parity", () => {
-  for (const engine of supportedParityModes()) {
-    describe(`${engine} vs ts`, () => {
+  const runners: ReadonlyArray<{
+    readonly name: string;
+    readonly run: (effect: Async<unknown, unknown, unknown>) => Promise<Exit<unknown, unknown>>;
+  }> = [
+    { name: "native top-level", run: runNativeTopLevelToExit },
+    { name: "direct adapter", run: runDirectToExit },
+    ...supportedParityModes().map((engine) => ({
+      name: engine,
+      run: (effect: Async<unknown, unknown, unknown>) => runEngineToExit(engine, effect),
+    })),
+  ];
+
+  for (const runner of runners) {
+    describe(`${runner.name} vs fiber-ts`, () => {
       for (const testCase of cases) {
-        it(`matches JS exit for ${testCase.name}`, async () => {
-          const expected = await runToExit("ts", testCase.effect);
-          const actual = await runToExit(engine, testCase.effect);
+        it(`matches the reference exit for ${testCase.name}`, async () => {
+          const expected = await runEngineToExit("ts", testCase.makeEffect());
+          const actual = await runner.run(testCase.makeEffect());
           expectSameExit(actual, expected);
         });
       }

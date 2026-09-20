@@ -1,0 +1,90 @@
+name: Brass adoption report
+description: Share a real Brass workload, migration gap, or operational result with explicit evidence consent.
+title: "[adoption] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for helping Brass distinguish real adoption from download counts.
+
+        This issue is public. Do not include credentials, proprietary payloads, private traces, customer data, or organization details you are not allowed to disclose. A maintainer can arrange a private evidence handoff when needed.
+
+  - type: input
+    id: version
+    attributes:
+      label: Exact Brass version
+      description: Include the exact version or prerelease, not an open range.
+      placeholder: 1.22.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment stage
+      options:
+        - Local evaluation
+        - CI or test
+        - Staging
+        - Canary
+        - Production
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: surfaces
+    attributes:
+      label: Surfaces used
+      options:
+        - label: Core runtime, effects, scopes, or streams
+        - label: HTTP
+        - label: Schema
+        - label: Observability or graceful shutdown
+        - label: Agent
+        - label: Performance tooling
+        - label: WASM engine
+        - label: V2 preview or beta
+    validations:
+      required: true
+
+  - type: textarea
+    id: workload
+    attributes:
+      label: Workload and outcome
+      description: Describe concurrency, duration or volume, environment, what changed, and the observed result.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Reproducible or redacted evidence
+      description: Add commands, a minimal repository, before/after measurements, or a redacted artifact. Include negative findings and rollback results.
+    validations:
+      required: true
+
+  - type: textarea
+    id: gaps
+    attributes:
+      label: Missing APIs or migration friction
+      description: List unsupported imports, escape hatches, migration time, or reasons you could not adopt the preview.
+
+  - type: dropdown
+    id: consent
+    attributes:
+      label: Evidence consent
+      description: This choice governs how the project may use the information in this public issue.
+      options:
+        - Discovery only; do not cite this as a case study
+        - Anonymized evidence and aggregate metrics may be cited
+        - This project and evidence may be named in a public case study
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: confirmation
+    attributes:
+      label: Confirmation
+      options:
+        - label: I am authorized to share the information in this issue and it contains no secrets or restricted data.
+          required: true

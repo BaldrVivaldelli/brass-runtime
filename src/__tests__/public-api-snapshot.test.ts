@@ -13,7 +13,7 @@ import * as agent from "../agent";
 
 const EXACT_EXPORT_SNAPSHOTS = Object.freeze({
   root: { count: 323, sha256: "4630f1eb941a5c011dbcd02b8c8f8bdd550e13f4797d75f3c67c4c5de05ff442" },
-  core: { count: 213, sha256: "9ccc40e704735494964da8b2e1a76cac84b7eef2ccb3584e76cd736b6542c66f" },
+  core: { count: 323, sha256: "4630f1eb941a5c011dbcd02b8c8f8bdd550e13f4797d75f3c67c4c5de05ff442" },
   next: { count: 18, sha256: "0ca5ba96279f716ed9693e97842db434af788d63510bc21408e087387450e9e5" },
   http: { count: 156, sha256: "6413697e1da8b34120c8d6b6112ee39159870bdbad0fe1f86c27837bce43c253" },
   httpTesting: { count: 12, sha256: "096ea6dca6b1e10f96e9e3cda9f0188f54dd19040d1e7c6ee2bec4acc95f7851" },

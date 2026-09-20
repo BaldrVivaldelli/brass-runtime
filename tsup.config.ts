@@ -86,15 +86,6 @@ export default defineConfig([
     outExtension() {
       return { js: ".mjs" };
     },
-  },
-  {
-    ...base,
-    format: ["esm"],
-    dts: false,
-    clean: false,
-    outExtension() {
-      return { js: ".js" };
-    },
     onSuccess: async () => {
       copyWasmAssets();
     },

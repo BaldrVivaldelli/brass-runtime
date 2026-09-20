@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "baselineDate": "2026-09-20",
+  "description": "Regression ceiling for the v1 compatibility package after removing the unpublished duplicate .js ESM build and retaining the audited three-lighthouse evidence bundle.",
+  "maximum": {
+    "compressedBytes": 1180000,
+    "unpackedBytes": 4900000,
+    "fileCount": 245,
+    "groups": {
+      "dist": 4050000,
+      "docs": 625000,
+      "wasm": 330000
+    }
+  },
+  "v2Target": {
+    "compressedBytes": 900000,
+    "unpackedBytes": 4000000,
+    "fileCount": 180
+  },
+  "productTargets": {
+    "agent": {
+      "compressedBytes": 300000,
+      "unpackedBytes": 1300000,
+      "fileCount": 10
+    },
+    "perf": {
+      "compressedBytes": 100000,
+      "unpackedBytes": 450000,
+      "fileCount": 10
+    },
+    "engine-wasm": {
+      "compressedBytes": 125000,
+      "unpackedBytes": 350000,
+      "fileCount": 10
+    }
+  }
+}

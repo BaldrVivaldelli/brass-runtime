@@ -15,17 +15,25 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const productSizeBudgets = JSON.parse(
+  readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8"),
+).productTargets;
 const requested = process.argv[2];
-const products = requested ? [requested] : ["agent", "perf"];
-const supported = new Set(["agent", "perf"]);
+const products = requested ? [requested] : ["agent", "perf", "engine-wasm"];
+const supported = new Set(["agent", "perf", "engine-wasm"]);
 
 for (const product of products) {
   if (!supported.has(product)) {
-    throw new Error(`Unknown product '${product}'. Expected agent or perf.`);
+    throw new Error(`Unknown product '${product}'. Expected agent, perf, or engine-wasm.`);
   }
 }
 
-for (const required of ["dist/index.cjs", "dist/agent/index.cjs", "dist/perf/index.cjs"]) {
+const requiredRuntimeFiles = [
+  "dist/index.cjs",
+  ...(products.includes("agent") ? ["dist/agent/index.cjs"] : []),
+  ...(products.includes("perf") ? ["dist/perf/index.cjs"] : []),
+];
+for (const required of requiredRuntimeFiles) {
   try {
     readFileSync(path.join(root, required));
   } catch {
@@ -72,6 +80,19 @@ try {
   );
 
   const esmChecks = products.map((product) => {
+    if (product === "engine-wasm") {
+      return [
+        'const engineWasmPackage = await import("@brass/engine-wasm");',
+        'const engineWasmLegacy = await import("brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js");',
+        "const EngineVm = engineWasmPackage.BrassWasmVm ?? engineWasmPackage.default?.BrassWasmVm;",
+        "const LegacyVm = engineWasmLegacy.BrassWasmVm ?? engineWasmLegacy.default?.BrassWasmVm;",
+        'if (typeof EngineVm !== "function") throw new Error("Missing BrassWasmVm ESM export");',
+        'if (typeof LegacyVm !== "function") throw new Error("Missing embedded BrassWasmVm ESM export");',
+        "const engineVm = new EngineVm();",
+        'if (engineVm.abi_version() !== 1) throw new Error("Unexpected WASM ABI version");',
+        "engineVm.free();",
+      ].join("\n");
+    }
     const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
     const behavior = product === "agent"
       ? `if (${product}Package.goalForAgentPreset("inspect").length === 0) throw new Error("Agent ESM behavior smoke failed");`
@@ -99,6 +120,19 @@ try {
   run(process.execPath, [esmSmoke], consumerDirectory);
 
   const cjsChecks = products.map((product) => {
+    if (product === "engine-wasm") {
+      return [
+        'const engineWasmPackage = require("@brass/engine-wasm");',
+        'const engineWasmLegacy = require("brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js");',
+        'if (typeof engineWasmPackage.BrassWasmVm !== "function") throw new Error("Missing BrassWasmVm CJS export");',
+        'if (typeof engineWasmLegacy.BrassWasmVm !== "function") throw new Error("Missing embedded BrassWasmVm CJS export");',
+        "const engineVm = new engineWasmPackage.BrassWasmVm();",
+        'if (engineVm.abi_version() !== 1) throw new Error("Unexpected WASM ABI version");',
+        "engineVm.free();",
+        'const strictWasmRuntime = new (require("brass-runtime/core").Runtime)({ env: {}, engine: "wasm" });',
+        'if (strictWasmRuntime.diagnostics().engine !== "wasm") throw new Error("Runtime did not load @brass/engine-wasm");',
+      ].join("\n");
+    }
     const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
     const behavior = product === "agent"
       ? `if (${product}Package.goalForAgentPreset("inspect").length === 0) throw new Error("Agent CJS behavior smoke failed");`
@@ -129,6 +163,9 @@ try {
   run(process.execPath, [cjsSmoke], consumerDirectory);
 
   const typeImports = products.map((product) => {
+    if (product === "engine-wasm") {
+      return 'import { BrassWasmVm } from "@brass/engine-wasm"; void BrassWasmVm;';
+    }
     const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
     return `import { ${symbol} } from "@brass/${product}"; void ${symbol};`;
   });
@@ -208,16 +245,47 @@ function pack(directory, destination) {
   if (directory !== root) {
     const paths = new Set(result.files.map((file) => file.path));
     const manifest = JSON.parse(readFileSync(path.join(directory, "package.json"), "utf8"));
-    for (const required of [
-      "dist/index.cjs",
-      "dist/index.mjs",
-      "dist/cli.cjs",
-      "index.d.ts",
-      "README.md",
-      "LICENSE",
-      "package.json",
-    ]) {
+    const productId = manifest.name.replace("@brass/", "");
+    const sizeBudget = productSizeBudgets?.[productId];
+    if (!sizeBudget) throw new Error(`${manifest.name} is missing a product package size budget`);
+    const actualSize = {
+      compressedBytes: Number(result.size ?? 0),
+      unpackedBytes: Number(result.unpackedSize ?? 0),
+      fileCount: result.files.length,
+    };
+    for (const [metric, maximum] of Object.entries(sizeBudget)) {
+      if (actualSize[metric] > maximum) {
+        throw new Error(`${manifest.name} ${metric} ${actualSize[metric]} exceeds ${maximum}`);
+      }
+    }
+    const requiredFiles = manifest.name === "@brass/engine-wasm"
+      ? [
+          "dist/brass_runtime_wasm_engine.js",
+          "dist/brass_runtime_wasm_engine.d.ts",
+          "dist/brass_runtime_wasm_engine_bg.wasm",
+          "dist/brass-runtime-build.json",
+          "README.md",
+          "LICENSE",
+          "package.json",
+        ]
+      : [
+          "dist/index.cjs",
+          "dist/index.mjs",
+          "dist/index.d.mts",
+          "dist/cli.cjs",
+          "README.md",
+          "LICENSE",
+          "package.json",
+        ];
+    for (const required of requiredFiles) {
       if (!paths.has(required)) throw new Error(`${manifest.name} tarball is missing ${required}`);
+    }
+
+    if (manifest.name === "@brass/agent" || manifest.name === "@brass/perf") {
+      const declaration = readFileSync(path.join(directory, "dist", "index.d.mts"), "utf8");
+      if (/from\s+["']brass-runtime\/(?:agent|perf)["']/.test(declaration)) {
+        throw new Error(`${manifest.name} declarations depend on a legacy monolith subpath`);
+      }
     }
   }
 

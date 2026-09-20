@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-09-20",
+  "status": "candidate-validated-not-published",
+  "registry": {
+    "package": "brass-runtime",
+    "latest": "1.22.0",
+    "next": null
+  },
+  "candidate": {
+    "version": "2.0.0-beta.0",
+    "path": "artifacts/v2-beta/brass-runtime-2.0.0-beta.0.tgz",
+    "sha256": "625ca6fdb6df772756f132c04657fb462d8f5110a5bb12098db8a72265dd2a22",
+    "files": 75,
+    "compressedBytes": 618922,
+    "unpackedBytes": 2974785,
+    "node": ">=20"
+  },
+  "publishDryRun": {
+    "id": "brass-runtime@2.0.0-beta.0",
+    "distTag": "next",
+    "access": "public",
+    "files": 75,
+    "compressedBytes": 618922,
+    "unpackedBytes": 2974785,
+    "registryMutation": false
+  },
+  "validatedConditions": [
+    "ESM root and /next parity",
+    "CommonJS root and /next parity",
+    "browser conditional exports",
+    "TypeScript declarations",
+    "/v1 and /core compatibility",
+    "Agent and Perf independent packages",
+    "TypeScript fallback without WASM",
+    "strict WASM with @brass/engine-wasm",
+    "create-brass React and vanilla beta builds",
+    "create-brass React and vanilla /v1 rollback builds",
+    "Express types, HTTP, observability, and graceful shutdown",
+    "core Effect and Stream migration through the v2 root with beta /next and published-v1 rollback",
+    "npm publication dry-run for the exact public next-tag candidate"
+  ],
+  "publicationControl": {
+    "workflow": ".github/workflows/publish-v2-beta.yml",
+    "branch": "next",
+    "branchExistsAtRecordedAt": false,
+    "environment": "npm-next",
+    "environmentExistsAtRecordedAt": false,
+    "npmTokenSecretExistsAtRecordedAt": true,
+    "distTag": "next",
+    "provenance": true,
+    "automaticPublish": false
+  },
+  "remaining": [
+    "Review and commit the candidate changes in both repositories",
+    "Merge the manual publication workflow into the default branch so GitHub can dispatch it",
+    "Create the next branch from the reviewed runtime commit and configure its protection",
+    "Create the npm-next environment and configure required-reviewer approval protection",
+    "Explicitly approve and run the manual publication workflow",
+    "Verify npm next resolves to 2.0.0-beta.0 and preserve the prior tag for rollback"
+  ],
+  "reproduce": [
+    "npm run release:check",
+    "npm run validate:v2-beta -- --version 2.0.0-beta.0",
+    "npm run validate:example:v2-core",
+    "npm publish ./artifacts/v2-beta/package --dry-run --access public --tag next --json",
+    "sha256sum artifacts/v2-beta/brass-runtime-2.0.0-beta.0.tgz",
+    "npm view brass-runtime dist-tags --json"
+  ]
+}

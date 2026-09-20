@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "kind": "controlled-local-stability",
+  "recordedAt": "2026-09-20",
+  "packageVersion": "1.22.0",
+  "sourceBase": "c3652c309a3050c7ac2c36037472c3e97c1f8476",
+  "sourceState": "uncommitted candidate changes",
+  "environment": {
+    "os": "Linux 7.2.5-3-omarchy x86_64",
+    "cpu": "AMD Ryzen 9 8945HS w/ Radeon 780M Graphics",
+    "logicalCpus": 16,
+    "memoryBytes": 32884776960,
+    "node": "22.23.2",
+    "forcedGc": true
+  },
+  "budgetsVersion": 1,
+  "runtime": {
+    "reportPath": "artifacts/stability/runtime-soak-local-2026-09-20.json",
+    "sha256": "932eccb01557be6d11c90cfc9738a2a454c3649be875dfac0d6a68eeb4a2ae8c",
+    "rounds": 10,
+    "iterationsPerRound": 5000,
+    "chainDepth": 100,
+    "heapTrendMb": 0.186,
+    "totalHeapDeltaMb": 0.22,
+    "passed": true
+  },
+  "http": {
+    "reportPath": "artifacts/stability/http-soak-local-2026-09-20.json",
+    "sha256": "30346872381a8249fe7fd635bbe86f1db5ae5712528337ad51a045519ccda784",
+    "calls": 100000,
+    "concurrency": 128,
+    "delayMs": 1,
+    "throughputPerSecond": 1680.873,
+    "errors": 0,
+    "heapDeltaMb": 8.97,
+    "adaptiveFinalLimit": 256,
+    "adaptiveMaxInFlight": 64,
+    "passed": true
+  },
+  "adaptive": {
+    "reportPath": "artifacts/stability/adaptive-soak-local-2026-09-20.json",
+    "sha256": "3cd6d73c144a261389ca14050c671f969847f454677045a1ac062a7d5133c68b",
+    "samplesPerScenario": 100000,
+    "keyCount": 64,
+    "results": [
+      {
+        "scenario": "stable",
+        "stateCount": 64,
+        "finalLimit": 8192,
+        "limitChanges": 2304,
+        "samplesPerSecond": 16519.738
+      },
+      {
+        "scenario": "saturation-recovery",
+        "stateCount": 64,
+        "finalLimit": 1447,
+        "limitChanges": 6829,
+        "samplesPerSecond": 16095.749
+      }
+    ],
+    "passed": true
+  },
+  "decision": "local-stability-gates-passed",
+  "limitations": [
+    "This is a controlled local run, not external production evidence.",
+    "The source worktree contained uncommitted candidate changes; the report and beta tarball hashes preserve the evaluated outputs until a commit exists.",
+    "A scheduled CI run must still retain its reports and logs for cross-runner evidence.",
+    "One passing run does not establish a long-term trend or eliminate environment-specific regressions."
+  ],
+  "reproduce": [
+    "BRASS_STABILITY_REPORT_PATH=artifacts/stability/runtime-soak.json npm run perf:stability:soak",
+    "BRASS_STABILITY_REPORT_PATH=artifacts/stability/http-soak.json npm run benchmark:http:stability",
+    "BRASS_STABILITY_REPORT_PATH=artifacts/stability/adaptive-soak.json npm run benchmark:adaptive:stability"
+  ]
+}

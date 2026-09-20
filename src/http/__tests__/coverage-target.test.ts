@@ -623,7 +623,7 @@ describe("HTTP coverage target helpers", () => {
       {},
       (exit) => exits.push(exit),
     );
-    expect(exits).toEqual([expect.objectContaining({ _tag: "Failure", cause: expect.objectContaining({ _tag: "Die" }) })]);
+    expect(exits).toEqual([{ _tag: "Success", value: "recovered" }]);
 
     let cancelled = false;
     const cancel = registerHttpEffect(

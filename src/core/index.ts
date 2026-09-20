@@ -168,3 +168,34 @@ export {
   tagError,
   orElse,
 } from "./types/typedError";
+
+// Compatibility owners for advanced runtime/engine and stream APIs that were
+// historically reachable only from the broad v1 root. Keeping them on /core
+// gives every v1 export a stable subpath when the small v2 root is promoted.
+export * from "./runtime/scheduler";
+export * from "./runtime/hostAction";
+export * from "./runtime/ringBuffer";
+export * from "./runtime/boundedRingBuffer";
+export * from "./runtime/engine";
+export * from "./runtime/engineStats";
+export * from "./runtime/capabilities";
+
+export * from "./stream/stream";
+export * from "./stream/dx";
+export * from "./stream/buffer";
+export * from "./stream/structuredConcurrency";
+export * from "./stream/hub";
+export * from "./stream/pipeline";
+export * from "./stream/fusion";
+export * from "./stream/chunks";
+export * from "./stream/queue";
+export {
+  throttle,
+  debounce,
+  zip as zipStream,
+  zipWith,
+  scan,
+  interleave,
+  take as takeStream,
+  drop as dropStream,
+} from "./stream/operators";

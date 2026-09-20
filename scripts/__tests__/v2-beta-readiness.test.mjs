@@ -1,0 +1,54 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { afterEach, describe, expect, it } from "vitest";
+
+const root = path.resolve(import.meta.dirname, "../..");
+const validator = path.join(root, "scripts", "check-v2-beta-readiness.mjs");
+const committed = JSON.parse(readFileSync(
+  path.join(root, "docs", "evidence", "v2-beta-readiness-2026-09-20.json"),
+  "utf8",
+));
+const temporaryDirectories = [];
+
+afterEach(() => {
+  while (temporaryDirectories.length > 0) {
+    rmSync(temporaryDirectories.pop(), { recursive: true, force: true });
+  }
+});
+
+describe("v2 beta readiness integrity", () => {
+  it("accepts the committed non-published candidate and its publication dry-run", () => {
+    expect(validate(committed)).toMatchObject({ status: 0 });
+  });
+
+  it("rejects a premature publication claim", () => {
+    const changed = structuredClone(committed);
+    changed.status = "published";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects a dry-run that does not match the candidate", () => {
+    const changed = structuredClone(committed);
+    changed.publishDryRun.files -= 1;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects a publication control that could move latest", () => {
+    const changed = structuredClone(committed);
+    changed.publicationControl.distTag = "latest";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+});
+
+function validate(evidence) {
+  const directory = mkdtempSync(path.join(tmpdir(), "brass-v2-readiness-test-"));
+  temporaryDirectories.push(directory);
+  const evidencePath = path.join(directory, "evidence.json");
+  writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`, "utf8");
+  return spawnSync(process.execPath, [validator, evidencePath], { cwd: root, encoding: "utf8" });
+}
