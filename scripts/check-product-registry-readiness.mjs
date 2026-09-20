@@ -28,9 +28,9 @@ const expectedAttemptRuns = new Map([
   ["engine-wasm", 35520792944],
 ]);
 
-if (evidence.schemaVersion !== 2) failures.push("schemaVersion must be 2");
-if (evidence.status !== "publication-blocked-on-npm-scope-access") {
-  failures.push("product readiness must record the verified npm scope-access blocker");
+if (evidence.schemaVersion !== 3) failures.push("schemaVersion must be 3");
+if (evidence.status !== "publication-blocked-on-npm-organization-read-access") {
+  failures.push("product readiness must record the verified npm organization-access blocker");
 }
 if (!Array.isArray(evidence.products) || evidence.products.length !== expectedProducts.size) {
   failures.push("all three independent products are required");
@@ -92,7 +92,22 @@ if (evidence.publicationControl?.branch !== "main"
 if (!Array.isArray(evidence.validatedConditions) || evidence.validatedConditions.length < 7) {
   failures.push("product validation conditions are incomplete");
 }
-if (evidence.blocker?.code !== "E404"
+const bootstrap = evidence.bootstrapVerificationAttempt;
+if (bootstrap?.runId !== 35538420035
+  || bootstrap?.jobId !== 106151532383
+  || bootstrap?.runUrl !== "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035"
+  || !/^[a-f0-9]{40}$/.test(bootstrap?.sourceSha ?? "")
+  || bootstrap?.environment !== "npm-products"
+  || bootstrap?.environmentApproved !== true
+  || bootstrap?.tokenIdentity !== "avivaldelli"
+  || bootstrap?.whoami !== "passed"
+  || bootstrap?.organizationMembershipRead?.httpStatus !== 403
+  || bootstrap?.organizationMembershipRead?.result !== "forbidden"
+  || bootstrap?.publicationReached !== false
+  || bootstrap?.registryMutation !== false) {
+  failures.push("latest npm bootstrap verification evidence is incomplete");
+}
+if (evidence.blocker?.code !== "E403"
   || !evidence.blocker?.causeBoundary?.includes("NPM_TOKEN")
   || !Array.isArray(evidence.blocker?.notCausedBy)
   || evidence.blocker.notCausedBy.length < 4) {
@@ -125,6 +140,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `Product registry readiness validated (${evidence.products.map((product) => product.package).join(", ")}; ` +
-    "published: no, blocker: npm scope access).",
+    "published: no, blocker: npm organization read access).",
   );
 }

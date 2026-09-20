@@ -136,6 +136,13 @@ organization read access and `@brass` package-scope publish access. Do not put
 the token in source, logs, issues, or chat. After the first versions exist,
 configure Trusted Publishing for each package and retire the bootstrap token.
 
+Approved bootstrap run `35538420035` then authenticated as npm user
+`avivaldelli`, but the refreshed token received `E403` while reading `brass`
+organization membership. It stopped before build or publication and left npm
+unchanged. The active blocker is therefore organization membership or the
+token's organization-read permission; package-scope publish access is still
+required after that preflight passes.
+
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the
 committed readiness evidence. Compressed and unpacked byte counts are checked
@@ -150,7 +157,7 @@ branches, enforced `validate`, `audit`, `examples`, and `CodeQL` checks, and req
 on `npm-next` and `npm-products`. The beta was published through `npm-next`;
 the product attempts were explicitly approved through `npm-products`. The
 dated readiness records preserve both the enforced controls and the remaining
-npm scope-access failure instead of treating workflow YAML as operational
+npm organization-access failure instead of treating workflow YAML as operational
 proof.
 
 The reviewed desired state is machine-readable in
@@ -222,9 +229,11 @@ The same workflow runs three explicitly bounded workloads:
 The versioned thresholds live in `scripts/stability-budgets.json`. They fail on
 HTTP errors, excessive retained heap, missing limiter recovery signals,
 unbounded limiter state, insufficient throughput, or an incomplete runtime
-sample. Logs and all three machine-readable reports are retained as workflow
-artifacts for 30 days. These runs are regression evidence, not external
-production-adoption evidence.
+sample. Every successful run writes `stability-run-manifest.json` with the
+workflow identity, source SHA, exact environment, budget decisions, metrics,
+byte counts, and SHA-256 identities for all three raw reports. Logs, reports,
+and the manifest are retained as workflow artifacts for 90 days. These runs are
+regression evidence, not external production-adoption evidence.
 
 Two retained green manual runs are recorded in
 [`evidence/stability-ci-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stability-ci-2026-09-20.json).
@@ -234,6 +243,21 @@ The second artifact was downloaded and re-hashed independently. These same-day
 runs prove repeatability, not a weekly trend. `npm run
 validate:stability-evidence` checks both remote snapshots and the independent
 local run.
+
+A weekly trend is established only from at least four successful `schedule`
+manifests covering at least 21 days, with consecutive samples 5–10 days apart,
+one Node major/platform, the current budget version, and raw reports matching
+every recorded byte count and SHA-256. Download each artifact into its own
+directory, then validate the series:
+
+```bash
+gh run download <run-id> --name brass-stability-<run-id> --dir artifacts/stability-history/<run-id>
+npm run stability:trend -- artifacts/stability-history
+```
+
+Set `BRASS_STABILITY_TREND_REPORT_PATH` to retain the generated comparison
+summary. Manual same-day runs remain useful repeatability evidence but cannot
+qualify as a weekly trend.
 
 ## Release cadence and channels
 
