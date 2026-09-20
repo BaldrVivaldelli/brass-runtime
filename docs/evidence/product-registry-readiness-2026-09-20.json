@@ -1,7 +1,7 @@
 {
-  "schemaVersion": 2,
-  "recordedAt": "2026-09-20T15:54:57Z",
-  "status": "publication-blocked-on-npm-scope-access",
+  "schemaVersion": 3,
+  "recordedAt": "2026-09-20T21:23:16Z",
+  "status": "publication-blocked-on-npm-organization-read-access",
   "registry": "https://registry.npmjs.org",
   "products": [
     {
@@ -104,20 +104,38 @@
     "provenance": true,
     "automaticPublish": false
   },
+  "bootstrapVerificationAttempt": {
+    "runId": 35538420035,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035",
+    "jobId": 106151532383,
+    "jobUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35538420035/job/106151532383",
+    "sourceSha": "d7bdfd9d5873a5f9de50297f92c89c37eb6ed0d6",
+    "environment": "npm-products",
+    "environmentApproved": true,
+    "tokenIdentity": "avivaldelli",
+    "whoami": "passed",
+    "organizationMembershipRead": {
+      "command": "npm org ls brass @avivaldelli --json",
+      "httpStatus": 403,
+      "result": "forbidden"
+    },
+    "publicationReached": false,
+    "registryMutation": false
+  },
   "blocker": {
-    "code": "E404",
-    "message": "PUT to each @brass package was rejected before registry mutation",
-    "causeBoundary": "The brass npm organization/scope is not owned by the publishing identity, or NPM_TOKEN lacks read/write publish access to the @brass package scope.",
+    "code": "E403",
+    "message": "The refreshed token authenticated as avivaldelli, but npm denied the brass organization-membership read before build or publication",
+    "causeBoundary": "The publishing identity is not a member of the brass npm organization, or NPM_TOKEN lacks read access to that organization. The earlier package PUT failures still require @brass package-scope publish access after this preflight passes.",
     "notCausedBy": [
-      "package build or validation",
+      "missing or invalid npm authentication",
       "GitHub branch or environment protection",
       "missing repository secret",
-      "npm provenance generation"
+      "an npm registry mutation"
     ]
   },
   "remaining": [
-    "Create or confirm ownership of the npm organization named brass and ensure the publishing user belongs to its developers team",
-    "Generate a short-lived granular token with organization read access and read/write publish access for the @brass package scope, then replace the GitHub NPM_TOKEN secret",
+    "Ensure npm user avivaldelli belongs to the brass organization developers team",
+    "Replace NPM_TOKEN with a short-lived granular token that has brass organization read access and read/write publish access for the @brass package scope",
     "Explicitly approve and rerun each first alpha publication",
     "After first publication, configure Trusted Publishing per package and retire the bootstrap write token",
     "Verify each alpha tag and retain the uploaded tarball for rollback"
