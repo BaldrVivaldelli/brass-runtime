@@ -40,7 +40,7 @@ jobs:
           mkdir -p artifacts/vscode
           npm run package:vsix --prefix extensions/vscode-brass-agent -- --out ../../artifacts/vscode/brass-agent.vsix
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: brass-agent-vscode
           path: artifacts/vscode/brass-agent.vsix

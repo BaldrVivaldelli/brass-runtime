@@ -64,7 +64,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: v2-beta-${{ github.ref }}-${{ matrix.node-version }}
+  group: v2-beta-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
