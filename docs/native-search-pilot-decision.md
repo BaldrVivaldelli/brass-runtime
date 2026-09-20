@@ -14,8 +14,8 @@ npm run benchmark:runtime:primitives:budget
 npm run benchmark:native:pilot
 ```
 
-The committed native-search record is
-`docs/evidence/native-search-pilot-2026-07-21.json`. Its v1 workload used 4,000
+The [committed native-search record](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/native-search-pilot-2026-07-21.json)
+used 4,000
 deterministically generated in-memory documents, 20 warmups, 200 searches, and
 20 cancellation trials. Both workers ran as isolated processes on the same
 Ryzen 9 5900X / Linux WSL2 machine with Node 22.23.1 and Rust 1.94.0. The

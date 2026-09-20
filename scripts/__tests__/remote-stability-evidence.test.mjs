@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("remote stability evidence integrity", () => {
-  it("accepts the retained green GitHub Actions run", () => {
+  it("accepts both retained green GitHub Actions runs", () => {
     expect(validate(committed)).toMatchObject({ status: 0 });
   });
 
@@ -37,6 +37,24 @@ describe("remote stability evidence integrity", () => {
     const changed = structuredClone(committed);
     changed.http.errors = 1;
     changed.http.successes -= 1;
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects a failed repeat conformance result", () => {
+    const changed = structuredClone(committed);
+    changed.repeatValidation.conformance.result = "failed";
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("rejects a mutated repeat artifact digest", () => {
+    const changed = structuredClone(committed);
+    changed.repeatValidation.artifact.files["runtime-soak.json"].sha256 = "not-a-digest";
+    expect(validate(changed)).toMatchObject({ status: 1 });
+  });
+
+  it("does not promote same-day repeats to a weekly trend", () => {
+    const changed = structuredClone(committed);
+    changed.comparison.weeklyTrendEstablished = true;
     expect(validate(changed)).toMatchObject({ status: 1 });
   });
 });
