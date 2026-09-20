@@ -88,6 +88,8 @@ const requiredV2PublishFragments = [
   "npm publish ./artifacts/v2-beta/package",
   "--tag next",
   "--provenance",
+  "for attempt in {1..20}",
+  "sleep 15",
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ];
 for (const fragment of requiredV2PublishFragments) {
