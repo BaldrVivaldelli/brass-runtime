@@ -118,8 +118,10 @@ still accumulate over time.
 Future successful scheduled runs retain a self-verifying manifest and raw
 reports for 90 days. `npm run stability:trend -- <history-directory>` refuses
 manual runs, short intervals, fewer than four samples, environment/budget drift,
-or any report whose bytes no longer match its manifest. This makes the future
-weekly claim reproducible without promoting the current same-day pair.
+or any report whose bytes no longer match its manifest. The scheduled workflow
+automatically joins the current sample with up to three retained predecessors;
+it reports valid incomplete history as pending and emits the trend on sample
+four. This does not promote the current same-day manual runs.
 
 ## Reproduce the workloads
 

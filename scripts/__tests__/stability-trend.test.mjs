@@ -68,6 +68,28 @@ describe("scheduled stability trend evidence", () => {
     });
   });
 
+  it("keeps an incomplete but valid scheduled history green while it accumulates", () => {
+    const history = makeHistory([
+      "2026-09-05T03:05:00Z",
+      "2026-09-12T03:06:00Z",
+      "2026-09-19T03:04:00Z",
+    ]);
+
+    const result = validateTrend(history, undefined, true);
+
+    expect(result).toMatchObject({ status: 0 });
+    expect(result.stdout).toContain("pending (3/4 scheduled runs, 13.999/21 days");
+  });
+
+  it("still rejects a manual run when incomplete history is allowed", () => {
+    const history = makeHistory(["2026-09-05T03:05:00Z"], "workflow_dispatch");
+
+    const result = validateTrend(history, undefined, true);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("is not a successful scheduled stability run");
+  });
+
   it("does not count manual runs as a weekly trend", () => {
     const history = makeHistory([
       "2026-09-05T03:05:00Z",
@@ -170,8 +192,8 @@ function createManifest(directory, { runId, recordedAt, event = "schedule" }) {
   });
 }
 
-function validateTrend(history, reportPath) {
-  return runNode([trendValidator, history], {
+function validateTrend(history, reportPath, allowIncomplete = false) {
+  return runNode([trendValidator, ...(allowIncomplete ? ["--allow-incomplete"] : []), history], {
     cwd: root,
     encoding: "utf8",
     env: {
