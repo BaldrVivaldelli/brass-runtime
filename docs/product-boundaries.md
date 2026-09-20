@@ -89,11 +89,10 @@ The package build configs are `tsup.agent.config.ts`, `tsup.perf.config.ts`, and
 export parity where promised, self-contained type resolution, real library
 execution, CLI startup, and all documented beta package conditions.
 
-The repository intentionally does not auto-publish any companion product. The
-`Agent`, `Perf`, `Engine WASM`, and `VS Code` workflows create independently
-downloadable release-candidate artifacts. A separate manual workflow can
-publish one reviewed npm product at a time from `main`, only under the `alpha`
-tag and after approval of the `npm-products` environment. It rejects reused
-versions, retains the tarball, uses provenance, and verifies that `latest` did
-not move. Namespace ownership, changelog, and compatibility review remain
-required before each first publication.
+Companion products are never auto-published. Their workflows create independent
+release candidates; a manual workflow publishes one reviewed product from
+`main` to `alpha` after `npm-products` approval. It rejects reused versions,
+retains the tarball, uses provenance, and proves `latest` did not move. A
+short-lived token is allowed only when the package does not exist; later alphas
+require its Trusted Publisher. Namespace and compatibility review remain
+required before first publication.
