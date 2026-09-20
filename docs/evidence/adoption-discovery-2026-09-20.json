@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "kind": "adoption-discovery",
   "recordedAt": "2026-09-20",
   "package": "brass-runtime",
@@ -47,7 +47,26 @@
       "id": "create-brass",
       "relationship": "first-party-template-generator",
       "visibility": "public",
-      "evidence": "v2-migration-lighthouse-1-2026-09-20.json"
+      "evidence": "v2-migration-lighthouse-1-2026-09-20.json",
+      "publicVerification": {
+        "repository": "BaldrVivaldelli/create-brass",
+        "evidenceUrl": "https://github.com/BaldrVivaldelli/create-brass/blob/638d802068e9c1a873e85441dae5542e3b1ee779/docs/evidence/beta-readiness-2026-09-20.json",
+        "evidenceCommitSha": "638d802068e9c1a873e85441dae5542e3b1ee779",
+        "migrationPullRequest": 13,
+        "evidencePullRequest": 15,
+        "runtimeBeta": "brass-runtime@2.0.0-beta.0",
+        "candidate": "create-brass@1.3.0-beta.0",
+        "candidateStatus": "validated-not-published",
+        "validationRunId": 35529031936,
+        "validationResult": "success",
+        "templateModes": 4,
+        "buildsPassed": 8,
+        "buildsTotal": 8,
+        "tarballSha256": "6e080764342729cb6147ac8748964c523931279e1a1bdeee7fae373656cb3121",
+        "registryLatest": "1.2.1",
+        "registryNext": null,
+        "claimBoundary": "first-party migration; not independent external production adoption or a publishable adopter case study"
+      }
     }
   ],
   "inferredActiveUsers": null,

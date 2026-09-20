@@ -10,7 +10,7 @@ const evidencePath = path.resolve(
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const failures = [];
 
-if (evidence.schemaVersion !== 1) failures.push("schemaVersion must be 1");
+if (evidence.schemaVersion !== 2) failures.push("schemaVersion must be 2");
 if (evidence.kind !== "adoption-discovery") failures.push("kind must be adoption-discovery");
 if (evidence.inferredActiveUsers !== null) failures.push("download signals must not infer active users");
 if (evidence.inferredProductionWorkloads !== null) failures.push("discovery signals must not infer production workloads");
@@ -76,6 +76,30 @@ if (!Array.isArray(evidence.verifiedConsumers) || evidence.verifiedConsumers.len
   || typeof consumer?.visibility !== "string"
   || typeof consumer?.evidence !== "string")) {
   failures.push("verified consumers require id, relationship, visibility, and evidence");
+}
+const createBrass = evidence.verifiedConsumers?.find((consumer) => consumer.id === "create-brass");
+const publicVerification = createBrass?.publicVerification;
+if (createBrass?.relationship !== "first-party-template-generator"
+  || createBrass?.visibility !== "public"
+  || publicVerification?.repository !== "BaldrVivaldelli/create-brass"
+  || !/^https:\/\/github\.com\/BaldrVivaldelli\/create-brass\/blob\/[a-f0-9]{40}\/docs\/evidence\/beta-readiness-2026-09-20\.json$/.test(publicVerification?.evidenceUrl ?? "")
+  || !/^[a-f0-9]{40}$/.test(publicVerification?.evidenceCommitSha ?? "")
+  || !publicVerification?.evidenceUrl?.includes(publicVerification.evidenceCommitSha)
+  || publicVerification?.migrationPullRequest !== 13
+  || publicVerification?.evidencePullRequest !== 15
+  || publicVerification?.runtimeBeta !== "brass-runtime@2.0.0-beta.0"
+  || publicVerification?.candidate !== "create-brass@1.3.0-beta.0"
+  || publicVerification?.candidateStatus !== "validated-not-published"
+  || !Number.isInteger(publicVerification?.validationRunId)
+  || publicVerification?.validationResult !== "success"
+  || publicVerification?.templateModes !== 4
+  || publicVerification?.buildsPassed !== 8
+  || publicVerification?.buildsTotal !== 8
+  || !/^[a-f0-9]{64}$/.test(publicVerification?.tarballSha256 ?? "")
+  || publicVerification?.registryLatest !== "1.2.1"
+  || publicVerification?.registryNext !== null
+  || !publicVerification?.claimBoundary?.includes("not independent external production adoption")) {
+  failures.push("create-brass public verification or first-party claim boundary is incomplete");
 }
 if (!Array.isArray(evidence.limitations) || evidence.limitations.length < 3) {
   failures.push("at least three discovery limitations are required");
