@@ -152,8 +152,10 @@ from the `next` branch with `channel=v2-beta`, the exact version, and the
 boolean publish confirmation. That entrypoint calls the reusable `Publish V2
 Beta` workflow. Keeping `release.yml` as the caller lets npm validate the same
 short-lived OIDC trusted publisher used by the stable train; the beta publisher
-does not receive a long-lived npm write token. It still requires approval of
-the `npm-next` environment, reruns `release:check`, rebuilds the exact requested
+does not receive a long-lived npm write token. The job pins npm `11.5.1` and
+verifies it before continuing because npm's OIDC exchange is unavailable in
+the npm 10 CLI bundled with Node 22. It still requires approval of the
+`npm-next` environment, reruns `release:check`, rebuilds the exact requested
 beta version, executes an npm publication dry-run, rejects an already-published
 version, retains the tarball, and publishes only with the `next` dist-tag and
 npm provenance. After publication it tolerates brief registry propagation

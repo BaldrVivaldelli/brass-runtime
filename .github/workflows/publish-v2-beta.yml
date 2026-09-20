@@ -40,6 +40,12 @@ jobs:
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
 
+      - name: Install the pinned OIDC-capable npm CLI
+        run: npm install --global npm@11.5.1
+
+      - name: Verify the npm trusted-publishing prerequisite
+        run: test "$(npm --version)" = "11.5.1"
+
       - run: npm ci
       - run: npm run release:check
 
