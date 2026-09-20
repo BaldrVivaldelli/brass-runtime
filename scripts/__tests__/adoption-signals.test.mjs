@@ -70,6 +70,30 @@ describe("adoption discovery integrity", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("create-brass public verification");
   });
+
+  it("requires the hardened consumer validation to use OIDC", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.authentication = "repository-token";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("create-brass public verification");
+  });
+
+  it("does not turn a validation-only run into a publication claim", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.publicationRequested = true;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("create-brass public verification");
+  });
+
+  it("retains the production dependency audit as a required consumer check", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.requiredChecks = ["templates", "CodeQL"];
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("create-brass public verification");
+  });
 });
 
 function validate(evidence) {
