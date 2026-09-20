@@ -5,16 +5,21 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import path from "node:path";
 
 const root = process.cwd();
-const inputs = process.argv.slice(2);
+const rawInputs = process.argv.slice(2);
+const allowIncomplete = rawInputs.includes("--allow-incomplete");
+const inputs = rawInputs.filter((input) => input !== "--allow-incomplete");
 const targets = inputs.length > 0 ? inputs : ["artifacts/stability-history"];
 const manifestPaths = [...new Set(targets.flatMap((target) => findManifests(path.resolve(root, target))))].sort();
 const budgets = JSON.parse(readFileSync(path.join(root, "scripts", "stability-budgets.json"), "utf8"));
 const failures = [];
+const readinessFailures = [];
 const records = manifestPaths.map(readManifest).filter(Boolean).sort((a, b) => a.time - b.time);
 const minimumRuns = 4;
 const minimumSpanDays = 21;
 
-if (records.length < minimumRuns) failures.push(`weekly trend requires at least ${minimumRuns} retained manifests`);
+if (records.length < minimumRuns) {
+  readinessFailures.push(`weekly trend requires at least ${minimumRuns} retained manifests`);
+}
 
 const runIds = new Set();
 for (const record of records) validateRecord(record, runIds);
@@ -33,7 +38,7 @@ for (let index = 1; index < records.length; index += 1) {
 
 const spanDays = records.length > 1 ? (records.at(-1).time - records[0].time) / 86_400_000 : 0;
 if (spanDays < minimumSpanDays) {
-  failures.push(`weekly trend span ${roundTo(spanDays)} days is below ${minimumSpanDays} days`);
+  readinessFailures.push(`weekly trend span ${roundTo(spanDays)} days is below ${minimumSpanDays} days`);
 }
 
 const nodeMajors = new Set(records.map(({ manifest }) => manifest.environment?.node?.split(".")[0]));
@@ -42,10 +47,18 @@ if (nodeMajors.size > 1 || platforms.size > 1) {
   failures.push("weekly trend samples must use one Node major and platform");
 }
 
-if (failures.length > 0) {
+if (failures.length > 0 || (readinessFailures.length > 0 && !allowIncomplete)) {
   console.error("Stability trend validation failed:");
-  for (const failure of failures) console.error(`- ${failure}`);
+  for (const failure of [...readinessFailures, ...failures]) console.error(`- ${failure}`);
   process.exit(1);
+}
+
+if (readinessFailures.length > 0) {
+  console.log(
+    `Weekly stability trend pending (${records.length}/${minimumRuns} scheduled runs, ` +
+    `${roundTo(spanDays)}/${minimumSpanDays} days; all available manifests and raw reports are valid).`,
+  );
+  process.exit(0);
 }
 
 const first = records[0].manifest;

@@ -190,6 +190,7 @@ for (const fragment of requiredProductPublishFragments) {
 
 const requiredStabilityFragments = [
   'cron: "0 3 * * 6"',
+  "actions: read",
   "timeout-minutes: 45",
   "npm run build:wasm",
   "npm run test:stability",
@@ -197,6 +198,10 @@ const requiredStabilityFragments = [
   "npm run benchmark:http:stability",
   "npm run benchmark:adaptive:stability",
   "npm run stability:manifest -- artifacts/stability",
+  "gh run list",
+  "gh run download",
+  "npm run stability:trend -- --allow-incomplete artifacts/stability-history",
+  "BRASS_STABILITY_TREND_REPORT_PATH: artifacts/stability/stability-trend.json",
   "retention-days: 90",
   "if: always()",
 ];

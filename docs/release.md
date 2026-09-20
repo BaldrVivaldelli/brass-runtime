@@ -247,8 +247,11 @@ local run.
 A weekly trend is established only from at least four successful `schedule`
 manifests covering at least 21 days, with consecutive samples 5–10 days apart,
 one Node major/platform, the current budget version, and raw reports matching
-every recorded byte count and SHA-256. Download each artifact into its own
-directory, then validate the series:
+every recorded byte count and SHA-256. Each scheduled run downloads up to the
+three preceding successful scheduled artifacts and validates them with the
+current run. Histories with one to three valid samples stay green as pending;
+the fourth sample must produce `stability-trend.json` or fail the workflow.
+Replay the same check manually with:
 
 ```bash
 gh run download <run-id> --name brass-stability-<run-id> --dir artifacts/stability-history/<run-id>
