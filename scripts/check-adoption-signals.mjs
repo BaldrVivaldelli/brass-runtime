@@ -86,7 +86,6 @@ if (createBrass?.relationship !== "first-party-template-generator"
   || !/^[a-f0-9]{40}$/.test(publicVerification?.evidenceCommitSha ?? "")
   || !publicVerification?.evidenceUrl?.includes(publicVerification.evidenceCommitSha)
   || publicVerification?.migrationPullRequest !== 13
-  || publicVerification?.evidencePullRequest !== 15
   || publicVerification?.runtimeBeta !== "brass-runtime@2.0.0-beta.0"
   || publicVerification?.candidate !== "create-brass@1.3.0-beta.0"
   || publicVerification?.candidateStatus !== "validated-not-published"
@@ -96,6 +95,9 @@ if (createBrass?.relationship !== "first-party-template-generator"
   || publicVerification?.buildsPassed !== 8
   || publicVerification?.buildsTotal !== 8
   || !/^[a-f0-9]{64}$/.test(publicVerification?.tarballSha256 ?? "")
+  || publicVerification?.authentication !== "npm-trusted-publishing-oidc"
+  || publicVerification?.publicationRequested !== false
+  || publicVerification?.trustedPublisherConfiguration !== "owner-confirmation-required"
   || publicVerification?.registryLatest !== "1.2.1"
   || publicVerification?.registryNext !== null
   || !publicVerification?.claimBoundary?.includes("not independent external production adoption")) {
