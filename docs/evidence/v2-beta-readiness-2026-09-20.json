@@ -1,11 +1,20 @@
 {
-  "schemaVersion": 1,
-  "recordedAt": "2026-09-20",
-  "status": "candidate-validated-not-published",
+  "schemaVersion": 2,
+  "recordedAt": "2026-09-20T16:47:41.498Z",
+  "status": "published-on-next",
   "registry": {
     "package": "brass-runtime",
     "latest": "1.22.0",
-    "next": null
+    "next": "2.0.0-beta.0",
+    "publishedAt": "2026-09-20T16:47:41.190Z",
+    "sha256": "f6e9f3e95c256b0806be34da226774e8ce72d7bcdca2ac6c549109ad63e9c065",
+    "shasum": "c5c044c0eceaea8bbac006865c539eead50ee8d5",
+    "integrity": "sha512-Bh04s23Na5BQpeGQ5B2OJhB1efIJFSoA3t7LMjYCO4FvQ2rfTx30RWQBj6Gp5rMlsc8Wx4zZCqUteuMCoF+0Vg==",
+    "tarball": "https://registry.npmjs.org/brass-runtime/-/brass-runtime-2.0.0-beta.0.tgz",
+    "attestation": "https://registry.npmjs.org/-/npm/v1/attestations/brass-runtime@2.0.0-beta.0",
+    "files": 75,
+    "compressedBytes": 619144,
+    "unpackedBytes": 2975406
   },
   "candidate": {
     "version": "2.0.0-beta.0",
@@ -41,23 +50,45 @@
     "npm publication dry-run for the exact public next-tag candidate"
   ],
   "publicationControl": {
+    "entrypoint": ".github/workflows/release.yml",
     "workflow": ".github/workflows/publish-v2-beta.yml",
     "branch": "next",
-    "branchExistsAtRecordedAt": false,
+    "branchProtected": true,
     "environment": "npm-next",
-    "environmentExistsAtRecordedAt": false,
-    "npmTokenSecretExistsAtRecordedAt": true,
+    "environmentProtected": true,
+    "authentication": "npm-trusted-publishing-oidc",
+    "npmCli": "11.5.1",
     "distTag": "next",
     "provenance": true,
     "automaticPublish": false
   },
-  "remaining": [
-    "Review and commit the candidate changes in both repositories",
-    "Merge the manual publication workflow into the default branch so GitHub can dispatch it",
-    "Create the next branch from the reviewed runtime commit and configure its protection",
-    "Create the npm-next environment and configure required-reviewer approval protection",
-    "Explicitly approve and run the manual publication workflow",
-    "Verify npm next resolves to 2.0.0-beta.0 and preserve the prior tag for rollback"
+  "publication": {
+    "runId": 35523173036,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35523173036",
+    "sourceSha": "d5f272c6a5ec79bb5281c8165e190fba401df42f",
+    "artifactId": 10608933909,
+    "artifactName": "brass-runtime-2.0.0-beta.0",
+    "artifactArchiveBytes": 615798,
+    "acceptedAt": "2026-09-20T16:45:35.002Z",
+    "registryIndexedAt": "2026-09-20T16:47:41.498Z",
+    "provenanceLog": "https://search.sigstore.dev/?logIndex=2901404889",
+    "result": "published; workflow verification timed out before 126-second registry propagation completed",
+    "postPublishValidation": {
+      "source": "npm registry tarball",
+      "registryTarballSha256": "f6e9f3e95c256b0806be34da226774e8ce72d7bcdca2ac6c549109ad63e9c065",
+      "core": "v2 root, /next alias, Effect and Stream execution, and stable 1.22.0 rollback passed",
+      "createBrass": "React and vanilla templates built against the v2 facade and /v1 bridge"
+    }
+  },
+  "rollback": {
+    "stable": "1.22.0",
+    "removeNext": "npm dist-tag rm brass-runtime next",
+    "deprecate": "npm deprecate brass-runtime@2.0.0-beta.0 \"Beta withdrawn; use brass-runtime@1.22.0 while a replacement is prepared\"",
+    "latestMustRemain": "1.22.0"
+  },
+  "nextActions": [
+    "Monitor beta feedback and adoption without treating internal lighthouses as external production adoption",
+    "Bootstrap the independently versioned @brass packages after confirming ownership of the npm @brass scope"
   ],
   "reproduce": [
     "npm run release:check",
@@ -65,6 +96,7 @@
     "npm run validate:example:v2-core",
     "npm publish ./artifacts/v2-beta/package --dry-run --access public --tag next --json",
     "sha256sum artifacts/v2-beta/brass-runtime-2.0.0-beta.0.tgz",
+    "npm view brass-runtime@2.0.0-beta.0 version dist --json",
     "npm view brass-runtime dist-tags --json"
   ]
 }

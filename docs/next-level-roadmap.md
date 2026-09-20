@@ -53,12 +53,13 @@ compatibility, or operational evidence does not close a workstream.
   build on the beta and through its `/v1` rollback bridge; the Express
   lighthouse also passes types, HTTP, observability, and graceful shutdown on
   that candidate. The core lighthouse additionally proves root promotion plus
-  beta `/next` and published-v1 rollback. Publication and external-production
-  rollback evidence remain open.
-- The final local beta gate measured 75 files, 618,922 compressed bytes, and
-  2,974,785 unpacked bytes, below every v2 candidate budget. The registry still
-  has no `next` tag; publication readiness is recorded separately and does not
-  claim that the beta is public.
+  beta `/next` and published-v1 rollback. External-production adoption remains
+  explicitly unclaimed.
+- `brass-runtime@2.0.0-beta.0` is published with npm provenance on the `next`
+  tag. The registry tarball has 75 files, 619,144 compressed bytes, and
+  2,975,406 unpacked bytes, below every v2 budget; `latest` remains `1.22.0`.
+  The protected run, artifact, integrity, attestation, propagation interval,
+  and rollback commands are recorded in the dated beta evidence.
 
 ## 1. Adoption and real evidence
 
@@ -103,7 +104,7 @@ compatibility, or operational evidence does not close a workstream.
 2. Provide migration tooling that inventories v1 imports, maps supported names
    to v2 namespaces, and reports manual migrations without modifying files by
    default.
-3. Publish `2.0.0-beta` from the `next` prerelease channel with packed-package
+3. Maintain the published `2.0.0-beta` on the `next` prerelease channel with packed-package
    Node, browser, ESM, CJS, declaration, and rollback validation.
 4. Publish Agent and Perf under independent versions. Preserve the v1
    `brass-runtime/agent` and `/perf` compatibility paths until the documented

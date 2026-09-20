@@ -19,13 +19,27 @@ afterEach(() => {
 });
 
 describe("v2 beta readiness integrity", () => {
-  it("accepts the committed non-published candidate and its publication dry-run", () => {
+  it("accepts the committed published candidate and its registry evidence", () => {
     expect(validate(committed)).toMatchObject({ status: 0 });
   });
 
-  it("rejects a premature publication claim", () => {
+  it("rejects a next tag that does not resolve to the candidate", () => {
     const changed = structuredClone(committed);
-    changed.status = "published";
+    changed.registry.next = "2.0.0-beta.99";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects published evidence without a provenance attestation", () => {
+    const changed = structuredClone(committed);
+    changed.registry.attestation = null;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects post-publication validation for a different registry tarball", () => {
+    const changed = structuredClone(committed);
+    changed.publication.postPublishValidation.registryTarballSha256 = "0".repeat(64);
     const result = validate(changed);
     expect(result.status).toBe(1);
   });

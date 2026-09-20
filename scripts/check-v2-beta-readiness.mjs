@@ -16,16 +16,16 @@ const releaseEntrypoint = readFileSync(path.join(root, ".github", "workflows", "
 const publisher = readFileSync(path.join(root, ".github", "workflows", "publish-v2-beta.yml"), "utf8");
 const failures = [];
 
-if (evidence.schemaVersion !== 1) failures.push("schemaVersion must be 1");
-if (evidence.status !== "candidate-validated-not-published") {
-  failures.push("readiness evidence must not claim publication before the next tag exists");
-}
+if (evidence.schemaVersion !== 2) failures.push("schemaVersion must be 2");
+if (evidence.status !== "published-on-next") failures.push("v2 beta evidence must record next publication");
 if (evidence.registry?.package !== packageJson.name || evidence.registry?.latest !== packageJson.version) {
   failures.push("registry latest snapshot must match the stable source package");
 }
-if (evidence.registry?.next !== null) failures.push("pre-publication next snapshot must be null");
 if (!/^2\.\d+\.\d+-beta\.\d+$/.test(evidence.candidate?.version ?? "")) {
   failures.push("candidate version must be an exact v2 beta");
+}
+if (evidence.registry?.next !== evidence.candidate?.version) {
+  failures.push("registry next must resolve to the published beta candidate");
 }
 if (!/^[a-f0-9]{64}$/.test(evidence.candidate?.sha256 ?? "")) failures.push("candidate sha256 is invalid");
 
@@ -54,16 +54,49 @@ if (!Array.isArray(evidence.validatedConditions) || evidence.validatedConditions
 }
 if (evidence.publicationControl?.branch !== "next"
   || evidence.publicationControl?.environment !== "npm-next"
-  || evidence.publicationControl?.branchExistsAtRecordedAt !== false
-  || evidence.publicationControl?.environmentExistsAtRecordedAt !== false
-  || evidence.publicationControl?.npmTokenSecretExistsAtRecordedAt !== true
+  || evidence.publicationControl?.branchProtected !== true
+  || evidence.publicationControl?.environmentProtected !== true
+  || evidence.publicationControl?.authentication !== "npm-trusted-publishing-oidc"
+  || evidence.publicationControl?.npmCli !== "11.5.1"
   || evidence.publicationControl?.distTag !== "next"
   || evidence.publicationControl?.provenance !== true
   || evidence.publicationControl?.automaticPublish !== false) {
   failures.push("publication control must remain manual, protected, provenance-enabled, and next-only");
 }
-if (!Array.isArray(evidence.remaining) || evidence.remaining.length < 4) {
-  failures.push("pre-publication actions must remain explicit");
+if (evidence.publication?.runId !== 35523173036
+  || evidence.publication?.sourceSha !== "d5f272c6a5ec79bb5281c8165e190fba401df42f"
+  || evidence.publication?.artifactId !== 10608933909
+  || !/^https:\/\/github\.com\//.test(evidence.publication?.runUrl ?? "")) {
+  failures.push("protected GitHub publication evidence is incomplete");
+}
+if (!/^\d{4}-\d{2}-\d{2}T/.test(evidence.registry?.publishedAt ?? "")
+  || !/^[a-f0-9]{64}$/.test(evidence.registry?.sha256 ?? "")
+  || !/^[a-f0-9]{40}$/.test(evidence.registry?.shasum ?? "")
+  || !/^sha512-/.test(evidence.registry?.integrity ?? "")
+  || !/^https:\/\/registry\.npmjs\.org\//.test(evidence.registry?.tarball ?? "")
+  || !/^https:\/\/registry\.npmjs\.org\/-\/npm\/v1\/attestations\//.test(evidence.registry?.attestation ?? "")
+  || evidence.registry?.files !== evidence.candidate?.files) {
+  failures.push("published registry identity, integrity, file count, or provenance is incomplete");
+}
+if (evidence.publication?.postPublishValidation?.source !== "npm registry tarball"
+  || evidence.publication?.postPublishValidation?.registryTarballSha256 !== evidence.registry?.sha256
+  || !evidence.publication?.postPublishValidation?.core?.includes("stable 1.22.0 rollback passed")
+  || !evidence.publication?.postPublishValidation?.createBrass?.includes("React and vanilla")) {
+  failures.push("post-publication registry consumer and rollback validation is incomplete");
+}
+for (const [key, maximum] of [
+  ["compressedBytes", budget.compressedBytes],
+  ["unpackedBytes", budget.unpackedBytes],
+]) {
+  const value = evidence.registry?.[key];
+  if (!Number.isInteger(value) || value < 1 || value > maximum) {
+    failures.push(`published registry ${key} must be positive and <= ${maximum}`);
+  }
+}
+if (evidence.rollback?.stable !== packageJson.version
+  || evidence.rollback?.removeNext !== "npm dist-tag rm brass-runtime next"
+  || !evidence.rollback?.deprecate?.includes(evidence.candidate.version)) {
+  failures.push("published beta rollback must preserve stable latest and cover next removal/deprecation");
 }
 if (!Array.isArray(evidence.reproduce) || !evidence.reproduce.includes("npm run release:check")) {
   failures.push("release gate reproduction is required");
@@ -78,6 +111,8 @@ for (const fragment of [
   "--dry-run --access public --tag next --json",
   "--tag next",
   "--provenance",
+  "for attempt in {1..20}",
+  "sleep 15",
   'test "$current_latest" = "$STABLE_LATEST_BEFORE"',
 ]) {
   if (!publisher.includes(fragment)) failures.push(`publisher is missing ${fragment}`);
@@ -113,6 +148,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `V2 beta readiness validated (${evidence.candidate.version}, ${evidence.candidate.files} files, ` +
-    `published: no, artifact checked: ${existsSync(artifactPath) ? "yes" : "no"}).`,
+    `published: yes, artifact checked: ${existsSync(artifactPath) ? "yes" : "no"}).`,
   );
 }

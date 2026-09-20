@@ -158,11 +158,11 @@ the npm 10 CLI bundled with Node 22. It still requires approval of the
 `npm-next` environment, reruns `release:check`, rebuilds the exact requested
 beta version, executes an npm publication dry-run, rejects an already-published
 version, retains the tarball, and publishes only with the `next` dist-tag and
-npm provenance. After publication it tolerates brief registry propagation
-delay, verifies that `next` resolves to the requested version, and proves that
+npm provenance. After publication it allows up to five minutes for asynchronous
+registry indexing, verifies that `next` resolves to the requested version, and proves that
 `latest` did not move. Semantic Release remains restricted to `main` and cannot
 accidentally publish the v1 package on the beta channel.
-The latest pre-publication registry and artifact snapshot is recorded in
+The publication, registry integrity, provenance, artifact, and rollback snapshot is recorded in
 [`evidence/v2-beta-readiness-2026-09-20.json`](./evidence/v2-beta-readiness-2026-09-20.json).
 
 Before approving the `npm-next` environment, record the current tags and the
