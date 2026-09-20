@@ -76,9 +76,10 @@ The release owner must verify:
   promotion.
 
 The v2 beta publisher is intentionally separate from the stable Semantic
-Release job. It is branch-locked to `next`, gated by the protected `npm-next`
-environment, and publishes the generated beta staging directory rather than
-the v1 repository root.
+Release job but is invoked by the trusted `release.yml` entrypoint so npm can
+authenticate it with short-lived OIDC credentials. It is branch-locked to
+`next`, gated by the protected `npm-next` environment, and publishes the
+generated beta staging directory rather than the v1 repository root.
 
 ## Adding a second release-capable maintainer
 

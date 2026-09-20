@@ -1,17 +1,15 @@
 name: Publish V2 Beta
 
 on:
-  workflow_dispatch:
+  workflow_call:
     inputs:
       version:
         description: Exact v2 beta version (for example, 2.0.0-beta.0)
         required: true
-        default: 2.0.0-beta.0
         type: string
       publish:
         description: Publish the validated package to npm with the next tag
         required: true
-        default: false
         type: boolean
 
 permissions:
@@ -80,8 +78,6 @@ jobs:
           if-no-files-found: error
 
       - name: Publish only to the next channel
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish ./artifacts/v2-beta/package --access public --tag next --provenance
 
       - name: Verify next changed and latest did not
