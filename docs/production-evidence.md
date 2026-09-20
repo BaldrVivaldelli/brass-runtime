@@ -16,6 +16,14 @@ first-party: this repository and `create-brass`, the verified template consumer.
 No external public consumer is currently identifiable, and these signals must
 not be converted into active-user or production-workload counts.
 
+The `create-brass` entry now points to a commit-pinned, machine-checked
+[public readiness record](https://github.com/BaldrVivaldelli/create-brass/blob/638d802068e9c1a873e85441dae5542e3b1ee779/docs/evidence/beta-readiness-2026-09-20.json).
+It retains the merged migration, four validation modes across two templates
+(8/8 builds), candidate tarball SHA-256, protected controls, and the npm
+authentication failure that occurred before publication. This strengthens the
+first-party consumer evidence; it does not identify an independent adopter,
+production deployment, or publishable case study.
+
 Users can provide a workload and choose an explicit evidence-consent level
 through the repository's **Brass adoption report** issue form. The form warns
 against posting private traces, credentials, or restricted customer data.
@@ -66,7 +74,7 @@ case studies:
 
 | Workload | Consent boundary | Reproducible evidence |
 | --- | --- | --- |
-| React and vanilla workspace templates | anonymized internal migration evidence | two packed builds, stable rollback, beta root, and `/v1` bridge |
+| React and vanilla workspace templates | anonymized internal migration evidence plus a public first-party verification | two packed builds, stable rollback, beta root, `/v1` bridge, and the commit-pinned `create-brass` readiness record |
 | Express HTTP and observability example | internal repository example | strict types, three routes, trace propagation, metrics, health, and graceful shutdown |
 | Core Effect and Stream example | internal repository example | public beta root, `/next`, and stable-v1 execution with identical results |
 

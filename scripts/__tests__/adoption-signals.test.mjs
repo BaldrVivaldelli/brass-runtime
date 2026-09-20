@@ -46,6 +46,30 @@ describe("adoption discovery integrity", () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("at least one verified consumer");
   });
+
+  it("requires the public create-brass evidence commit to match its permalink", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.evidenceCommitSha = "a".repeat(40);
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("create-brass public verification");
+  });
+
+  it("rejects turning first-party validation into an external-adoption claim", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.claimBoundary = "external production adopter";
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("first-party claim boundary");
+  });
+
+  it("requires all eight public template builds to pass", () => {
+    const changed = structuredClone(baseline);
+    changed.verifiedConsumers[0].publicVerification.buildsPassed = 7;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("create-brass public verification");
+  });
 });
 
 function validate(evidence) {
