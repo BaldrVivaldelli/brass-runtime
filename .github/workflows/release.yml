@@ -66,6 +66,7 @@ jobs:
 
       - run: npm ci
       - run: npm run validate:boundaries
+      - run: npm run validate:dependency-security
       - run: npm run validate:evidence
       - run: npm run validate:adoption-evidence
       - run: npm run validate:release-policy
@@ -122,6 +123,7 @@ jobs:
 
       - run: npm ci
       - run: npm run validate:boundaries
+      - run: npm run validate:dependency-security
       - run: npm run validate:evidence
       - run: npm run validate:adoption-evidence
       - run: npm run validate:release-policy
@@ -204,6 +206,7 @@ jobs:
 
       - run: npm ci
       - run: npm run validate:boundaries
+      - run: npm run validate:dependency-security
       - run: npm run validate:evidence
       - run: npm run validate:adoption-evidence
       - run: npm run validate:release-policy

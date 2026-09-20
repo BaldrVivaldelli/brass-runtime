@@ -1,5 +1,6 @@
 {
   "name": "vscode-brass-agent",
+  "private": true,
   "displayName": "Brass Agent",
   "description": "VS Code client for the brass-agent CLI.",
   "version": "0.1.0-alpha.0",

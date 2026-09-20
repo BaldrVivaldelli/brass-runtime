@@ -90,6 +90,7 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
+      - run: npm run validate:dependency-security
       - run: npm run test:types
       - run: npm run build:wasm
       - run: npm run validate:v2-beta

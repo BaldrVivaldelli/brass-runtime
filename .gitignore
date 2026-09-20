@@ -150,5 +150,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 
+# Angular local build cache
+.angular/
+
 # Private adopter identities, contacts, and operational notes
 /.brass-private/

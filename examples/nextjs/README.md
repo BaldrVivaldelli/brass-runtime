@@ -3,6 +3,8 @@
 Next.js uses a server-only Brass singleton for Route Handlers. The example also
 includes a same-origin OTLP proxy route shape for browser telemetry.
 
+Requires Node `>=20.9.0`.
+
 ## Run
 
 From the repository root:
@@ -10,7 +12,7 @@ From the repository root:
 ```bash
 npm run build:ts
 cd examples/nextjs
-npm install
+npm ci
 npm run dev
 ```
 
@@ -26,4 +28,3 @@ To proxy real OTLP traffic from `/api/otel/v1/*`, set:
 ```bash
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318
 ```
-

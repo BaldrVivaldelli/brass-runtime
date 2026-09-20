@@ -10,8 +10,11 @@ const packageLock = await readJson(new URL("../package-lock.json", import.meta.u
 const releaseConfig = await readJson(new URL("../.releaserc.json", import.meta.url));
 const stabilityBudgets = await readJson(new URL("./stability-budgets.json", import.meta.url));
 const releaseWorkflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
+const qualityWorkflow = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
 const stabilityWorkflow = await readFile(new URL("../.github/workflows/stability.yml", import.meta.url), "utf8");
 const v2BetaWorkflow = await readFile(new URL("../.github/workflows/v2-beta.yml", import.meta.url), "utf8");
+const dependencySecurityWorkflow = await readFile(new URL("../.github/workflows/dependency-security.yml", import.meta.url), "utf8");
+const examplesWorkflow = await readFile(new URL("../.github/workflows/examples.yml", import.meta.url), "utf8");
 const publishV2BetaWorkflow = await readFile(new URL("../.github/workflows/publish-v2-beta.yml", import.meta.url), "utf8");
 const publishProductWorkflow = await readFile(new URL("../.github/workflows/publish-product-alpha.yml", import.meta.url), "utf8");
 const agentWorkflow = await readFile(new URL("../.github/workflows/agent.yml", import.meta.url), "utf8");
@@ -24,6 +27,11 @@ if (packageJson.version !== packageLock.version || packageJson.version !== packa
 if (packageJson.engines?.node !== ">=18") fail("the stable v1 Node engine contract must be >=18");
 if (!packageJson.scripts?.["release:check"]?.includes("npm run validate:product-publish-dry-run")) {
   fail("the release gate must execute companion-product publication dry-runs");
+}
+for (const script of ["check", "release:check"]) {
+  if (!packageJson.scripts?.[script]?.includes("npm run validate:dependency-security")) {
+    fail(`${script} must execute the offline dependency security policy`);
+  }
 }
 
 const main = releaseConfig.branches?.some((branch) => branch === "main");
@@ -75,6 +83,39 @@ const requiredV2BetaFragments = [
 ];
 for (const fragment of requiredV2BetaFragments) {
   if (!v2BetaWorkflow.includes(fragment)) fail(`v2 beta workflow is missing: ${fragment}`);
+}
+for (const [name, workflow] of [
+  ["quality", qualityWorkflow],
+  ["release", releaseWorkflow],
+  ["v2 beta", v2BetaWorkflow],
+]) {
+  if (!workflow.includes("npm run validate:dependency-security")) {
+    fail(`${name} workflow must execute the offline dependency security policy`);
+  }
+}
+for (const fragment of [
+  'cron: "30 8 * * 1"',
+  "npm run validate:dependency-security",
+  "npm audit --package-lock-only --audit-level=high",
+  "--prefix examples/angular",
+  "--prefix examples/nestjs",
+  "--prefix examples/nextjs",
+  "--prefix examples/react",
+  "--prefix extensions/vscode-brass-agent",
+]) {
+  if (!dependencySecurityWorkflow.includes(fragment)) fail(`dependency security workflow is missing: ${fragment}`);
+}
+for (const fragment of [
+  "cargo install wasm-pack --version 0.14.0 --locked",
+  "npm run build",
+  "working-directory: examples/angular",
+  "working-directory: examples/nestjs",
+  "working-directory: examples/nextjs",
+  "working-directory: examples/react",
+  "npm run typecheck",
+  "npm run build",
+]) {
+  if (!examplesWorkflow.includes(fragment)) fail(`example consumer workflow is missing: ${fragment}`);
 }
 if (/^\s*group:.*matrix\./m.test(v2BetaWorkflow)) {
   fail("v2 beta workflow-level concurrency cannot reference the job matrix");

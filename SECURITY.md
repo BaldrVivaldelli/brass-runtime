@@ -15,6 +15,39 @@ used on a Git branch with patch review enabled.
 | `brass-agent` experimental preview | Supported for reports; not production-stable |
 | Older downloaded ZIPs / local VSIX builds | Not supported |
 
+## Dependency gates
+
+Every pull request audits the root package, the Angular, NestJS, Next.js, and
+React consumers, and the VS Code extension lockfile; a Monday schedule repeats
+that audit. High or critical npm advisories fail the `audit` check. The
+`examples` check installs only from committed lockfiles, builds the runtime,
+and typechecks/builds every framework consumer.
+
+Run the same checks locally with:
+
+```bash
+npm run validate:dependency-security
+npm audit --package-lock-only --audit-level=high
+npm audit --package-lock-only --audit-level=high --prefix examples/angular
+npm audit --package-lock-only --audit-level=high --prefix examples/nestjs
+npm audit --package-lock-only --audit-level=high --prefix examples/nextjs
+npm audit --package-lock-only --audit-level=high --prefix examples/react
+npm audit --package-lock-only --audit-level=high --prefix extensions/vscode-brass-agent
+```
+
+Dependabot tracks each lockfile weekly. Framework examples are private packages
+and do not widen the Node 18 contract of the published stable runtime; their
+own `engines.node` fields state the versions their current frameworks require.
+
+## Recorded exception
+
+On 2026-09-20, the Angular 20.3 build-tool graph reported five moderate
+development-server advisories through `webpack-dev-server`/`sockjs`/`uuid`.
+npm reported no fix, and the graph had zero high or critical vulnerabilities.
+Do not expose the example development server to untrusted networks. The weekly
+audit keeps this exception visible and it must be removed when upstream ships a
+compatible fix.
+
 ## Reporting vulnerabilities
 
 Please do **not** put secrets, API keys, tokens, private repository contents, or

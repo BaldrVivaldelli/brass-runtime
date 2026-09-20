@@ -10,6 +10,8 @@
         "strict": true,
         "checks": [
           { "context": "validate", "appId": 15368 },
+          { "context": "audit", "appId": 15368 },
+          { "context": "examples", "appId": 15368 },
           { "context": "CodeQL", "appId": 57789 }
         ]
       },
@@ -26,6 +28,8 @@
         "strict": true,
         "checks": [
           { "context": "validate", "appId": 15368 },
+          { "context": "audit", "appId": 15368 },
+          { "context": "examples", "appId": 15368 },
           { "context": "CodeQL", "appId": 57789 }
         ]
       },

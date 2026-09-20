@@ -5,21 +5,23 @@
   "scripts": {
     "dev": "ng serve",
     "build": "ng build",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.app.json --noEmit"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   },
   "dependencies": {
-    "@angular/common": ">=17",
-    "@angular/core": ">=17",
-    "@angular/platform-browser": ">=17",
+    "@angular/common": "^20.3.31",
+    "@angular/core": "^20.3.31",
+    "@angular/platform-browser": "^20.3.31",
     "brass-runtime": "file:../..",
-    "rxjs": ">=7",
-    "zone.js": ">=0.14"
+    "rxjs": "^7.8.2",
+    "zone.js": "~0.15.1"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": ">=17",
-    "@angular/cli": ">=17",
-    "@angular/compiler-cli": ">=17",
+    "@angular-devkit/build-angular": "^20.3.37",
+    "@angular/cli": "^20.3.37",
+    "@angular/compiler-cli": "^20.3.31",
     "typescript": "^5.9.3"
   }
 }
-
