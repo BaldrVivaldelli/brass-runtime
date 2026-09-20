@@ -80,7 +80,8 @@
   rollback evidence and allowed for npm's asynchronous indexing delay.
 - Recorded the first retained green GitHub Actions stability run with verified
   report hashes and budgets, fixed the undispatchable v2 Node matrix concurrency
-  expression, and moved remaining artifact uploads off the deprecated action.
+  expression, proved both push and manual dispatch on Node 20/22, and moved
+  remaining artifact uploads off the deprecated action.
 - Added canonical ABI, IPC, and lifecycle fixtures plus ownership, protocol,
   compatibility, performance-gate, adoption, rollback, and 35-point roadmap
   traceability documentation.
