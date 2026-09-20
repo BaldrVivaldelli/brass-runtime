@@ -35,7 +35,7 @@ jobs:
           cache: npm
           registry-url: "https://registry.npmjs.org"
 
-      - uses: dtolnay/rust-toolchain@1.94.0
+      - uses: dtolnay/rust-toolchain@1.120.0
 
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.14.0 --locked
