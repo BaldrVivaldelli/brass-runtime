@@ -71,12 +71,24 @@ describe("v2 beta readiness integrity", () => {
     const result = validate(changed);
     expect(result.status).toBe(1);
   });
+
+  it("checks a local candidate only when its path is explicitly requested", () => {
+    const directory = mkdtempSync(path.join(tmpdir(), "brass-v2-artifact-test-"));
+    temporaryDirectories.push(directory);
+    const artifactPath = path.join(directory, "candidate.tgz");
+    writeFileSync(artifactPath, "not-the-published-candidate", "utf8");
+    expect(validate(committed, ["--artifact", artifactPath])).toMatchObject({ status: 1 });
+  });
 });
 
-function validate(evidence) {
+function validate(evidence, extraArguments = []) {
   const directory = mkdtempSync(path.join(tmpdir(), "brass-v2-readiness-test-"));
   temporaryDirectories.push(directory);
   const evidencePath = path.join(directory, "evidence.json");
   writeFileSync(evidencePath, `${JSON.stringify(evidence)}\n`, "utf8");
-  return spawnSync(process.execPath, [validator, evidencePath], { cwd: root, encoding: "utf8" });
+  return spawnSync(
+    process.execPath,
+    [validator, evidencePath, ...extraArguments],
+    { cwd: root, encoding: "utf8" },
+  );
 }

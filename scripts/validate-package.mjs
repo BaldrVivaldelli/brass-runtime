@@ -50,6 +50,23 @@ if (sourceOnlyEvidence.length > 0) {
   process.exit(1);
 }
 
+const repositoryOnlyDocs = [
+  "docs/adr/",
+  "docs/ai/",
+  "docs/case-studies/",
+  "docs/agent-release-readiness.md",
+  "docs/native-roadmap-traceability.md",
+  "docs/native-search-pilot-decision.md",
+  "docs/next-level-roadmap.md",
+];
+const publishedRepositoryOnlyDocs = packageFiles
+  .map((file) => file.path)
+  .filter((path) => repositoryOnlyDocs.some((entry) => path === entry || path.startsWith(entry)));
+if (publishedRepositoryOnlyDocs.length > 0) {
+  console.error(`Package contains repository-only documentation: ${publishedRepositoryOnlyDocs.join(", ")}`);
+  process.exit(1);
+}
+
 const groupBytes = (group) => packageFiles
   .filter((file) => file.path === group || file.path.startsWith(`${group}/`))
   .reduce((total, file) => total + file.size, 0);

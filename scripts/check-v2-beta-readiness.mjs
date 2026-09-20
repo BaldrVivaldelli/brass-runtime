@@ -5,9 +5,18 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
+const argumentsList = process.argv.slice(2);
+const artifactFlag = argumentsList.indexOf("--artifact");
+const artifactArgument = artifactFlag >= 0 ? argumentsList[artifactFlag + 1] : undefined;
+if (artifactFlag >= 0 && (!artifactArgument || artifactArgument.startsWith("--"))) {
+  throw new Error("--artifact requires a tarball path");
+}
+const evidenceArgument = argumentsList.find((argument, index) =>
+  (artifactFlag < 0 || (index !== artifactFlag && index !== artifactFlag + 1))
+    && !argument.startsWith("--"));
 const evidencePath = path.resolve(
   root,
-  process.argv[2] ?? "docs/evidence/v2-beta-readiness-2026-09-20.json",
+  evidenceArgument ?? "docs/evidence/v2-beta-readiness-2026-09-20.json",
 );
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -163,8 +172,10 @@ if (!publisher.includes("workflow_call:") || publisher.includes("NODE_AUTH_TOKEN
   failures.push("v2 beta publication must be called by the trusted OIDC release workflow without a write token");
 }
 
-const artifactPath = path.resolve(root, evidence.candidate?.path ?? "");
-if (existsSync(artifactPath)) {
+const artifactPath = artifactArgument ? path.resolve(root, artifactArgument) : null;
+if (artifactPath && !existsSync(artifactPath)) {
+  failures.push(`requested candidate artifact does not exist: ${artifactPath}`);
+} else if (artifactPath) {
   const bytes = readFileSync(artifactPath);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (sha256 !== evidence.candidate.sha256) failures.push("candidate artifact sha256 does not match evidence");
@@ -180,6 +191,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `V2 beta readiness validated (${evidence.candidate.version}, ${evidence.candidate.files} files, ` +
-    `published: yes, artifact checked: ${existsSync(artifactPath) ? "yes" : "no"}).`,
+    `published: yes, artifact checked: ${artifactPath ? "yes" : "no"}).`,
   );
 }

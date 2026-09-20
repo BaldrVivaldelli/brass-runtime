@@ -1,14 +1,14 @@
 {
   "schemaVersion": 1,
   "baselineDate": "2026-09-20",
-  "description": "Regression ceiling for the v1 compatibility package after removing duplicate ESM output and keeping raw operational evidence source-only while retaining linked consumer documentation.",
+  "description": "Regression ceiling for the v1 compatibility package after removing duplicate ESM output and keeping repository-only operational, planning, and contributor documentation out of the tarball while retaining linked consumer documentation.",
   "maximum": {
     "compressedBytes": 1150000,
     "unpackedBytes": 4875000,
-    "fileCount": 230,
+    "fileCount": 220,
     "groups": {
       "dist": 4050000,
-      "docs": 600000,
+      "docs": 550000,
       "wasm": 330000
     }
   },

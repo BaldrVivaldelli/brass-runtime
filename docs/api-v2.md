@@ -6,7 +6,9 @@ surface. The preview is experimental until a major release promotes it.
 
 The installable beta candidate promotes that same facade to the package root,
 keeps it aliased at `/next`, and moves the frozen root compatibility surface to
-`/v1`. It requires Node 20 or 22 and is built locally with:
+`/v1`. It declares Node `>=20` and is validated on Node 20, 22, and 24. Node 20
+is compatibility-only because it is upstream EOL; Node 22 and 24 are the
+security-supported LTS lines. Build the candidate locally with:
 
 ```bash
 npm run validate:v2-beta
