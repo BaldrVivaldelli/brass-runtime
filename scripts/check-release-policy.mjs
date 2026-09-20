@@ -77,6 +77,8 @@ const requiredV2PublishFragments = [
   "workflow_call:",
   "github.ref == 'refs/heads/next' && inputs.publish",
   "environment: npm-next",
+  "npm install --global npm@11.5.1",
+  "test \"$(npm --version)\" = \"11.5.1\"",
   "npm run release:check",
   "npm run validate:v2-beta -- --version",
   "npm run validate:example:v2-core -- --beta-tarball",
