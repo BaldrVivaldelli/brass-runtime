@@ -222,9 +222,11 @@ The same workflow runs three explicitly bounded workloads:
 The versioned thresholds live in `scripts/stability-budgets.json`. They fail on
 HTTP errors, excessive retained heap, missing limiter recovery signals,
 unbounded limiter state, insufficient throughput, or an incomplete runtime
-sample. Logs and all three machine-readable reports are retained as workflow
-artifacts for 30 days. These runs are regression evidence, not external
-production-adoption evidence.
+sample. Every successful run writes `stability-run-manifest.json` with the
+workflow identity, source SHA, exact environment, budget decisions, metrics,
+byte counts, and SHA-256 identities for all three raw reports. Logs, reports,
+and the manifest are retained as workflow artifacts for 90 days. These runs are
+regression evidence, not external production-adoption evidence.
 
 Two retained green manual runs are recorded in
 [`evidence/stability-ci-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stability-ci-2026-09-20.json).
@@ -234,6 +236,21 @@ The second artifact was downloaded and re-hashed independently. These same-day
 runs prove repeatability, not a weekly trend. `npm run
 validate:stability-evidence` checks both remote snapshots and the independent
 local run.
+
+A weekly trend is established only from at least four successful `schedule`
+manifests covering at least 21 days, with consecutive samples 5–10 days apart,
+one Node major/platform, the current budget version, and raw reports matching
+every recorded byte count and SHA-256. Download each artifact into its own
+directory, then validate the series:
+
+```bash
+gh run download <run-id> --name brass-stability-<run-id> --dir artifacts/stability-history/<run-id>
+npm run stability:trend -- artifacts/stability-history
+```
+
+Set `BRASS_STABILITY_TREND_REPORT_PATH` to retain the generated comparison
+summary. Manual same-day runs remain useful repeatability evidence but cannot
+qualify as a weekly trend.
 
 ## Release cadence and channels
 

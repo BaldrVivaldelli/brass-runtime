@@ -198,6 +198,8 @@
     "perf:runtime:ab": "tsx src/perf/cli.ts --profile runtime-ab",
     "perf:runtime:soak": "tsx src/perf/cli.ts --profile runtime-soak",
     "perf:stability:soak": "node scripts/check-runtime-stability.mjs",
+    "stability:manifest": "node scripts/create-stability-run-manifest.mjs",
+    "stability:trend": "node scripts/check-stability-trend.mjs",
     "perf:runtime:budget": "tsx src/perf/budgetCli.ts",
     "perf:http:memory": "tsx src/perf/cli.ts --profile http-memory",
     "perf:history": "tsx src/perf/cli.ts --record-history",

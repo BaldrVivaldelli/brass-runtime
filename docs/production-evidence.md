@@ -115,6 +115,12 @@ downloaded artifact was independently re-hashed. These two same-day runs prove
 repeatability across repository states, not a weekly trend; scheduled runs must
 still accumulate over time.
 
+Future successful scheduled runs retain a self-verifying manifest and raw
+reports for 90 days. `npm run stability:trend -- <history-directory>` refuses
+manual runs, short intervals, fewer than four samples, environment/budget drift,
+or any report whose bytes no longer match its manifest. This makes the future
+weekly claim reproducible without promoting the current same-day pair.
+
 ## Reproduce the workloads
 
 Run on an otherwise quiet machine. Absolute throughput will vary; the budget

@@ -155,7 +155,9 @@ Items 4 and 5 are implemented as gates and have produced both a local run and a
 pair of retained green GitHub Actions runs with independently hashed raw
 reports. This closes repeatability across two repository states; continuing
 weekly history is required to establish a time trend and catch runner-specific
-regressions.
+regressions. The scheduled lane now emits a self-verifying run manifest, retains
+90 days of raw reports, and has a four-run/21-day trend validator; the criterion
+remains open until real scheduled time has elapsed.
 Item 7 is documented in `support-and-maintenance.md`; the second-maintainer
 outcome remains open until a real maintainer completes that qualification path.
 

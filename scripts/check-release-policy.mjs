@@ -196,6 +196,8 @@ const requiredStabilityFragments = [
   "npm run perf:stability:soak",
   "npm run benchmark:http:stability",
   "npm run benchmark:adaptive:stability",
+  "npm run stability:manifest -- artifacts/stability",
+  "retention-days: 90",
   "if: always()",
 ];
 for (const fragment of requiredStabilityFragments) {
