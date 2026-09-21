@@ -19,7 +19,7 @@ on:
         default: 2.0.0-beta.0
         type: string
       publish:
-        description: Confirm publication (required for v2-beta)
+        description: Confirm publication; false runs validation only
         required: true
         default: false
         type: boolean
@@ -178,7 +178,14 @@ jobs:
   release:
     if: >-
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'schedule' || inputs.channel == 'stable')
+      (
+        github.event_name == 'schedule' ||
+        (
+          github.event_name == 'workflow_dispatch' &&
+          inputs.channel == 'stable' &&
+          inputs.publish
+        )
+      )
     runs-on: ubuntu-latest
     needs: [test, node18-smoke, native-artifacts]
     permissions:

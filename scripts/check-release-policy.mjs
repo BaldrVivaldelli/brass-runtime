@@ -91,6 +91,17 @@ if (!releaseWorkflow.includes("github.ref == 'refs/heads/main' &&")
   || !releaseWorkflow.includes("inputs.channel == 'stable'")) {
   fail("the stable publisher must be locked to the main branch");
 }
+const stableReleaseJob = releaseWorkflow.slice(
+  releaseWorkflow.indexOf("\n  release:\n"),
+  releaseWorkflow.indexOf("\n  v2-beta:\n"),
+);
+if (!stableReleaseJob
+  || !stableReleaseJob.includes("github.event_name == 'schedule'")
+  || !stableReleaseJob.includes("github.event_name == 'workflow_dispatch'")
+  || !stableReleaseJob.includes("inputs.channel == 'stable' &&")
+  || !stableReleaseJob.includes("inputs.publish")) {
+  fail("manual stable publication must require publish=true while publish=false remains validation-only");
+}
 if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.includes("@semantic-release/git@10.0.1")) {
   fail("release tooling must be pinned in the isolated release job");
 }
