@@ -119,7 +119,8 @@ their own type/test lane and upload a package candidate without publishing it:
 The registry snapshot in
 [`evidence/product-registry-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/product-registry-readiness-2026-09-20.json)
 records that the three scoped npm products do not yet exist. Their first
-publication uses `Publish Companion Product Alpha` from `main`. It requires an
+publication is currently deferred. If it is resumed later, it uses `Publish
+Companion Product Alpha` from `main`. It requires an
 exact manifest version and `npm-products` approval, checks bootstrap identity,
 runs the release and dry-run gates, rejects reused versions, publishes only to
 `alpha` with provenance, and proves `latest` did not move.
@@ -142,9 +143,10 @@ Bootstrap run `35544680926` authenticated as `avivaldelli` but got `E403`
 reading `brass` membership. It stopped before build or publication with no
 registry mutation. The product workflow now uses only the environment-scoped
 `NPM_PRODUCT_BOOTSTRAP_TOKEN`, preventing a scoped bootstrap credential from
-breaking or broadening the stable publisher. The remaining blocker is the new
-secret plus membership or organization-read permission; scope write remains
-required.
+breaking or broadening the stable publisher. If companion publication is
+resumed, its remaining prerequisites are the new secret plus membership or
+organization-read permission; scope write remains required. These are future
+publication prerequisites, not blockers for independent packaging readiness.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the
@@ -275,8 +277,25 @@ qualify as a weekly trend.
 ## Release cadence and channels
 
 - Stable releases run from `main` on the weekly Monday release train or by an
-  explicit manual dispatch. Multiple fixes can therefore ship as one reviewed
-  release rather than producing a new version for every merge.
+  explicit manual dispatch with `channel=stable` and `publish=true`. Multiple
+  fixes can therefore ship as one reviewed release rather than producing a new
+  version for every merge.
+- A manual dispatch with `publish=false` runs the complete stable validation
+  matrix and native-artifact build but skips both publishing jobs. Use this to
+  qualify Node compatibility or release policy without contacting npm:
+
+  ```bash
+  gh workflow run release.yml --ref main \
+    -f channel=stable -f version=2.0.0-beta.0 -f publish=false
+  ```
+
+  The release-policy gate rejects a workflow where manual stable publication
+  does not explicitly require `publish=true`. The first retained execution of
+  this path is [run `35547826504`](https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35547826504):
+  Node 18/20/22/24 and all three native platforms passed while both publisher
+  jobs were skipped. Its immutable job and artifact metadata is checked by
+  `npm run validate:evidence` from
+  `docs/evidence/stable-release-validation-2026-09-21.json`.
 - The publishing job is branch-locked to `main`; dispatching the stable
   workflow from `next` cannot publish the v1 package as a prerelease by mistake.
 - The `next` branch builds and retains prerelease candidates on push. Publishing

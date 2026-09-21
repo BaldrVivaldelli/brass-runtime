@@ -118,6 +118,22 @@ downloaded artifact was independently re-hashed. These two same-day runs prove
 repeatability across repository states, not a weekly trend; scheduled runs must
 still accumulate over time.
 
+The stable release qualification is independently recorded in
+[`stable-release-validation-2026-09-21.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/stable-release-validation-2026-09-21.json).
+GitHub Actions run `35547826504` passed the Node 18 compatibility smoke, full
+Node 20/22/24 validation, and native packaging on Linux, macOS, and Windows.
+The stable and v2 publisher jobs were both skipped with zero executed steps;
+the `latest` and `next` registry snapshots remained unchanged. This is release-
+readiness evidence without a publication or external-production claim.
+
+The cross-workstream closure record,
+[`next-level-readiness-2026-09-21.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/next-level-readiness-2026-09-21.json),
+links adoption, v2/product, and operational evidence without weakening their
+claim boundaries. Its validator requires at least two consented internal or
+external use cases, all 546 v1 export dispositions, the independently packaged
+Agent/Perf/Engine candidates, and the green non-publishing release matrix.
+Companion registry publication is explicitly outside that readiness decision.
+
 Future successful scheduled runs retain a self-verifying manifest and raw
 reports for 90 days. `npm run stability:trend -- <history-directory>` refuses
 manual runs, short intervals, fewer than four samples, environment/budget drift,

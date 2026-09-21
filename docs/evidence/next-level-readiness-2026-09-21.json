@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "kind": "next-level-readiness",
+  "recordedAt": "2026-09-21T00:47:32Z",
+  "baselineMainSha": "48089a2632ec538851c780b97d873436fdcb7462",
+  "outcome": "three-objectives-verified-with-publication-deferred",
+  "adoptionAndEvidence": {
+    "status": "verified-with-consented-internal-use-cases",
+    "discoveryEvidence": "docs/evidence/adoption-discovery-2026-09-20.json",
+    "verifiedConsumerIds": [
+      "create-brass"
+    ],
+    "useCaseTarget": {
+      "minimum": 2,
+      "observed": 3,
+      "allowedKinds": [
+        "internal",
+        "external"
+      ]
+    },
+    "useCases": [
+      {
+        "id": "workspace-template-lighthouse-1",
+        "kind": "internal",
+        "evidence": "docs/evidence/v2-migration-lighthouse-1-2026-09-20.json"
+      },
+      {
+        "id": "internal-express-observability-lighthouse-2",
+        "kind": "internal",
+        "evidence": "docs/evidence/v2-migration-lighthouse-2-2026-09-20.json"
+      },
+      {
+        "id": "internal-core-effect-stream-lighthouse-3",
+        "kind": "internal",
+        "evidence": "docs/evidence/v2-migration-lighthouse-3-2026-09-20.json"
+      }
+    ],
+    "metricsAndInventory": {
+      "productionEvidence": "docs/production-evidence.md",
+      "privateInventoryContract": "docs/adopter-inventory.md",
+      "aggregateCommand": "npm run adoption:report"
+    },
+    "claims": {
+      "externalProductionAdopters": 0,
+      "publishableExternalCaseStudies": 0,
+      "downloadsTreatedAsUsers": false
+    }
+  },
+  "productAndApiV2": {
+    "status": "verified",
+    "migrationEvidence": [
+      "docs/evidence/v2-migration-lighthouse-1-2026-09-20.json",
+      "docs/evidence/v2-migration-lighthouse-2-2026-09-20.json",
+      "docs/evidence/v2-migration-lighthouse-3-2026-09-20.json"
+    ],
+    "migrationTooling": {
+      "mode": "read-only",
+      "script": "scripts/analyze-v2-migration.mjs",
+      "tests": "scripts/__tests__/analyze-v2-migration.test.mjs",
+      "guide": "docs/migration-v1-to-v2.md"
+    },
+    "apiDisposition": {
+      "path": "docs/v1-to-v2-export-map.json",
+      "totalV1RootExports": 546,
+      "uncovered": 0
+    },
+    "beta": {
+      "version": "2.0.0-beta.0",
+      "distTag": "next",
+      "evidence": "docs/evidence/v2-beta-readiness-2026-09-20.json",
+      "rollbackBridge": "brass-runtime/v1"
+    },
+    "independentProducts": [
+      {
+        "name": "@brass/agent",
+        "version": "0.1.0-alpha.0",
+        "manifest": "packages/agent/package.json"
+      },
+      {
+        "name": "@brass/perf",
+        "version": "0.1.0-alpha.0",
+        "manifest": "packages/perf/package.json"
+      },
+      {
+        "name": "@brass/engine-wasm",
+        "version": "0.1.0-alpha.0",
+        "manifest": "packages/engine-wasm/package.json"
+      }
+    ],
+    "packageValidation": {
+      "command": "npm run validate:products",
+      "releaseEvidence": "docs/evidence/stable-release-validation-2026-09-21.json",
+      "v1CompatibilityEntrypoints": [
+        "./agent",
+        "./perf"
+      ]
+    },
+    "companionRegistryPublication": "deferred-not-required-for-readiness"
+  },
+  "operationalMaturity": {
+    "status": "verified",
+    "stableReleaseEvidence": "docs/evidence/stable-release-validation-2026-09-21.json",
+    "nodePolicy": "scripts/node-support-policy.json",
+    "packageSizeBudget": "scripts/package-size-budget.json",
+    "stabilityEvidence": "docs/evidence/stability-ci-2026-09-20.json",
+    "stabilityWorkflow": ".github/workflows/stability.yml",
+    "coveragePolicy": "vitest.config.ts",
+    "supportAndMaintenance": "docs/support-and-maintenance.md",
+    "migrationAndRollback": "docs/migration-v1-to-v2.md",
+    "releaseGate": "npm run release:check",
+    "scheduledTrend": "capability-verified-history-accumulating",
+    "releaseOwnership": "single-maintainer-with-qualified-expansion-path"
+  },
+  "limitations": [
+    "The evidence verifies three consented internal use cases but does not claim an external production adopter.",
+    "A second release-capable maintainer has a documented qualification path but has not completed it.",
+    "Two retained stability runs prove repeatability; real scheduled history is still accumulating toward the four-run trend.",
+    "Agent, Perf, and Engine WASM are independently versioned and installable candidates; their npm registry publication is intentionally deferred."
+  ],
+  "reproduce": [
+    "npm run validate:next-level-readiness",
+    "npm run validate:evidence",
+    "npm run validate:adoption-evidence",
+    "npm run validate:release-policy",
+    "npm run release:check"
+  ]
+}
