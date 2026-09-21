@@ -28,7 +28,7 @@ npm run release:check
 - A separate `npm run validate:v2-beta` gate builds the prospective v2 package
   root, `/v1` bridge, browser/CJS/ESM/declaration conditions, independent
   products, package-size target, and optional-WASM behavior. It is exercised by
-  the `V2 Beta` workflow on Node 20 and 22.
+  the `V2 Beta` workflow on Node 20, 22, and 24.
 - Packed Express lighthouse validation covering strict types, HTTP behavior,
   incoming trace propagation, health, metrics, and graceful `SIGTERM` shutdown.
 - Integrity validation for the committed production-like evidence record.
@@ -62,11 +62,12 @@ npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-h
 - Confirm `npm run validate:package` reports the expected tarball contents.
   The command also enforces the versioned compressed, unpacked, file-count, and
   top-level group ceilings in `scripts/package-size-budget.json`, and rejects
-  the unpublished duplicate `.js` ESM artifacts. Raw operational records under
-  `docs/evidence` stay versioned in GitHub instead of shipping in the npm
-  tarball; the validator requires the linked migration, production-evidence,
-  and support documentation. Public ESM entrypoints use `.mjs`; CommonJS and
-  bin entrypoints use `.cjs`.
+  the unpublished duplicate `.js` ESM artifacts. Raw operational records and
+  repository-only planning, ADR, AI-context, case-study intake, and native
+  pilot documents stay versioned in GitHub instead of shipping in the npm
+  tarball. The validator rejects those paths and requires the linked migration,
+  production-evidence, and support documentation. Public ESM entrypoints use
+  `.mjs`; CommonJS and bin entrypoints use `.cjs`.
 - Confirm `npm run validate:evidence` passes and rerun the relevant benchmark
   budget when a hot path or threshold changed.
 - The committed `package.json` and lockfile version must match the latest stable
@@ -187,6 +188,13 @@ registry indexing, verifies that `next` resolves to the requested version, and p
 accidentally publish the v1 package on the beta channel.
 The publication, registry integrity, provenance, artifact, and rollback snapshot is recorded in
 [`evidence/v2-beta-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-beta-readiness-2026-09-20.json).
+The normal evidence gate validates that immutable snapshot without inspecting
+unrelated local builds. To re-hash a downloaded copy of the exact retained
+candidate, opt in with:
+
+```bash
+npm run validate:v2-beta-readiness -- --artifact artifacts/v2-beta/brass-runtime-2.0.0-beta.0.tgz
+```
 
 Before approving the `npm-next` environment, record the current tags and the
 last known-good beta in the release notes:
@@ -284,9 +292,13 @@ qualify as a weekly trend.
 ## Node support
 
 The v1 package declares Node `>=18`, matching its compatibility smoke lane.
-Full stable release validation runs on Node 20 and 22. The v2 beta declares
-Node `>=20` and its candidate workflow validates Node 20 and 22. Any further
-minimum-version change requires migration and rollback guidance.
+Full stable release validation runs on Node 20, 22, and 24. The v2 beta declares
+Node `>=20` and its candidate workflow validates the same three majors. Node 18
+and 20 are compatibility-only because they are upstream EOL; Node 22 and 24 are
+the security-supported LTS lines. Node 26 is Current and will be reviewed at
+its scheduled LTS transition. The dated, machine-readable decision lives in
+`scripts/node-support-policy.json`. Any further minimum-version change requires
+migration and rollback guidance.
 
 The support windows, v2 reversal procedure, release-owner duties, and path to a
 second release-capable maintainer are defined in

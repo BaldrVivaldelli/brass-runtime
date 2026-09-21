@@ -9,6 +9,7 @@ const packageJson = await readJson(new URL("../package.json", import.meta.url));
 const packageLock = await readJson(new URL("../package-lock.json", import.meta.url));
 const releaseConfig = await readJson(new URL("../.releaserc.json", import.meta.url));
 const stabilityBudgets = await readJson(new URL("./stability-budgets.json", import.meta.url));
+const nodeSupport = await readJson(new URL("./node-support-policy.json", import.meta.url));
 const releaseWorkflow = await readFile(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
 const qualityWorkflow = await readFile(new URL("../.github/workflows/quality.yml", import.meta.url), "utf8");
 const stabilityWorkflow = await readFile(new URL("../.github/workflows/stability.yml", import.meta.url), "utf8");
@@ -25,6 +26,28 @@ if (packageJson.version !== packageLock.version || packageJson.version !== packa
   fail("package.json and package-lock.json versions must match");
 }
 if (packageJson.engines?.node !== ">=18") fail("the stable v1 Node engine contract must be >=18");
+if (nodeSupport.schemaVersion !== 1
+  || nodeSupport.source !== "https://github.com/nodejs/Release/blob/main/schedule.json"
+  || JSON.stringify(nodeSupport.releaseLines?.lts) !== JSON.stringify([22, 24])
+  || JSON.stringify(nodeSupport.releaseLines?.current) !== JSON.stringify([26])
+  || JSON.stringify(nodeSupport.releaseLines?.eolCompatibility) !== JSON.stringify([18, 20])
+  || nodeSupport.stableV1?.engine !== packageJson.engines.node
+  || JSON.stringify(nodeSupport.stableV1?.fullValidation) !== JSON.stringify([20, 22, 24])
+  || JSON.stringify(nodeSupport.stableV1?.compatibilitySmoke) !== JSON.stringify([18])
+  || JSON.stringify(nodeSupport.stableV1?.securitySupported) !== JSON.stringify([22, 24])
+  || JSON.stringify(nodeSupport.stableV1?.compatibilityOnly) !== JSON.stringify([18, 20])
+  || nodeSupport.v2Beta?.engine !== ">=20"
+  || JSON.stringify(nodeSupport.v2Beta?.fullValidation) !== JSON.stringify([20, 22, 24])
+  || JSON.stringify(nodeSupport.v2Beta?.securitySupported) !== JSON.stringify([22, 24])
+  || JSON.stringify(nodeSupport.v2Beta?.compatibilityOnly) !== JSON.stringify([20])
+  || nodeSupport.canonicalBuildNode !== 22) {
+  fail("the versioned Node support policy must distinguish current LTS support from EOL compatibility");
+}
+if (!/^\d{4}-\d{2}-\d{2}$/.test(nodeSupport.observedAt ?? "")
+  || !/^\d{4}-\d{2}-\d{2}$/.test(nodeSupport.reviewAfter ?? "")
+  || Date.parse(`${nodeSupport.reviewAfter}T00:00:00Z`) <= Date.now()) {
+  fail("the Node support policy must be refreshed no later than the next scheduled LTS transition");
+}
 if (!packageJson.scripts?.["release:check"]?.includes("npm run validate:product-publish-dry-run")) {
   fail("the release gate must execute companion-product publication dry-runs");
 }
@@ -71,11 +94,15 @@ if (!releaseWorkflow.includes("github.ref == 'refs/heads/main' &&")
 if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.includes("@semantic-release/git@10.0.1")) {
   fail("release tooling must be pinned in the isolated release job");
 }
+if (!releaseWorkflow.includes("node-version: [20, 22, 24]")
+  || !releaseWorkflow.includes("node-version: 18")) {
+  fail("the stable release workflow must validate Node 20/22/24 and retain the Node 18 compatibility smoke");
+}
 
 const requiredV2BetaFragments = [
   "branches: [main, next]",
   "group: v2-beta-${{ github.ref }}",
-  "node-version: [20, 22]",
+  "node-version: [20, 22, 24]",
   "npm run validate:v2-beta",
   "npm run validate:example:v2-core",
   "brass-runtime-v2-beta-package",

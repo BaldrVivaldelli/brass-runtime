@@ -50,6 +50,10 @@ compatibility, or operational evidence does not close a workstream.
   12% smaller by file count while all package-condition and independent-product
   smoke tests stay green. Raw operational evidence remains versioned in the
   repository and linked from consumer docs instead of inflating the npm tarball.
+- The Node policy preserves the published v1 `>=18` and beta `>=20` contracts
+  while distinguishing compatibility from runtime security: CI covers Node 20,
+  22, and 24, retains a Node 18 packed smoke, and recognizes only the upstream-
+  supported Node 22/24 LTS lines for production security support.
 - Agent, Perf, and Engine WASM build as independently versioned candidates.
   Agent and Perf now own bundled declarations as well as executable output.
   Their v1 compatibility entrypoints/artifact remain in `brass-runtime`.

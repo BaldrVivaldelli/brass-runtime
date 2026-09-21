@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-09-20",
+  "reviewAfter": "2026-10-28",
+  "source": "https://github.com/nodejs/Release/blob/main/schedule.json",
+  "releaseLines": {
+    "lts": [22, 24],
+    "current": [26],
+    "eolCompatibility": [18, 20]
+  },
+  "stableV1": {
+    "engine": ">=18",
+    "fullValidation": [20, 22, 24],
+    "compatibilitySmoke": [18],
+    "securitySupported": [22, 24],
+    "compatibilityOnly": [18, 20]
+  },
+  "v2Beta": {
+    "engine": ">=20",
+    "fullValidation": [20, 22, 24],
+    "securitySupported": [22, 24],
+    "compatibilityOnly": [20]
+  },
+  "canonicalBuildNode": 22
+}
