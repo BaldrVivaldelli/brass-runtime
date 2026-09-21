@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "recordedAt": "2026-09-20T16:47:41.498Z",
   "status": "published-on-next",
   "registry": {
@@ -126,6 +126,31 @@
       }
     }
   },
+  "currentCompatibilityValidation": {
+    "observedAt": "2026-09-21T00:05:37Z",
+    "sourceSha": "d30bc03abd8ff2045d5246fe899e11cfd45a7ec2",
+    "branch": "main",
+    "nodes": [20, 22, 24],
+    "runId": 35546409754,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35546409754",
+    "event": "push",
+    "conclusion": "success",
+    "jobs": {
+      "20": 106173017227,
+      "22": 106173017044,
+      "24": 106173017313
+    },
+    "artifact": {
+      "id": 10616189718,
+      "name": "brass-runtime-v2-beta-package",
+      "archiveBytes": 619582,
+      "digest": "sha256:b6e32a5a331727b97cdc4e8c2b716bbefab374315d4ba39b051d8e23da410b83",
+      "expiresAt": "2026-12-20T00:03:07Z",
+      "relationship": "validation-rebuild-not-published-candidate"
+    },
+    "publicationAttempted": false,
+    "registryMutation": false
+  },
   "rollback": {
     "stable": "1.22.0",
     "removeNext": "npm dist-tag rm brass-runtime next",
@@ -134,7 +159,7 @@
   },
   "nextActions": [
     "Monitor beta feedback and adoption without treating internal lighthouses as external production adoption",
-    "Bootstrap the independently versioned @brass packages after confirming ownership of the npm @brass scope"
+    "Keep companion npm publication deferred while compatibility, evidence, and operational maturity remain the priority"
   ],
   "reproduce": [
     "npm run release:check",

@@ -8,14 +8,20 @@ credentials. It does not claim that a second release maintainer already exists.
 
 | Line | Status | Node contract | Fix policy |
 | --- | --- | --- | --- |
-| latest v1 minor | stable | Node 18, 20, and 22 | compatibility, correctness, and security fixes |
-| `next` / v2 beta | prerelease | declared by each beta; Node 20 and 22 until the final matrix is approved | fixes needed to evaluate the preview; breaking changes allowed with migration notes |
+| latest v1 minor | stable | `>=18` compatibility; security-supported LTS: Node 22 and 24 | compatibility and correctness across the declared range; runtime-security support requires an upstream-supported Node line |
+| `next` / v2 beta | prerelease | `>=20`; security-supported LTS: Node 22 and 24 | fixes needed to evaluate the preview; breaking changes allowed with migration notes |
 | Agent and Perf candidates | alpha, independently versioned | their packed-package validation matrix | no stable API guarantee outside documented v1 compatibility entrypoints |
 | Rust/WASM internals | experimental, versioned ABI | built by the release toolchain | compatibility only at documented TypeScript/WASM boundaries |
 
-Node 18 receives a packed-package compatibility smoke test. Node 20 and 22 run
-the full stable release suite. A future minimum-version increase requires a
-major or explicitly documented prerelease, plus a migration and reversal path.
+Node 18 and 20 are upstream EOL. Brass keeps Node 18 as a packed-package smoke
+and runs the full compatibility suite on Node 20, 22, and 24 so the published
+v1 `>=18` and beta `>=20` contracts are not silently narrowed. Only Node 22 and
+24 are security-supported production runtimes; compatibility testing cannot
+replace upstream runtime security fixes. Node 26 remains Current and is not a
+supported production target yet. The versioned policy in
+`scripts/node-support-policy.json` forces review by its LTS transition. A future
+minimum-version increase requires a major or explicitly documented prerelease,
+plus a migration and reversal path.
 
 ## v1 LTS window
 

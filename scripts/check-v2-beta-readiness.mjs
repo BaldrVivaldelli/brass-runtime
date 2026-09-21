@@ -5,9 +5,18 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
 const root = process.cwd();
+const argumentsList = process.argv.slice(2);
+const artifactFlag = argumentsList.indexOf("--artifact");
+const artifactArgument = artifactFlag >= 0 ? argumentsList[artifactFlag + 1] : undefined;
+if (artifactFlag >= 0 && (!artifactArgument || artifactArgument.startsWith("--"))) {
+  throw new Error("--artifact requires a tarball path");
+}
+const evidenceArgument = argumentsList.find((argument, index) =>
+  (artifactFlag < 0 || (index !== artifactFlag && index !== artifactFlag + 1))
+    && !argument.startsWith("--"));
 const evidencePath = path.resolve(
   root,
-  process.argv[2] ?? "docs/evidence/v2-beta-readiness-2026-09-20.json",
+  evidenceArgument ?? "docs/evidence/v2-beta-readiness-2026-09-20.json",
 );
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
@@ -16,7 +25,7 @@ const releaseEntrypoint = readFileSync(path.join(root, ".github", "workflows", "
 const publisher = readFileSync(path.join(root, ".github", "workflows", "publish-v2-beta.yml"), "utf8");
 const failures = [];
 
-if (evidence.schemaVersion !== 2) failures.push("schemaVersion must be 2");
+if (evidence.schemaVersion !== 3) failures.push("schemaVersion must be 3");
 if (evidence.status !== "published-on-next") failures.push("v2 beta evidence must record next publication");
 if (evidence.registry?.package !== packageJson.name || evidence.registry?.latest !== packageJson.version) {
   failures.push("registry latest snapshot must match the stable source package");
@@ -116,6 +125,29 @@ for (const [name, event] of [["automatic", "push"], ["manual", "workflow_dispatc
     failures.push(`${name} v2 workflow verification is incomplete or unsuccessful`);
   }
 }
+
+const currentCompatibility = evidence.currentCompatibilityValidation;
+if (currentCompatibility?.observedAt !== "2026-09-21T00:05:37Z"
+  || currentCompatibility?.sourceSha !== "d30bc03abd8ff2045d5246fe899e11cfd45a7ec2"
+  || currentCompatibility?.branch !== "main"
+  || JSON.stringify(currentCompatibility?.nodes) !== JSON.stringify([20, 22, 24])
+  || currentCompatibility?.runId !== 35546409754
+  || currentCompatibility?.runUrl !== "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35546409754"
+  || currentCompatibility?.event !== "push"
+  || currentCompatibility?.conclusion !== "success"
+  || currentCompatibility?.jobs?.["20"] !== 106173017227
+  || currentCompatibility?.jobs?.["22"] !== 106173017044
+  || currentCompatibility?.jobs?.["24"] !== 106173017313
+  || currentCompatibility?.artifact?.id !== 10616189718
+  || currentCompatibility?.artifact?.name !== "brass-runtime-v2-beta-package"
+  || currentCompatibility?.artifact?.archiveBytes !== 619582
+  || currentCompatibility?.artifact?.digest !== "sha256:b6e32a5a331727b97cdc4e8c2b716bbefab374315d4ba39b051d8e23da410b83"
+  || currentCompatibility?.artifact?.expiresAt !== "2026-12-20T00:03:07Z"
+  || currentCompatibility?.artifact?.relationship !== "validation-rebuild-not-published-candidate"
+  || currentCompatibility?.publicationAttempted !== false
+  || currentCompatibility?.registryMutation !== false) {
+  failures.push("current v2 compatibility evidence must prove a non-publishing Node 20/22/24 run on main");
+}
 for (const [key, maximum] of [
   ["compressedBytes", budget.compressedBytes],
   ["unpackedBytes", budget.unpackedBytes],
@@ -163,8 +195,10 @@ if (!publisher.includes("workflow_call:") || publisher.includes("NODE_AUTH_TOKEN
   failures.push("v2 beta publication must be called by the trusted OIDC release workflow without a write token");
 }
 
-const artifactPath = path.resolve(root, evidence.candidate?.path ?? "");
-if (existsSync(artifactPath)) {
+const artifactPath = artifactArgument ? path.resolve(root, artifactArgument) : null;
+if (artifactPath && !existsSync(artifactPath)) {
+  failures.push(`requested candidate artifact does not exist: ${artifactPath}`);
+} else if (artifactPath) {
   const bytes = readFileSync(artifactPath);
   const sha256 = createHash("sha256").update(bytes).digest("hex");
   if (sha256 !== evidence.candidate.sha256) failures.push("candidate artifact sha256 does not match evidence");
@@ -180,6 +214,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `V2 beta readiness validated (${evidence.candidate.version}, ${evidence.candidate.files} files, ` +
-    `published: yes, artifact checked: ${existsSync(artifactPath) ? "yes" : "no"}).`,
+    `published: yes, artifact checked: ${artifactPath ? "yes" : "no"}).`,
   );
 }

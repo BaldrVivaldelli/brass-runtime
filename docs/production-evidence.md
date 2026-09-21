@@ -34,10 +34,13 @@ The v2 package and registry state are captured in
 It records the protected OIDC publication, npm integrity and provenance, the
 public registry tarball replay, and rollback controls. npm currently resolves
 `next` to `2.0.0-beta.0` while `latest` remains `1.22.0`.
-It also records successful push and manual-dispatch runs on the protected
-`next` branch for the Node 20/22 matrix. Both runs rebuilt WASM, validated the
-beta package and core lighthouse, and retained a digest-addressed package
-artifact.
+It also records the historical successful push and manual-dispatch runs on the
+protected `next` branch for the Node 20/22 matrix. The current non-publishing
+[compatibility run](https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35546409754)
+on protected `main` extends that validation to Node 20/22/24. All three jobs
+rebuilt WASM, validated the beta package and core lighthouse, and the canonical
+Node 22 job retained a digest-addressed package artifact. The evidence marks
+that artifact as a validation rebuild, not the already-published beta candidate.
 
 The first v2 import inventory is recorded as
 [`v2-migration-assessment-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/v2-migration-assessment-2026-09-20.json).

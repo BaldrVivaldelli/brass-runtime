@@ -54,10 +54,13 @@ with `.js` extensions. All public Node imports already resolve to `.mjs`, all
 CommonJS imports and bins resolve to `.cjs`, and browser exports resolve to
 browser `.mjs` files. Removing the unpublished duplicate reduced the packed v1
 artifact from its 269-file, approximately 1.392 MB compressed and 5.973 MB
-unpacked baseline. It remains below the versioned 245-file, 1.18 MB compressed,
-and 4.9 MB unpacked ceilings, including generated migration and readiness
-evidence. Packed consumer tests prove that the legacy Agent/Perf entrypoints and
-independent candidates still execute.
+unpacked baseline. The current candidate is 215 files, approximately 1.118 MB
+compressed and 4.793 MB unpacked, below the versioned 220-file, 1.15 MB
+compressed, and 4.875 MB unpacked ceilings. Repository-only operational,
+planning, ADR, AI-context, case-study intake, and native-pilot documents remain
+available in GitHub but are excluded from the consumer tarball. Packed consumer
+tests prove that the legacy Agent/Perf entrypoints and independent candidates
+still execute.
 
 The generated 546-symbol v1-to-v2 disposition is intentionally shipped as
 migration documentation. Its repetitive JSON adds documentation bytes without
