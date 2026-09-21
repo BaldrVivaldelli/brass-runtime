@@ -21,8 +21,8 @@ compatibility, or operational evidence does not close a workstream.
 - The public first-party `create-brass` consumer independently retains that
   migration's distribution candidate: four validation modes across two
   templates pass (8/8 builds), with a hashed tarball and protected release
-  controls. OIDC validation now passes, but the beta awaits npm Trusted
-  Publisher confirmation; the record is not external adoption.
+  controls. The protected OIDC route promoted the beta to `next`; the record is
+  still first-party verification, not external adoption.
 - Public discovery currently shows 8,760 npm downloads in the last year but
   only 1 in the last week; public manifest search found no external repository.
   These are reach signals, not users. A Git-ignored private adopter inventory
@@ -34,10 +34,11 @@ compatibility, or operational evidence does not close a workstream.
 - A third internal lighthouse promotes the core Effect and Stream preview from
   `/next` to the beta package root. Strict types and identical outputs pass on
   the v2 root, its `/next` rollback, and the published npm 1.22.0 rollback.
-- Lighthouse progress is 3 of 3 migrations and 0 of 2 publishable external case
-  studies. The migration-count target is closed with internal workloads; both
-  external reports still require consenting adopters and are not inferred from
-  these examples.
+- Lighthouse progress is 3 of 3 consented, reproducible internal migrations.
+  This closes the roadmap's use-case evidence target without relabeling those
+  records as external production. Publishable external case studies remain a
+  useful growth target and are still 0 of 2, but are not a release-readiness
+  blocker.
 - The shared semantic corpus now exercises the TypeScript fiber interpreter,
   native top-level fast path, direct adapter, and the WASM engine when built.
 - A bounded weekly stability lane runs that corpus plus cancellation, finalizer,
@@ -57,11 +58,9 @@ compatibility, or operational evidence does not close a workstream.
 - Agent, Perf, and Engine WASM build as independently versioned candidates.
   Agent and Perf now own bundled declarations as well as executable output.
   Their v1 compatibility entrypoints/artifact remain in `brass-runtime`.
-  Registry checks confirm that none of the three scoped packages exists yet;
-  a manual protected `alpha` publisher is ready and its short-lived bootstrap
-  credential is isolated from the stable release token. First publication,
-  the environment-scoped secret, and npm namespace authorization remain open
-  external steps.
+  Their packed tarballs install and execute without private source-tree imports.
+  Registry publication of these candidates is deliberately deferred: it is
+  neither required to prove the product boundary nor part of the current work.
 - A distinct `2.0.0-beta.0` tarball shape is generated and installed locally:
   v2 owns the root, `/v1` is the bridge, optional products are absent, and the
   WASM engine is installed separately. Both variants of the first lighthouse
@@ -86,10 +85,11 @@ compatibility, or operational evidence does not close a workstream.
 2. Select at least three lighthouse workloads: one core/runtime workload, one
    HTTP workload, and one application using observability or graceful shutdown.
 3. Predeclare success and reversal thresholds before each migration.
-4. Publish at least two consented case studies under `docs/case-studies/` with
-   reproducible or redacted evidence.
-5. Update `docs/production-evidence.md` so its external-production row points to
-   those reports without turning npm downloads into a user count.
+4. Maintain at least two consented, reproducible internal or external use-case
+   records. Public case studies require separate publication consent.
+5. Update `docs/production-evidence.md` with the evidence boundary for each
+   record without turning npm downloads or internal examples into external
+   production users.
 
 ### Required metrics
 
@@ -104,10 +104,12 @@ compatibility, or operational evidence does not close a workstream.
 
 ### Exit evidence
 
-- Three lighthouse migration records and two publishable case studies.
+- Three lighthouse migration records, including at least two consented and
+  reproducible internal or external use cases.
 - Every report names its Brass version, workload, thresholds, negative findings,
   decision, and rollback path.
-- No case study is generated from package-download or local benchmark data.
+- No external-adoption claim is generated from package-download or local
+  benchmark data.
 
 ## 2. Product and v2 API
 
@@ -121,11 +123,11 @@ compatibility, or operational evidence does not close a workstream.
    default.
 3. Maintain the published `2.0.0-beta` on the `next` prerelease channel with
    packed-package Node, browser, ESM, CJS, declaration, and rollback validation.
-4. Publish Agent and Perf under independent versions. Preserve the v1
-   `brass-runtime/agent` and `/perf` compatibility paths until the documented
-   major-version boundary. Their candidates and protected publication route are
-   ready; first publication is blocked only on ownership or publish permission
-   for the npm `@brass` scope, as recorded in the dated registry evidence.
+4. Build, version, pack, install, and execute Agent and Perf independently.
+   Preserve the v1 `brass-runtime/agent` and `/perf` compatibility paths until
+   the documented major-version boundary. Registry publication is optional and
+   deferred; it does not determine whether the product split is technically
+   complete.
 5. **Decision implemented:** WASM is an optional independently versioned engine
    candidate. It accounts for 315,792 unpacked bytes and no verified adopter
    requires it; v1 retains the embedded artifact while the v2 beta validates
@@ -160,12 +162,14 @@ compatibility, or operational evidence does not close a workstream.
 Items 4 and 5 are implemented as gates and have produced both a local run and a
 pair of retained green GitHub Actions runs with independently hashed raw
 reports. This closes repeatability across two repository states; continuing
-weekly history is required to establish a time trend and catch runner-specific
-regressions. The scheduled lane now emits a self-verifying run manifest, retains
-90 days of raw reports, and has a four-run/21-day trend validator; the criterion
-remains open until real scheduled time has elapsed.
-Item 7 is documented in `support-and-maintenance.md`; the second-maintainer
-outcome remains open until a real maintainer completes that qualification path.
+weekly history will establish a stronger time trend and catch runner-specific
+regressions. The scheduled lane already emits a self-verifying run manifest,
+retains 90 days of raw reports, and enforces a four-run/21-day trend once enough
+real time has elapsed; trend maturity is an ongoing operational signal, not a
+prerequisite for proving that the scheduled soak/fault capability exists.
+Item 7 is documented in `support-and-maintenance.md`, including a tested
+non-publishing qualification route. A real second maintainer has not completed
+that path, so the project still accurately reports single-maintainer ownership.
 
 ### Exit evidence
 

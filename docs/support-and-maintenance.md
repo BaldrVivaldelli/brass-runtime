@@ -76,7 +76,11 @@ For release qualification without registry access, dispatch `release.yml` from
 `main` with `channel=stable` and `publish=false`. That path runs the stable Node
 matrix, the Node 18 compatibility smoke, and native artifact builds while both
 publisher jobs remain skipped. Manual stable publication requires the same
-dispatch with an explicit `publish=true` confirmation.
+dispatch with an explicit `publish=true` confirmation. The first completed
+qualification, [run `35547826504`](https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35547826504),
+is retained in `docs/evidence/stable-release-validation-2026-09-21.json`; its
+validator requires every Node job and native platform to succeed, both
+publishers to execute zero steps, and registry tags to remain unchanged.
 
 The release owner must verify:
 
