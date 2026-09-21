@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "kind": "stable-release-validation",
+  "recordedAt": "2026-09-21T00:34:16Z",
+  "packageVersion": "1.22.0",
+  "sourceSha": "ed023ffb993261bb9f6ecdbf9b15adf16105d75f",
+  "workflow": {
+    "name": "Release",
+    "runId": 35547826504,
+    "runUrl": "https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35547826504",
+    "event": "workflow_dispatch",
+    "branch": "main",
+    "conclusion": "success",
+    "startedAt": "2026-09-21T00:28:49Z",
+    "completedAt": "2026-09-21T00:34:16Z",
+    "dispatch": {
+      "channel": "stable",
+      "publish": false
+    }
+  },
+  "nodeValidation": {
+    "compatibilitySmoke": {
+      "18": {
+        "jobId": 106176854046,
+        "conclusion": "success"
+      }
+    },
+    "fullValidation": {
+      "20": {
+        "jobId": 106176854169,
+        "conclusion": "success"
+      },
+      "22": {
+        "jobId": 106176854232,
+        "conclusion": "success"
+      },
+      "24": {
+        "jobId": 106176854241,
+        "conclusion": "success"
+      }
+    },
+    "canonicalNode": 22,
+    "canonicalChecks": [
+      "npm run validate:boundaries",
+      "npm run validate:dependency-security",
+      "npm run validate:evidence",
+      "npm run validate:adoption-evidence",
+      "npm run validate:release-policy",
+      "npm run test:types",
+      "npm run rust:check",
+      "npm run rust:fuzz:check",
+      "npm run build",
+      "npm run validate:example:express",
+      "npm run validate:api",
+      "npm run validate:v2-map",
+      "npm run validate:wasm",
+      "npm run test:coverage",
+      "npm run validate:cjs",
+      "npm run validate:browser",
+      "npm run validate:package",
+      "npm run validate:products",
+      "npm run perf:runtime:budget",
+      "npm run benchmark:runtime:budget",
+      "npm run benchmark:runtime:primitives:budget",
+      "npm run benchmark:http:budget",
+      "npm run benchmark:observability:budget"
+    ]
+  },
+  "nativeArtifacts": [
+    {
+      "platform": "windows-x64",
+      "jobId": 106176854138,
+      "jobConclusion": "success",
+      "artifactId": 10617600889,
+      "name": "brass-native-service-Windows-X64",
+      "sizeBytes": 216837,
+      "digest": "sha256:44d73c14c64076c47a0c75a2767b7f3c9f883f5f55fce5b1541b47cdedc6cb4f",
+      "expiresAt": "2026-12-20T00:28:50Z"
+    },
+    {
+      "platform": "linux-x64",
+      "jobId": 106176854171,
+      "jobConclusion": "success",
+      "artifactId": 10617281262,
+      "name": "brass-native-service-Linux-X64",
+      "sizeBytes": 362526,
+      "digest": "sha256:90fdad81ce018c3ed0a1861a756ca662cb847630eca24757552a26425be4b314",
+      "expiresAt": "2026-12-20T00:28:50Z"
+    },
+    {
+      "platform": "macos-arm64",
+      "jobId": 106176854199,
+      "jobConclusion": "success",
+      "artifactId": 10617216370,
+      "name": "brass-native-service-macOS-ARM64",
+      "sizeBytes": 330779,
+      "digest": "sha256:183e6a4686899a7c78928186b484876afd74805d36d67e20b69eeccabcb08d9f",
+      "expiresAt": "2026-12-20T00:28:50Z"
+    }
+  ],
+  "publisherJobs": {
+    "release": {
+      "jobId": 106177651598,
+      "conclusion": "skipped",
+      "stepCount": 0
+    },
+    "v2Beta": {
+      "jobId": 106177651657,
+      "conclusion": "skipped",
+      "stepCount": 0
+    }
+  },
+  "publicationAttempted": false,
+  "registryMutation": false,
+  "registrySnapshotBefore": {
+    "latest": "1.22.0",
+    "next": "2.0.0-beta.0"
+  },
+  "registrySnapshotAfter": {
+    "latest": "1.22.0",
+    "next": "2.0.0-beta.0"
+  },
+  "decision": "stable-matrix-and-native-artifacts-passed-with-publishers-skipped",
+  "claimBoundary": "This validates release readiness without publishing a package, moving a dist-tag, or claiming an external production deployment.",
+  "reproduce": [
+    "gh run view 35547826504 --json databaseId,url,event,headBranch,headSha,status,conclusion,createdAt,startedAt,updatedAt,jobs",
+    "gh api repos/BaldrVivaldelli/brass-runtime/actions/runs/35547826504/artifacts",
+    "node scripts/check-stable-release-validation.mjs"
+  ]
+}

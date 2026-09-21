@@ -119,7 +119,8 @@ their own type/test lane and upload a package candidate without publishing it:
 The registry snapshot in
 [`evidence/product-registry-readiness-2026-09-20.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/product-registry-readiness-2026-09-20.json)
 records that the three scoped npm products do not yet exist. Their first
-publication uses `Publish Companion Product Alpha` from `main`. It requires an
+publication is currently deferred. If it is resumed later, it uses `Publish
+Companion Product Alpha` from `main`. It requires an
 exact manifest version and `npm-products` approval, checks bootstrap identity,
 runs the release and dry-run gates, rejects reused versions, publishes only to
 `alpha` with provenance, and proves `latest` did not move.
@@ -288,7 +289,12 @@ qualify as a weekly trend.
   ```
 
   The release-policy gate rejects a workflow where manual stable publication
-  does not explicitly require `publish=true`.
+  does not explicitly require `publish=true`. The first retained execution of
+  this path is [run `35547826504`](https://github.com/BaldrVivaldelli/brass-runtime/actions/runs/35547826504):
+  Node 18/20/22/24 and all three native platforms passed while both publisher
+  jobs were skipped. Its immutable job and artifact metadata is checked by
+  `npm run validate:evidence` from
+  `docs/evidence/stable-release-validation-2026-09-21.json`.
 - The publishing job is branch-locked to `main`; dispatching the stable
   workflow from `next` cannot publish the v1 package as a prerelease by mistake.
 - The `next` branch builds and retains prerelease candidates on push. Publishing
