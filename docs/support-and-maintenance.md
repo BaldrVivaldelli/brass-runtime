@@ -72,6 +72,12 @@ stable train, npm provenance, GitHub release notes, recovery, and revocation.
 CI performs the build and publication; maintainers must not publish a locally
 built tarball or share npm tokens.
 
+For release qualification without registry access, dispatch `release.yml` from
+`main` with `channel=stable` and `publish=false`. That path runs the stable Node
+matrix, the Node 18 compatibility smoke, and native artifact builds while both
+publisher jobs remain skipped. Manual stable publication requires the same
+dispatch with an explicit `publish=true` confirmation.
+
 The release owner must verify:
 
 - `npm run release:check` and the supported Node matrix are green;

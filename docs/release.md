@@ -275,8 +275,20 @@ qualify as a weekly trend.
 ## Release cadence and channels
 
 - Stable releases run from `main` on the weekly Monday release train or by an
-  explicit manual dispatch. Multiple fixes can therefore ship as one reviewed
-  release rather than producing a new version for every merge.
+  explicit manual dispatch with `channel=stable` and `publish=true`. Multiple
+  fixes can therefore ship as one reviewed release rather than producing a new
+  version for every merge.
+- A manual dispatch with `publish=false` runs the complete stable validation
+  matrix and native-artifact build but skips both publishing jobs. Use this to
+  qualify Node compatibility or release policy without contacting npm:
+
+  ```bash
+  gh workflow run release.yml --ref main \
+    -f channel=stable -f version=2.0.0-beta.0 -f publish=false
+  ```
+
+  The release-policy gate rejects a workflow where manual stable publication
+  does not explicitly require `publish=true`.
 - The publishing job is branch-locked to `main`; dispatching the stable
   workflow from `next` cannot publish the v1 package as a prerelease by mistake.
 - The `next` branch builds and retains prerelease candidates on push. Publishing
