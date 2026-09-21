@@ -72,6 +72,20 @@ describe("v2 beta readiness integrity", () => {
     expect(result.status).toBe(1);
   });
 
+  it("rejects current compatibility evidence without a successful Node 24 job", () => {
+    const changed = structuredClone(committed);
+    changed.currentCompatibilityValidation.jobs["24"] = null;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
+  it("rejects compatibility evidence that attempted publication", () => {
+    const changed = structuredClone(committed);
+    changed.currentCompatibilityValidation.publicationAttempted = true;
+    const result = validate(changed);
+    expect(result.status).toBe(1);
+  });
+
   it("checks a local candidate only when its path is explicitly requested", () => {
     const directory = mkdtempSync(path.join(tmpdir(), "brass-v2-artifact-test-"));
     temporaryDirectories.push(directory);
