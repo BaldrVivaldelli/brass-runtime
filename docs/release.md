@@ -143,9 +143,10 @@ Bootstrap run `35544680926` authenticated as `avivaldelli` but got `E403`
 reading `brass` membership. It stopped before build or publication with no
 registry mutation. The product workflow now uses only the environment-scoped
 `NPM_PRODUCT_BOOTSTRAP_TOKEN`, preventing a scoped bootstrap credential from
-breaking or broadening the stable publisher. The remaining blocker is the new
-secret plus membership or organization-read permission; scope write remains
-required.
+breaking or broadening the stable publisher. If companion publication is
+resumed, its remaining prerequisites are the new secret plus membership or
+organization-read permission; scope write remains required. These are future
+publication prerequisites, not blockers for independent packaging readiness.
 
 `npm run validate:product-publish-dry-run` reproduces all three npm dry-runs
 locally and compares package identity, exact version, and file count with the

@@ -166,6 +166,6 @@ if (failures.length > 0) {
 } else {
   console.log(
     `Product registry readiness validated (${evidence.products.map((product) => product.package).join(", ")}; ` +
-    "published: no, blockers: isolated environment secret and npm organization read access).",
+    "published: no, publication deferred; future prerequisites: isolated environment secret and npm organization read access).",
   );
 }

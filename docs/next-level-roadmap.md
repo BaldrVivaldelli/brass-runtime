@@ -4,6 +4,22 @@ This roadmap turns product maturity into three evidence-backed workstreams.
 It is intentionally outcome-based: a completed implementation without adopter,
 compatibility, or operational evidence does not close a workstream.
 
+## Verification snapshot
+
+All three original workstreams have a machine-readable closure record in
+[`next-level-readiness-2026-09-21.json`](./evidence/next-level-readiness-2026-09-21.json).
+`npm run validate:next-level-readiness` cross-checks that record against the
+three consented internal migrations, the public first-party consumer, the v2
+contract and beta evidence, independent product manifests, the stable Node and
+native release run, package budgets, coverage floors, retained stability runs,
+and support/rollback policy.
+
+This closes readiness, not every possible growth outcome. External production
+adoption remains unclaimed, scheduled history continues accumulating, release
+ownership remains single-maintainer, and registry publication of Agent, Perf,
+and Engine WASM is deferred. None of those facts invalidates the verified
+internal evidence, independent package boundaries, or operational gates.
+
 ## Current baseline
 
 - Stable v1 surfaces: runtime/core, schema, HTTP, and observability.

@@ -126,6 +126,14 @@ The stable and v2 publisher jobs were both skipped with zero executed steps;
 the `latest` and `next` registry snapshots remained unchanged. This is release-
 readiness evidence without a publication or external-production claim.
 
+The cross-workstream closure record,
+[`next-level-readiness-2026-09-21.json`](https://github.com/BaldrVivaldelli/brass-runtime/blob/main/docs/evidence/next-level-readiness-2026-09-21.json),
+links adoption, v2/product, and operational evidence without weakening their
+claim boundaries. Its validator requires at least two consented internal or
+external use cases, all 546 v1 export dispositions, the independently packaged
+Agent/Perf/Engine candidates, and the green non-publishing release matrix.
+Companion registry publication is explicitly outside that readiness decision.
+
 Future successful scheduled runs retain a self-verifying manifest and raw
 reports for 90 days. `npm run stability:trend -- <history-directory>` refuses
 manual runs, short intervals, fewer than four samples, environment/budget drift,
