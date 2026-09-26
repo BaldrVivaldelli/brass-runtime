@@ -23,13 +23,14 @@ const perfWorkflow = await readFile(new URL("../.github/workflows/perf.yml", imp
 if (packageJson.version !== packageLock.version || packageJson.version !== packageLock.packages?.[""]?.version) {
   fail("package.json and package-lock.json versions must match");
 }
-if (packageJson.engines?.node !== ">=18") fail("the stable v1 Node engine contract must be >=18");
+if (packageJson.engines?.node !== ">=20") fail("the shipped Node engine contract must be >=20");
 if (nodeSupport.schemaVersion !== 1
   || nodeSupport.source !== "https://github.com/nodejs/Release/blob/main/schedule.json"
   || JSON.stringify(nodeSupport.releaseLines?.lts) !== JSON.stringify([22, 24])
   || JSON.stringify(nodeSupport.releaseLines?.current) !== JSON.stringify([26])
   || JSON.stringify(nodeSupport.releaseLines?.eolCompatibility) !== JSON.stringify([18, 20])
-  || nodeSupport.stableV1?.engine !== packageJson.engines.node
+  || nodeSupport.stable?.engine !== packageJson.engines.node
+  || nodeSupport.stableV1?.engine !== ">=18"
   || JSON.stringify(nodeSupport.stableV1?.fullValidation) !== JSON.stringify([20, 22, 24])
   || JSON.stringify(nodeSupport.stableV1?.compatibilitySmoke) !== JSON.stringify([18])
   || JSON.stringify(nodeSupport.stableV1?.securitySupported) !== JSON.stringify([22, 24])
