@@ -22,7 +22,7 @@ npm run release:check
 - CJS compatibility validation.
 - Conditional browser bundle validation.
 - npm tarball validation for Node, browser, declaration, and WASM artifacts.
-- Installed-tarball validation for `@brass/agent`, `@brass/perf`, and
+- Installed-tarball validation for `@brass/perf` and
   `@brass/engine-wasm`, covering ESM, CJS, declarations, v1 export parity or
   ABI compatibility, real execution, and CLI startup where applicable.
 - A separate `npm run validate:v2-beta` gate builds the prospective v2 package
@@ -102,14 +102,12 @@ is editor-specific. Its promotion result is `adopt-native-search`; the default
 - HTTP client/server, schema validation, lifecycle middleware.
 - Observability and runtime health/readiness.
 - Performance profiler, budgets, history, and baselines.
-- Brass Agent CLI/library surface.
 
 ## Companion product candidates
 
 Agent, Perf, and VS Code have separate path-scoped workflows. They validate
 their own type/test lane and upload a package candidate without publishing it:
 
-- `Agent` produces the `@brass/agent` tarball.
 - `Perf` produces the `@brass/perf` tarball.
 - `Engine WASM` produces the optional `@brass/engine-wasm` tarball.
 - `VS Code` compiles the extension and produces a VSIX.

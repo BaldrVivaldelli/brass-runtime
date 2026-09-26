@@ -78,16 +78,6 @@ const surfaces = [
     },
     localRuntime: true,
   },
-  {
-    directory: "extensions/vscode-brass-agent",
-    declarations: { "devDependencies.@vscode/vsce": "^3.9.2" },
-    lockedMinimums: {
-      "@vscode/vsce": "3.9.2",
-      "fast-uri": "3.1.6",
-      "js-yaml": "4.3.2",
-      undici: "7.29.0",
-    },
-  },
 ];
 
 for (const surface of surfaces) {

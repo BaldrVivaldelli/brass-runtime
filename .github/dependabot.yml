@@ -109,23 +109,6 @@ updates:
         patterns: ["*"]
         update-types: ["minor", "patch"]
 
-  - package-ecosystem: "npm"
-    directory: "/extensions/vscode-brass-agent"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "09:30"
-      timezone: "America/Argentina/Buenos_Aires"
-    open-pull-requests-limit: 5
-    commit-message:
-      prefix: "deps(vscode)"
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
-    groups:
-      vscode-minor-patch:
-        patterns: ["*"]
-        update-types: ["minor", "patch"]
 
   # GitHub Actions (archivos en .github/workflows)
   - package-ecosystem: "github-actions"

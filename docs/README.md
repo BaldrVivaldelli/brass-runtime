@@ -26,14 +26,11 @@ Start here:
 - **[Private adopter inventory](./adopter-inventory.md)** — consent-safe workload, retention, and upgrade-lag tracking
 - **[Modules overview](./modules.md)** — map of core modules and where things live
 - **[AI context pack](./ai/PROJECT_MAP.md)** — compact project map, invariants, validation matrix, and public API notes
-- **[Agent module boundaries](./agent-boundaries.md)** — rules for keeping `brass-agent` isolated from the core runtime
-- **[Brass Agent install and configure](./agent-install-and-configure.md)** — end-to-end local setup for CLI, config, providers, and VS Code
 
 - [Agent LLM adapters](./agent-llm-adapters.md)
 - [Agent env files](./agent-env-files.md)
 - [Agent global usage and workspace discovery](./agent-global-usage.md)
 - [Agent apply mode](./agent-apply-mode.md)
-- [Brass Agent CLI](./agent-cli.md)
 - [Agent init](./agent-init.md)
 - [Agent observability](./agent-observability.md)
 - [Agent approvals](./agent-approvals.md)

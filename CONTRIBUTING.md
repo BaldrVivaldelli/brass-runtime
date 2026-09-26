@@ -34,7 +34,6 @@ smallest matching lane while iterating:
 ```bash
 npm run test:types:agent && npm run test:agent
 npm run test:types:perf && npm run test:perf
-npm run compile --prefix extensions/vscode-brass-agent
 ```
 
 Changes under `packages/agent` or `packages/perf` must preserve parity with

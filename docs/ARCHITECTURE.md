@@ -272,7 +272,7 @@ This architecture has a stable TypeScript core, schema, HTTP, and observability
 surface. The compatibility root is frozen and new APIs belong in focused
 subpaths.
 
-The Rust/WASM engine internals and Brass Agent remain experimental. Browser
+The Rust/WASM engine internals remain experimental. Browser
 builds select the TypeScript engine and exclude Node-only HTTP server/transport
 exports.
 

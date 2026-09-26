@@ -36,8 +36,6 @@ The package has several public surfaces:
 - `brass-runtime/perf`: runtime/HTTP performance profiler, A/B runtime lab,
   runtime soak profiles, memory reports, diagnostics, history/baseline store,
   and perf budgets.
-- `brass-runtime/agent`: agent library API.
-- `brass-agent`: CLI binary.
 - `brass-perf`: performance profiler CLI binary.
 
 Root exports are compatibility-first. Do not widen `src/index.ts` by default.
@@ -602,12 +600,6 @@ it usually means a constructor was not typed strictly enough.
   per-request overrides.
 - Compression must keep body/header semantics explicit.
 
-### Agent
-
-- `src/agent` may depend on runtime primitives.
-- Core runtime must not depend on agent code.
-- Workspace reads/writes go through services and permission policies.
-- Prompt/context helpers must be bounded and redaction-aware.
 
 ### WASM
 

@@ -21,12 +21,10 @@ Defined in `package.json`:
 
 CLI:
 
-- `brass-agent` -> `dist/agent/cli/main.cjs`
 - `brass-perf` -> `dist/perf/cli.cjs`
 
 Separately versioned alpha candidates:
 
-- `@brass/agent` owns independently built ESM, CJS, and `brass-agent` bundles;
   its exports and declarations retain parity with the v1 Agent surface.
 - `@brass/perf` owns independently built ESM, CJS, and `brass-perf` bundles;
   its exports and declarations retain parity with the v1 Perf surface.
@@ -336,7 +334,6 @@ When changing performance API:
 
 ## Agent export: `brass-runtime/agent`
 
-Source: `src/agent/index.ts`
 
 Primary categories:
 
@@ -357,9 +354,7 @@ Primary categories:
 
 When changing agent API:
 
-- Preserve boundaries in `docs/agent-boundaries.md`.
 - Keep CLI/node adapters separate from pure core logic.
-- Update relevant `docs/agent-*.md` files.
 
 ## Generated outputs
 

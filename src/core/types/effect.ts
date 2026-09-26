@@ -1,5 +1,5 @@
 import type { Async, RestoreInterruptibility } from "./asyncEffect";
-import { asyncFail, asyncFlatMap, asyncFold, asyncMap, asyncMapError, asyncSucceed, asyncSync } from "./asyncEffect";
+import { asyncFail, asyncFlatMap, asyncFold, asyncMap, asyncMapError, asyncSucceed, asyncSync, unit } from "./asyncEffect";
 import type { Option } from "./option";
 import { none, some } from "./option";
 
@@ -320,3 +320,41 @@ export function orElseOptional<R, E, A, R2, A2>(
 }
 
 export const end = <E>(): ZIO<unknown, Option<E>, never> => fail(none as Option<E>);
+
+/**
+ * Defers building an effect until it is interpreted.
+ *
+ * Use it whenever the description itself depends on work that must not happen
+ * at construction time, and to give each execution a fresh graph.
+ */
+export function suspend<R, E, A>(make: () => ZIO<R, E, A>): ZIO<R, E, A> {
+    return asyncFlatMap(unit<R>(), make);
+}
+
+/**
+ * Runs an effect for its side effect and keeps the original success value.
+ */
+export function tap<R, E, A, R2, E2>(
+    fa: ZIO<R, E, A>,
+    f: (a: A) => ZIO<R2, E2, unknown>
+): ZIO<R & R2, E | E2, A> {
+    return asyncFlatMap(fa, (a) => asyncMap(f(a), () => a));
+}
+
+/**
+ * Replaces the success value, discarding the original.
+ */
+export function as<R, E, A, B>(fa: ZIO<R, E, A>, value: B): ZIO<R, E, B> {
+    return asyncMap(fa, () => value);
+}
+
+/**
+ * Handles a failure by producing a replacement value rather than an effect.
+ */
+export function catchAllWith<R, E, A, B>(fa: ZIO<R, E, A>, f: (e: E) => B): ZIO<R, never, A | B> {
+    return asyncFold<R, E, A, R, never, B, R, never, A>(
+        fa,
+        (e) => asyncSucceed(f(e)) as ZIO<R, never, B>,
+        (a) => asyncSucceed(a) as ZIO<R, never, A>
+    );
+}

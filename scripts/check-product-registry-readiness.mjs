@@ -18,12 +18,10 @@ const workflow = readFileSync(
 );
 const failures = [];
 const expectedProducts = new Map([
-  ["agent", "@brass/agent"],
   ["perf", "@brass/perf"],
   ["engine-wasm", "@brass/engine-wasm"],
 ]);
 const expectedAttemptRuns = new Map([
-  ["agent", 35520793237],
   ["perf", 35520792929],
   ["engine-wasm", 35520792944],
 ]);

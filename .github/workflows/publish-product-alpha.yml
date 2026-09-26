@@ -8,7 +8,6 @@ on:
         required: true
         type: choice
         options:
-          - agent
           - perf
           - engine-wasm
       version:
@@ -63,7 +62,6 @@ jobs:
         shell: bash
         run: |
           case "$PRODUCT" in
-            agent) package_name="@brass/agent"; package_dir="./packages/agent" ;;
             perf) package_name="@brass/perf"; package_dir="./packages/perf" ;;
             engine-wasm) package_name="@brass/engine-wasm"; package_dir="./packages/engine-wasm" ;;
             *) echo "Unsupported product: $PRODUCT" >&2; exit 1 ;;

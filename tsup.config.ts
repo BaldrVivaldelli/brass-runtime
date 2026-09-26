@@ -33,8 +33,6 @@ const entry = {
   "observability/index": "src/observability/index.ts",
   "perf/index": "src/perf/index.ts",
   "perf/cli": "src/perf/cli.ts",
-  "agent/index": "src/agent/index.ts",
-  "agent/cli/main": "src/agent/cli/main.ts",
 };
 
 const base = {

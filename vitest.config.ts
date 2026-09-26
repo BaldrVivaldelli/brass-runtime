@@ -62,7 +62,6 @@ export default defineConfig({
         "src/http/**/index.ts",
         "src/observability/**/index.ts",
         "src/perf/**/index.ts",
-        "src/agent/**/index.ts",
         "src/core/runtime/engine/types.ts",
         "src/http/lifecycle/types.ts",
         "src/http/prewarm/types.ts",

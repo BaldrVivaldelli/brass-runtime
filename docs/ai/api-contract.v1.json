@@ -8,11 +8,6 @@
       "sha256": "e085a67a5ec0e2504950130fa9a184010aba8967cbdc2d6eb2694ae2c4a3d9e0",
       "exportCount": 546
     },
-    "./agent": {
-      "file": "dist/agent/index.d.ts",
-      "sha256": "4ebce38163b0889c7336e42004b2565d4cf0cc776d2923365b65a8345fa910d0",
-      "exportCount": 243
-    },
     "./core": {
       "file": "dist/core/index.d.ts",
       "sha256": "2e641b5d20cecb1b7a73c13eda2a11a646f601829bb7e88fecbff62c3967a91a",

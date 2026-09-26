@@ -11,11 +11,14 @@ import {
 } from "../next";
 
 const EXPECTED_EFFECT_OPERATIONS = [
+  "as",
   "async",
   "catchAll",
+  "catchAllWith",
   "fail",
   "flatMap",
   "fromPromiseAbortable",
+  "gen",
   "interruptible",
   "map",
   "mapError",
@@ -24,7 +27,9 @@ const EXPECTED_EFFECT_OPERATIONS = [
   "retryWithBackoff",
   "sleep",
   "succeed",
+  "suspend",
   "sync",
+  "tap",
   "timeout",
   "uninterruptible",
   "uninterruptibleMask",
@@ -35,9 +40,11 @@ describe("v2 API preview", () => {
     expect(Object.isFrozen(Effect)).toBe(true);
     expect(Object.keys(Effect).sort()).toEqual(EXPECTED_EFFECT_OPERATIONS);
 
-    const effect = Effect.flatMap(Effect.succeed(20), (value) =>
-      Effect.map(Effect.succeed(22), (other) => value + other),
-    );
+    const effect = Effect.gen(function* ($) {
+      const value = yield* $(Effect.succeed(20));
+      const other = yield* $(Effect.succeed(22));
+      return value + other;
+    });
 
     await expect(runPromise(effect)).resolves.toBe(42);
   });

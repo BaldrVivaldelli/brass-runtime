@@ -10,7 +10,7 @@ ship a small, dependable runtime.
 - `brass-runtime/next` is the experimental candidate for the next major root.
 - Agent, Perf, native editor search, and VS Code integration evolve as separate
   products even while they share this repository.
-- `@brass/agent` and `@brass/perf` are alpha, independently versioned adoption
+- `@brass/perf` is an alpha, independently versioned adoption
   packages. Their v1 export/type parity and executable behavior are tested from
   packed tarballs.
 - Rust/WASM internals are experimental behind a versioned ABI.

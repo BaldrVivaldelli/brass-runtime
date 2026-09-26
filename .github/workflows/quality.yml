@@ -2,16 +2,43 @@ name: Quality
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: quality-${{ github.event.pull_request.number }}
+  group: quality-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
-  validate:
+  # Fast lane. Everything here catches a regression a reviewer would otherwise
+  # miss, and nothing here needs a Rust toolchain. Keep it under a few minutes.
+  check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - run: npm run validate:boundaries
+      - run: npm run validate:dependency-security
+      - run: npm run test:types
+      - run: npm run test:coverage
+      - run: npm run validate:api
+      - run: npm run validate:v2-map
+
+  # Packaging and cross-condition validation. This needs the WASM toolchain, so
+  # it runs on main rather than on every push to a pull request. The release
+  # workflow re-runs all of it plus the evidence and budget gates.
+  package:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
 
     steps:
@@ -28,19 +55,10 @@ jobs:
         run: cargo install wasm-pack --version 0.14.0 --locked
 
       - run: npm ci
-      - run: npm run validate:boundaries
-      - run: npm run validate:dependency-security
-      - run: npm run validate:evidence
-      - run: npm run validate:adoption-evidence
-      - run: npm run validate:release-policy
-      - run: npm run test:types
       - run: npm run rust:check
       - run: npm run build
-      - run: npm run validate:example:express
-      - run: npm run validate:api
-      - run: npm run validate:v2-map
       - run: npm run validate:wasm
-      - run: npm run test:coverage
+      - run: npm run validate:example:express
       - run: npm run validate:cjs
       - run: npm run validate:browser
       - run: npm run validate:package

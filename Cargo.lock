@@ -11,15 +11,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "brass-native-service"
-version = "0.1.0"
-dependencies = [
- "brass-engine-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "brass-runtime-wasm-engine"
 version = "0.2.0"
 dependencies = [
