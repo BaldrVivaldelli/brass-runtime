@@ -44,7 +44,6 @@ Product-level lanes can be run independently before the full release gate:
 
 ```bash
 npm run test:types:runtime && npm run test:runtime
-npm run test:types:agent && npm run test:agent
 npm run test:types:perf && npm run test:perf
 ```
 

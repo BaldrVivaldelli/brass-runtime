@@ -52,7 +52,6 @@ try {
   assertBetaPackage(betaPack.report, version);
 
   run(npmCommand(), ["run", "build:products"], root);
-  const agentPack = pack(path.join(root, "packages", "agent"), productPacks).tarball;
   const perfPack = pack(path.join(root, "packages", "perf"), productPacks).tarball;
   const enginePack = pack(path.join(root, "packages", "engine-wasm"), productPacks).tarball;
 
@@ -60,7 +59,7 @@ try {
     path.join(consumer, "package.json"),
     `${JSON.stringify({ name: "brass-v2-beta-consumer", private: true, type: "module" }, null, 2)}\n`,
   );
-  install([betaPack.tarball, agentPack, perfPack]);
+  install([betaPack.tarball, perfPack]);
 
   await validateBrowserConditions(consumer);
   validateTypes(consumer);
@@ -244,10 +243,9 @@ function validateTypes(consumerDirectory) {
       'import { succeed } from "brass-runtime/v1";',
       'import { Scope } from "brass-runtime/core";',
       'import { httpClient } from "brass-runtime/http";',
-      'import { runAgent } from "@brass/agent";',
       'import { runBrassPerformanceProfile } from "@brass/perf";',
       "const effect = Effect.succeed(42);",
-      "void [Runtime, runPromise, succeed, Scope, httpClient, runAgent, runBrassPerformanceProfile, effect];",
+      "void [Runtime, runPromise, succeed, Scope, httpClient, runBrassPerformanceProfile, effect];",
     ].join("\n"),
   );
   writeFileSync(
@@ -279,14 +277,13 @@ function validateEsmWithoutWasm(consumerDirectory) {
       'import * as core from "brass-runtime/core";',
       'import { httpClient } from "brass-runtime/http";',
       'import * as observability from "brass-runtime/observability";',
-      'import { goalForAgentPreset } from "@brass/agent";',
       'import { makePerfRecorder } from "@brass/perf";',
       "const answer = await brass.runPromise(brass.Effect.map(brass.Effect.succeed(41), (value) => value + 1));",
       'if (answer !== 42) throw new Error("v2 root execution failed");',
       'if (JSON.stringify(Object.keys(brass).sort()) !== JSON.stringify(Object.keys(next).sort())) throw new Error("root/next drift");',
       'if (typeof v1.succeed !== "function" || typeof core.Runtime !== "function") throw new Error("v1 compatibility failed");',
       'if (typeof httpClient !== "function" || Object.keys(observability).length === 0) throw new Error("product surface failed");',
-      'if (goalForAgentPreset("inspect").length === 0 || makePerfRecorder().mark("beta").name !== "beta") throw new Error("companion product failed");',
+      'if (makePerfRecorder().mark("beta").name !== "beta") throw new Error("companion product failed");',
       'const auto = new brass.Runtime({ env: {}, engine: "auto" });',
       'if (auto.diagnostics().engine !== "ts" || !auto.diagnostics().fallbackUsed) throw new Error("missing-WASM fallback failed");',
       "let strictFailed = false;",
@@ -306,14 +303,13 @@ function validateCjsWithoutWasm(consumerDirectory) {
       'const next = require("brass-runtime/next");',
       'const v1 = require("brass-runtime/v1");',
       'const core = require("brass-runtime/core");',
-      'const agent = require("@brass/agent");',
       'const perf = require("@brass/perf");',
       "async function main() {",
       "  const answer = await brass.runPromise(brass.Effect.succeed(42));",
       '  if (answer !== 42) throw new Error("v2 CJS execution failed");',
       '  if (JSON.stringify(Object.keys(brass).sort()) !== JSON.stringify(Object.keys(next).sort())) throw new Error("CJS root/next drift");',
       '  if (typeof v1.succeed !== "function" || typeof core.Runtime !== "function") throw new Error("CJS v1 compatibility failed");',
-      '  if (agent.goalForAgentPreset("inspect").length === 0 || perf.makePerfRecorder().mark("beta").name !== "beta") throw new Error("CJS companion product failed");',
+      '  if (perf.makePerfRecorder().mark("beta").name !== "beta") throw new Error("CJS companion product failed");',
       "}",
       "main().catch((error) => { console.error(error); process.exitCode = 1; });",
     ].join("\n"),
