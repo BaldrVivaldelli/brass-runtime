@@ -15,7 +15,7 @@ concurrency:
 jobs:
   # Fast lane. Everything here catches a regression a reviewer would otherwise
   # miss, and nothing here needs a Rust toolchain. Keep it under a few minutes.
-  check:
+  validate:
     runs-on: ubuntu-latest
 
     steps:
