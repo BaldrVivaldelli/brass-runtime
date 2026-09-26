@@ -637,19 +637,28 @@ const result = await Stream
 
 | Import | Purpose |
 |--------|---------|
-| `brass-runtime` | Core runtime: effects, fibers, scheduler, streams, layers |
-| `brass-runtime/core` | Stable core surface (preferred for new code) |
+| `brass-runtime` | The small v2 API: `Effect`, `pipe`, `Runtime`, `Scope`, `Layer`, `Resource`, `Schedule`, `Stream` |
+| `brass-runtime/next` | Alias of the root, kept so preview code keeps resolving |
+| `brass-runtime/v1` | The frozen v1 surface, as a compatibility bridge |
+| `brass-runtime/core` | Full core surface: effects, fibers, scheduler, streams, layers |
 | `brass-runtime/http` | Default HTTP client factory, lifecycle middleware, compression, batching, prewarm, adaptive limiter |
 | `brass-runtime/http/testing` | Dependency-free mock clients, mock fetch, response factories, and effect runner helpers |
 | `brass-runtime/schema` | Dependency-free runtime schema DSL with type inference |
 | `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
-| `brass-runtime/perf` | Runtime, HTTP, observability, memory, and baseline performance profiler |
-| `@brass/perf` | Independently built Perf candidate with v1 export/type parity |
+| `@brass/perf` | Performance profiler, installed separately. CLI: `brass-perf` |
+| `@brass/engine-wasm` | Optional WASM engine, installed separately |
 
-The `brass-runtime/perf` path remains supported through v1. `@brass/perf` is a
-release-candidate package, not an assertion that the npm namespace has already
-been published. Its CI artifact installs next to `brass-runtime`.
-CLI: `brass-perf`.
+The root is the small v2 API. Code written against v1 keeps working by
+importing from `brass-runtime/v1`, or from `brass-runtime/core` for the full
+surface; [the migration guide](./docs/migration-v1-to-v2.md) maps every symbol.
+
+The performance profiler and the WASM engine are no longer bundled into this
+tarball. Install them alongside it when you need them:
+
+```bash
+npm i -D @brass/perf
+npm i @brass/engine-wasm   # only if you request engine: "wasm"
+```
 
 ### Platform support
 

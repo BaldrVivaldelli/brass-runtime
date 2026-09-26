@@ -1,44 +1,24 @@
 import { defineConfig } from "tsup";
 import type { Plugin } from "esbuild";
-import { cpSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
-function copyWasmAssets() {
-  const root = process.cwd();
-  const src = path.join(root, "wasm", "pkg");
-
-  if (!existsSync(src)) {
-    throw new Error("Missing wasm/pkg. Run `npm run build:wasm` before `tsup`.");
-  }
-
-  const distDest = path.join(root, "dist", "wasm", "pkg");
-
-  mkdirSync(distDest, { recursive: true });
-  cpSync(src, distDest, {
-    recursive: true,
-    // Root wasm/pkg needs this override for npm packing. The dist copy keeps
-    // wasm-pack's .gitignore so the tarball does not contain duplicate binaries.
-    filter: (source) => path.basename(source) !== ".npmignore",
-  });
-  writeFileSync(path.join(distDest, ".npmignore"), "*\n", "utf8");
-}
-
+// The package root is the small v2 facade. `/v1` is the explicit compatibility
+// bridge, and the WASM engine installs separately as @brass/engine-wasm rather
+// than shipping inside this tarball.
 const entry = {
-  index: "src/index.ts",
-  next: "src/next.ts",
+  index: "src/next.ts",
+  "v1/index": "src/index.ts",
   "core/index": "src/core/index.ts",
   "http/index": "src/http/index.ts",
   "http/testing": "src/http/testing.ts",
   "schema/index": "src/schema/index.ts",
   "observability/index": "src/observability/index.ts",
-  "perf/index": "src/perf/index.ts",
-  "perf/cli": "src/perf/cli.ts",
 };
 
 const base = {
   entry,
   platform: "node" as const,
-  target: "node18" as const,
+  target: "node20" as const,
   splitting: true,
   sourcemap: false,
   outDir: "dist",
@@ -84,14 +64,11 @@ export default defineConfig([
     outExtension() {
       return { js: ".mjs" };
     },
-    onSuccess: async () => {
-      copyWasmAssets();
-    },
   },
   {
     entry: {
-      "browser/index": "src/index.ts",
-      "browser/next": "src/next.ts",
+      "browser/index": "src/next.ts",
+      "browser/v1/index": "src/index.ts",
       "browser/core/index": "src/core/index.ts",
       "browser/http/index": "src/http/browser.ts",
       "browser/observability/index": "src/observability/index.ts",

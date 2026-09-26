@@ -218,10 +218,10 @@ Do not commit that local history unless explicitly requested.
 
 The repo intentionally contains multiple products:
 
-- Runtime package exported at `brass-runtime`.
+- Runtime package exported at `brass-runtime` (the small v2 API at the root, with the frozen v1 surface at `brass-runtime/v1`).
 - HTTP subpath exported at `brass-runtime/http`.
 - Schema subpath exported at `brass-runtime/schema`.
-- Perf subpath and CLI exported at `brass-runtime/perf` and `brass-perf`.
+- Perf ships separately as `@brass/perf` with the `brass-perf` CLI.
 - Rust/WASM engine sources under `crates/`.
 
 When a change touches more than one product, update docs and validation notes in
