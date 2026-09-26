@@ -3,25 +3,25 @@
   "description": "Exhaustive generated disposition for every brass-runtime v1 root export before v2 promotion.",
   "generatedFrom": {
     "v1Root": {
-      "file": "dist/index.d.ts",
-      "sha256": "e085a67a5ec0e2504950130fa9a184010aba8967cbdc2d6eb2694ae2c4a3d9e0"
+      "file": "dist/v1/index.d.ts",
+      "sha256": "115a44f35c34cc38d6afdff137f7109161f5f7c1e3c4b60f4aafcd1c8fc7982e"
     },
     "v1Core": {
       "file": "dist/core/index.d.ts",
-      "sha256": "2e641b5d20cecb1b7a73c13eda2a11a646f601829bb7e88fecbff62c3967a91a"
+      "sha256": "a99a9cabb976d1664a0d8b360e87049cd64760d0ca6e744198ed6615b6d19736"
     },
     "v2Preview": {
-      "file": "dist/next.d.ts",
-      "sha256": "312e7beeefaf242db380cbb1d0662ea549809c79e8e6fcd9cc7f248afeb4038e"
+      "file": "dist/index.d.ts",
+      "sha256": "7399918b4d10a6b3d507902aadfc3fbad8917a2fffbaebce44e3c04c3ee278e2"
     }
   },
   "summary": {
-    "totalV1RootExports": 546,
-    "totalV2PreviewExports": 34,
+    "totalV1RootExports": 556,
+    "totalV2PreviewExports": 38,
     "dispositions": {
-      "v1-compatibility-subpath": 413,
+      "v1-compatibility-subpath": 419,
       "v2-namespace": 103,
-      "v2-direct": 30
+      "v2-direct": 34
     },
     "uncovered": 0
   },
@@ -85,6 +85,11 @@
       "kind": "value",
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#applyFused"
+    },
+    "as": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#as"
     },
     "assertAbiWordLimit": {
       "kind": "value",
@@ -255,6 +260,11 @@
       "kind": "value",
       "disposition": "v2-namespace",
       "target": "brass-runtime/next#Effect.catchAll"
+    },
+    "catchAllWith": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#catchAllWith"
     },
     "catchTag": {
       "kind": "value",
@@ -476,6 +486,16 @@
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#dropStream"
     },
+    "dual": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#dual"
+    },
+    "DualGuard": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#DualGuard"
+    },
     "dumpAllFibers": {
       "kind": "value",
       "disposition": "v1-compatibility-subpath",
@@ -490,6 +510,11 @@
       "kind": "type",
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#EffectFailure"
+    },
+    "EffectGenAdapter": {
+      "kind": "type",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#EffectGenAdapter"
     },
     "EffectSuccess": {
       "kind": "type",
@@ -880,6 +905,16 @@
       "kind": "type",
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#Gauge"
+    },
+    "gen": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#gen"
+    },
+    "GenEffect": {
+      "kind": "value-and-type",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#GenEffect"
     },
     "getBenchmarkBudget": {
       "kind": "value",
@@ -1580,6 +1615,11 @@
       "kind": "value",
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#orElseOptional"
+    },
+    "pipe": {
+      "kind": "value",
+      "disposition": "v2-direct",
+      "target": "brass-runtime/next#pipe"
     },
     "Pipeline": {
       "kind": "value",
@@ -2401,6 +2441,11 @@
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#SupervisorStrategy"
     },
+    "suspend": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#suspend"
+    },
     "sync": {
       "kind": "value",
       "disposition": "v2-namespace",
@@ -2435,6 +2480,11 @@
       "kind": "value",
       "disposition": "v1-compatibility-subpath",
       "target": "brass-runtime/core#takeStream"
+    },
+    "tap": {
+      "kind": "value",
+      "disposition": "v1-compatibility-subpath",
+      "target": "brass-runtime/core#tap"
     },
     "tapDecision": {
       "kind": "value",

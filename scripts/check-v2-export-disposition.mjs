@@ -8,10 +8,11 @@ import { V2_NAMESPACE_MAPPINGS } from "./v2-export-disposition-config.mjs";
 
 const root = process.cwd();
 const outputPath = path.join(root, "docs", "v1-to-v2-export-map.json");
+// The package root is the v2 facade now; the frozen v1 surface lives at /v1.
 const declarations = {
-  v1Root: path.join(root, "dist", "index.d.ts"),
+  v1Root: path.join(root, "dist", "v1", "index.d.ts"),
   v1Core: path.join(root, "dist", "core", "index.d.ts"),
-  v2Preview: path.join(root, "dist", "next.d.ts"),
+  v2Preview: path.join(root, "dist", "index.d.ts"),
 };
 const write = process.argv.includes("--write");
 

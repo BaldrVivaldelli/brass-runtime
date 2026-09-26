@@ -7,15 +7,12 @@ const require = createRequire(import.meta.url);
 
 const requiredFiles = [
   "dist/index.cjs",
-  "dist/next.cjs",
+  "dist/v1/index.cjs",
+  "dist/core/index.cjs",
   "dist/http/index.cjs",
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
   "dist/observability/index.cjs",
-  "dist/perf/index.cjs",
-  "dist/perf/cli.cjs",
-  "wasm/pkg/brass_runtime_wasm_engine.js",
-  "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
 ];
 
 for (const file of requiredFiles) {
@@ -28,12 +25,12 @@ for (const file of requiredFiles) {
 
 const cjsFiles = [
   "dist/index.cjs",
-  "dist/next.cjs",
+  "dist/v1/index.cjs",
+  "dist/core/index.cjs",
   "dist/http/index.cjs",
   "dist/http/testing.cjs",
   "dist/schema/index.cjs",
   "dist/observability/index.cjs",
-  "dist/perf/index.cjs",
 ];
 
 for (const file of cjsFiles) {
@@ -50,21 +47,25 @@ for (const file of cjsFiles) {
 }
 
 try {
-  const next = require(path.join(root, "dist/next.cjs"));
+  // The root is the small v2 facade; `/next` is kept as an alias of it.
+  const root2 = require(path.join(root, "dist/index.cjs"));
 
-  if (!next.Effect || Object.keys(next).length > 40) {
-    throw new Error("Invalid brass-runtime/next surface");
+  if (!root2.Effect || typeof root2.pipe !== "function" || Object.keys(root2).length > 40) {
+    throw new Error("Invalid brass-runtime root surface");
+  }
+  if (typeof root2.Effect.gen !== "function") {
+    throw new Error("Effect.gen missing from the root surface");
   }
 
-  console.log("✅ Small v2 preview surface loads correctly from CJS");
+  console.log("✅ Small v2 root surface loads correctly from CJS");
 } catch (error) {
-  console.error("❌ v2 preview CJS validation failed");
+  console.error("❌ v2 root CJS validation failed");
   console.error(error);
   process.exitCode = 1;
 }
 
 try {
-  const brass = require(path.join(root, "dist/index.cjs"));
+  const brass = require(path.join(root, "dist/v1/index.cjs"));
 
   if (!brass.Runtime) {
     throw new Error("Runtime export not found");

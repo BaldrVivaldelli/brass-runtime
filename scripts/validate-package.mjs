@@ -12,25 +12,32 @@ const required = [
   "dist/index.cjs",
   "dist/index.mjs",
   "dist/index.d.ts",
-  "dist/next.cjs",
-  "dist/next.mjs",
-  "dist/next.d.ts",
+  "dist/v1/index.cjs",
+  "dist/v1/index.mjs",
+  "dist/v1/index.d.ts",
   "dist/browser/index.mjs",
-  "dist/browser/next.mjs",
+  "dist/browser/v1/index.mjs",
   "dist/browser/core/index.mjs",
   "dist/browser/http/index.mjs",
   "dist/browser/observability/index.mjs",
   "docs/migration-v1-to-v2.md",
   "docs/production-evidence.md",
   "docs/support-and-maintenance.md",
-  "wasm/pkg/brass_runtime_wasm_engine.js",
-  "wasm/pkg/brass_runtime_wasm_engine_bg.wasm",
-  "wasm/pkg/brass-runtime-build.json",
 ];
 const missing = required.filter((entry) => !paths.has(entry));
 
 if (missing.length > 0) {
   console.error(`Package is missing required artifacts: ${missing.join(", ")}`);
+  process.exit(1);
+}
+
+const embeddedWasm = packageFiles
+  .map((file) => file.path)
+  .filter((path) => path.startsWith("wasm/"));
+if (embeddedWasm.length > 0) {
+  console.error(
+    `Package embeds the WASM engine, which installs separately as @brass/engine-wasm: ${embeddedWasm.join(", ")}`,
+  );
   process.exit(1);
 }
 
@@ -54,9 +61,7 @@ const repositoryOnlyDocs = [
   "docs/adr/",
   "docs/ai/",
   "docs/case-studies/",
-  "docs/agent-release-readiness.md",
   "docs/native-roadmap-traceability.md",
-  "docs/native-search-pilot-decision.md",
   "docs/next-level-roadmap.md",
 ];
 const publishedRepositoryOnlyDocs = packageFiles
