@@ -1,21 +1,13 @@
 # API v2 preview
 
-`brass-runtime/next` is the additive preview of the future v2 root API. It lets
-applications exercise a smaller facade without breaking the v1 compatibility
-surface. The preview is experimental until a major release promotes it.
+The v2 API is the package root. `brass-runtime/next` is kept as an alias so
+preview code keeps resolving, and the frozen v1 surface moved to
+`brass-runtime/v1`. The package declares Node `>=20` and is validated on Node
+20, 22, and 24: Node 20 is compatibility-only because it is upstream EOL, while
+Node 22 and 24 are the security-supported LTS lines.
 
-The installable beta candidate promotes that same facade to the package root,
-keeps it aliased at `/next`, and moves the frozen root compatibility surface to
-`/v1`. It declares Node `>=20` and is validated on Node 20, 22, and 24. Node 20
-is compatibility-only because it is upstream EOL; Node 22 and 24 are the
-security-supported LTS lines. Build the candidate locally with:
-
-```bash
-npm run validate:v2-beta
-```
-
-The command leaves a validated `2.0.0-beta.0` tarball under
-`artifacts/v2-beta/`. It does not publish anything.
+The performance profiler and the WASM engine are separate installs
+(`@brass/perf`, `@brass/engine-wasm`) rather than embedded payloads.
 
 ## Contract
 
@@ -103,7 +95,7 @@ The step-by-step and rollback path is in
 
 ## Promotion gates
 
-Before promotion to the v2 root:
+These were the conditions for promoting the facade to the root, and all of them hold:
 
 1. The runtime value export count stays at or below 40.
 2. The exact value surface and generated declaration contract are release-gated.

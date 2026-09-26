@@ -28,10 +28,7 @@ for (const product of products) {
   }
 }
 
-const requiredRuntimeFiles = [
-  "dist/index.cjs",
-  ...(products.includes("perf") ? ["dist/perf/index.cjs"] : []),
-];
+const requiredRuntimeFiles = ["dist/index.cjs"];
 for (const required of requiredRuntimeFiles) {
   try {
     readFileSync(path.join(root, required));
@@ -82,11 +79,8 @@ try {
     if (product === "engine-wasm") {
       return [
         'const engineWasmPackage = await import("@brass/engine-wasm");',
-        'const engineWasmLegacy = await import("brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js");',
         "const EngineVm = engineWasmPackage.BrassWasmVm ?? engineWasmPackage.default?.BrassWasmVm;",
-        "const LegacyVm = engineWasmLegacy.BrassWasmVm ?? engineWasmLegacy.default?.BrassWasmVm;",
         'if (typeof EngineVm !== "function") throw new Error("Missing BrassWasmVm ESM export");',
-        'if (typeof LegacyVm !== "function") throw new Error("Missing embedded BrassWasmVm ESM export");',
         "const engineVm = new EngineVm();",
         'if (engineVm.abi_version() !== 1) throw new Error("Unexpected WASM ABI version");',
         "engineVm.free();",
@@ -96,10 +90,7 @@ try {
     const behavior = `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf ESM behavior smoke failed");`;
     return [
       `const ${product}Package = await import("@brass/${product}");`,
-      `const ${product}Legacy = await import("brass-runtime/${product}");`,
       `if (typeof ${product}Package.${symbol} !== "function") throw new Error("Missing ${symbol}");`,
-      `if (JSON.stringify(Object.keys(${product}Package).sort()) !== JSON.stringify(Object.keys(${product}Legacy).sort())) throw new Error("ESM export parity mismatch for ${product}");`,
-      `if (${product}Package.${symbol} === ${product}Legacy.${symbol}) throw new Error("ESM ${product} package unexpectedly forwards its implementation");`,
       behavior,
     ].join("\n");
   });
@@ -120,9 +111,7 @@ try {
     if (product === "engine-wasm") {
       return [
         'const engineWasmPackage = require("@brass/engine-wasm");',
-        'const engineWasmLegacy = require("brass-runtime/wasm/pkg/brass_runtime_wasm_engine.js");',
         'if (typeof engineWasmPackage.BrassWasmVm !== "function") throw new Error("Missing BrassWasmVm CJS export");',
-        'if (typeof engineWasmLegacy.BrassWasmVm !== "function") throw new Error("Missing embedded BrassWasmVm CJS export");',
         "const engineVm = new engineWasmPackage.BrassWasmVm();",
         'if (engineVm.abi_version() !== 1) throw new Error("Unexpected WASM ABI version");',
         "engineVm.free();",
@@ -134,10 +123,7 @@ try {
     const behavior = `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf CJS behavior smoke failed");`;
     return [
       `const ${product}Package = require("@brass/${product}");`,
-      `const ${product}Legacy = require("brass-runtime/${product}");`,
       `if (typeof ${product}Package.${symbol} !== "function") throw new Error("Missing ${symbol}");`,
-      `if (JSON.stringify(Object.keys(${product}Package).sort()) !== JSON.stringify(Object.keys(${product}Legacy).sort())) throw new Error("CJS export parity mismatch for ${product}");`,
-      `if (${product}Package.${symbol} === ${product}Legacy.${symbol}) throw new Error("CJS ${product} package unexpectedly forwards its implementation");`,
       behavior,
     ].join("\n");
   });

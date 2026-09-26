@@ -9,7 +9,7 @@
   "types": "./dist/index.d.ts",
   "sideEffects": false,
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "exports": {
     ".": {
@@ -17,6 +17,24 @@
       "browser": "./dist/browser/index.mjs",
       "import": "./dist/index.mjs",
       "require": "./dist/index.cjs"
+    },
+    "./next": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/browser/index.mjs",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    },
+    "./v1": {
+      "types": "./dist/v1/index.d.ts",
+      "browser": "./dist/browser/v1/index.mjs",
+      "import": "./dist/v1/index.mjs",
+      "require": "./dist/v1/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core/index.d.ts",
+      "browser": "./dist/browser/core/index.mjs",
+      "import": "./dist/core/index.mjs",
+      "require": "./dist/core/index.cjs"
     },
     "./http": {
       "types": "./dist/http/index.d.ts",
@@ -34,43 +52,22 @@
       "import": "./dist/schema/index.mjs",
       "require": "./dist/schema/index.cjs"
     },
-    "./core": {
-      "types": "./dist/core/index.d.ts",
-      "browser": "./dist/browser/core/index.mjs",
-      "import": "./dist/core/index.mjs",
-      "require": "./dist/core/index.cjs"
-    },
-    "./next": {
-      "types": "./dist/next.d.ts",
-      "browser": "./dist/browser/next.mjs",
-      "import": "./dist/next.mjs",
-      "require": "./dist/next.cjs"
-    },
     "./observability": {
       "types": "./dist/observability/index.d.ts",
       "browser": "./dist/browser/observability/index.mjs",
       "import": "./dist/observability/index.mjs",
       "require": "./dist/observability/index.cjs"
     },
-    "./perf": {
-      "types": "./dist/perf/index.d.ts",
-      "import": "./dist/perf/index.mjs",
-      "require": "./dist/perf/index.cjs"
-    },
-    "./package.json": "./package.json",
-    "./wasm/pkg/brass_runtime_wasm_engine.js": "./wasm/pkg/brass_runtime_wasm_engine.js",
-    "./wasm/pkg/brass_runtime_wasm_engine_bg.wasm": "./wasm/pkg/brass_runtime_wasm_engine_bg.wasm"
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
-    "wasm/pkg",
+    "docs",
     "README.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "GOVERNANCE.md",
-    "docs",
-    "LICENSE",
-    "package.json"
+    "LICENSE"
   ],
   "keywords": [
     "runtime",
@@ -215,7 +212,12 @@
     "url": "https://github.com/BaldrVivaldelli/brass-runtime/issues"
   },
   "homepage": "https://github.com/BaldrVivaldelli/brass-runtime#readme",
-  "bin": {
-    "brass-perf": "dist/perf/cli.cjs"
+  "peerDependencies": {
+    "@brass/engine-wasm": ">=0.1.0-alpha.0 <1"
+  },
+  "peerDependenciesMeta": {
+    "@brass/engine-wasm": {
+      "optional": true
+    }
   }
 }

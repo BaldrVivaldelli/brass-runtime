@@ -52,6 +52,11 @@ automated `npm run validate:boundaries` gate enforces the important absences:
    [BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent)
    with its git history, consuming `brass-runtime` as a peer. The v1 `/agent`
    subpath and the `brass-agent` bin are removed in 2.0; v1.x keeps them.
+9. **Done:** promote the v2 package shape to the published package. The root is
+   the small v2 facade, `/next` aliases it, the frozen v1 surface moved to
+   `/v1`, and the profiler and WASM engine install separately as `@brass/perf`
+   and `@brass/engine-wasm` instead of shipping inside the tarball. One build
+   and one publish route now produce what `latest` serves.
 
 The v1 compatibility package no longer produces an unused second ESM build
 with `.js` extensions. All public Node imports already resolve to `.mjs`, all

@@ -20,7 +20,8 @@ const evidencePath = path.resolve(
 );
 const evidence = JSON.parse(readFileSync(evidencePath, "utf8"));
 const packageJson = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
-const budget = JSON.parse(readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8")).v2Target;
+// The main package now ships the v2 shape, so its ceiling is the budget maximum.
+const budget = JSON.parse(readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8")).maximum;
 const releaseEntrypoint = readFileSync(path.join(root, ".github", "workflows", "release.yml"), "utf8");
 const publisher = readFileSync(path.join(root, ".github", "workflows", "publish-v2-beta.yml"), "utf8");
 const failures = [];

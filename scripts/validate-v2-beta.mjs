@@ -170,7 +170,7 @@ function copyDocumentation(destination) {
 
 function assertBetaPackage(report, candidateVersion) {
   const budget = JSON.parse(readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8"));
-  const target = budget.v2Target;
+  const target = budget.maximum;
   const failures = [];
   if (report.size > target.compressedBytes) failures.push(`compressed ${report.size} > ${target.compressedBytes}`);
   if (report.unpackedSize > target.unpackedBytes) failures.push(`unpacked ${report.unpackedSize} > ${target.unpackedBytes}`);

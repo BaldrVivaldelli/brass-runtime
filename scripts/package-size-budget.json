@@ -1,28 +1,18 @@
 {
   "schemaVersion": 1,
-  "baselineDate": "2026-09-20",
-  "description": "Regression ceiling for the v1 compatibility package after removing duplicate ESM output and keeping repository-only operational, planning, and contributor documentation out of the tarball while retaining linked consumer documentation.",
+  "baselineDate": "2026-09-26",
+  "description": "Regression ceiling for the v2 package. The root is the small v2 facade, /v1 is the compatibility bridge, and the WASM engine installs separately as @brass/engine-wasm, so the wasm group must stay at zero. Measured at 138 files, 737808 compressed and 3336362 unpacked bytes; the ceilings leave room for growth without hiding a regression.",
   "maximum": {
-    "compressedBytes": 1150000,
-    "unpackedBytes": 4875000,
-    "fileCount": 220,
+    "compressedBytes": 850000,
+    "unpackedBytes": 3800000,
+    "fileCount": 170,
     "groups": {
-      "dist": 4050000,
-      "docs": 550000,
-      "wasm": 330000
+      "dist": 3300000,
+      "docs": 450000,
+      "wasm": 0
     }
   },
-  "v2Target": {
-    "compressedBytes": 900000,
-    "unpackedBytes": 4000000,
-    "fileCount": 180
-  },
   "productTargets": {
-    "agent": {
-      "compressedBytes": 300000,
-      "unpackedBytes": 1300000,
-      "fileCount": 10
-    },
     "perf": {
       "compressedBytes": 100000,
       "unpackedBytes": 450000,
