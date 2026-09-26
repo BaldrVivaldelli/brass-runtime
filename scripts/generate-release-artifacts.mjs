@@ -121,14 +121,6 @@ function discoverArtifacts() {
     resolve(root, "wasm/pkg/brass_runtime_wasm_engine.js"),
     resolve(root, "wasm/pkg/brass_runtime_wasm_engine_bg.wasm"),
   ];
-  collectFiles(resolve(root, "native"), candidates);
-  if (!existsSync(resolve(root, "native"))) {
-    candidates.push(resolve(
-      root,
-      "target/release",
-      process.platform === "win32" ? "brass-native-service.exe" : "brass-native-service",
-    ));
-  }
   for (const name of readdirSync(root)) {
     if (name.endsWith(".tgz")) candidates.push(resolve(root, name));
   }
