@@ -19,18 +19,17 @@ const productSizeBudgets = JSON.parse(
   readFileSync(path.join(root, "scripts", "package-size-budget.json"), "utf8"),
 ).productTargets;
 const requested = process.argv[2];
-const products = requested ? [requested] : ["agent", "perf", "engine-wasm"];
-const supported = new Set(["agent", "perf", "engine-wasm"]);
+const products = requested ? [requested] : ["perf", "engine-wasm"];
+const supported = new Set(["perf", "engine-wasm"]);
 
 for (const product of products) {
   if (!supported.has(product)) {
-    throw new Error(`Unknown product '${product}'. Expected agent, perf, or engine-wasm.`);
+    throw new Error(`Unknown product '${product}'. Expected perf or engine-wasm.`);
   }
 }
 
 const requiredRuntimeFiles = [
   "dist/index.cjs",
-  ...(products.includes("agent") ? ["dist/agent/index.cjs"] : []),
   ...(products.includes("perf") ? ["dist/perf/index.cjs"] : []),
 ];
 for (const required of requiredRuntimeFiles) {
@@ -93,10 +92,8 @@ try {
         "engineVm.free();",
       ].join("\n");
     }
-    const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
-    const behavior = product === "agent"
-      ? `if (${product}Package.goalForAgentPreset("inspect").length === 0) throw new Error("Agent ESM behavior smoke failed");`
-      : `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf ESM behavior smoke failed");`;
+    const symbol = "runBrassPerformanceProfile";
+    const behavior = `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf ESM behavior smoke failed");`;
     return [
       `const ${product}Package = await import("@brass/${product}");`,
       `const ${product}Legacy = await import("brass-runtime/${product}");`,
@@ -133,10 +130,8 @@ try {
         'if (strictWasmRuntime.diagnostics().engine !== "wasm") throw new Error("Runtime did not load @brass/engine-wasm");',
       ].join("\n");
     }
-    const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
-    const behavior = product === "agent"
-      ? `if (${product}Package.goalForAgentPreset("inspect").length === 0) throw new Error("Agent CJS behavior smoke failed");`
-      : `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf CJS behavior smoke failed");`;
+    const symbol = "runBrassPerformanceProfile";
+    const behavior = `if (${product}Package.makePerfRecorder().mark("smoke").name !== "smoke") throw new Error("Perf CJS behavior smoke failed");`;
     return [
       `const ${product}Package = require("@brass/${product}");`,
       `const ${product}Legacy = require("brass-runtime/${product}");`,
@@ -166,7 +161,7 @@ try {
     if (product === "engine-wasm") {
       return 'import { BrassWasmVm } from "@brass/engine-wasm"; void BrassWasmVm;';
     }
-    const symbol = product === "agent" ? "runAgent" : "runBrassPerformanceProfile";
+    const symbol = "runBrassPerformanceProfile";
     return `import { ${symbol} } from "@brass/${product}"; void ${symbol};`;
   });
   const typeSmoke = path.join(consumerDirectory, "smoke.ts");
@@ -192,16 +187,6 @@ try {
   );
   run(process.execPath, [path.join(root, "node_modules", "typescript", "bin", "tsc")], consumerDirectory);
 
-  if (products.includes("agent")) {
-    const help = run(
-      process.execPath,
-      [path.join(consumerDirectory, "node_modules", "@brass", "agent", "dist", "cli.cjs"), "--help"],
-      consumerDirectory,
-      {},
-      true,
-    );
-    if (!help.includes("Usage: brass-agent")) throw new Error("@brass/agent CLI help smoke failed");
-  }
   if (products.includes("perf")) {
     const report = run(
       process.execPath,
@@ -281,9 +266,9 @@ function pack(directory, destination) {
       if (!paths.has(required)) throw new Error(`${manifest.name} tarball is missing ${required}`);
     }
 
-    if (manifest.name === "@brass/agent" || manifest.name === "@brass/perf") {
+    if (manifest.name === "@brass/perf") {
       const declaration = readFileSync(path.join(directory, "dist", "index.d.mts"), "utf8");
-      if (/from\s+["']brass-runtime\/(?:agent|perf)["']/.test(declaration)) {
+      if (/from\s+["']brass-runtime\/perf["']/.test(declaration)) {
         throw new Error(`${manifest.name} declarations depend on a legacy monolith subpath`);
       }
     }

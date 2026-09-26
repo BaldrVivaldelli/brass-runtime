@@ -94,7 +94,7 @@ the v2 root. Keep those imports on `brass-runtime/core` or the owning stable
 subpath. Do not build a private deep import under `dist` or `src`.
 
 Agent and Perf are not runtime-root concepts. Their v1 paths stay supported;
-the repository also produces `@brass/agent` and `@brass/perf` candidate
+the repository also produces the `@brass/perf` candidate
 packages with their own executable bundles and declarations. The beta does not
 export `/agent` or `/perf`. Install those packages explicitly if needed.
 

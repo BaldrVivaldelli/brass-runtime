@@ -34,15 +34,6 @@ const modules = [
     validation: ["npm run test:types", "npm test -- src/http/__tests__"],
   },
   {
-    name: "agent",
-    aliases: ["brass-agent", "cli", "llm", "vscode"],
-    purpose: "Workspace intelligence, policy-aware tools, LLM patch loop, CLI, and VS Code integration.",
-    paths: ["src/agent", "extensions/vscode-brass-agent"],
-    docs: ["docs/agent-boundaries.md", "docs/agent-project-intelligence.md", "docs/agent-context-discovery.md", "docs/agent-cli.md"],
-    tests: [],
-    validation: ["npm run test:types", "npm run agent:test:smoke"],
-  },
-  {
     name: "wasm",
     aliases: ["rust", "engine"],
     purpose: "Strict WASM engine/state-machine sources and TypeScript bridge code.",
@@ -55,7 +46,7 @@ const modules = [
     name: "packaging",
     aliases: ["package", "exports", "build", "tsup"],
     purpose: "Package exports, build entries, CJS/ESM/type output, CLI bin, generated assets.",
-    paths: ["package.json", "tsup.config.ts", "tsconfig.json", "tsconfig.base.json", "src/index.ts", "src/http/index.ts", "src/agent/index.ts"],
+    paths: ["package.json", "tsup.config.ts", "tsconfig.json", "tsconfig.base.json", "src/index.ts", "src/http/index.ts", "src/next.ts"],
     docs: ["docs/ai/PUBLIC_API.md", "README.md"],
     tests: [],
     validation: ["npm run build", "npm run validate:cjs", "npm run test:types"],
@@ -73,7 +64,7 @@ const modules = [
     name: "docs",
     aliases: ["documentation", "guides", "ai"],
     purpose: "Human and agent documentation.",
-    paths: ["docs", "README.md", "AGENTS.md", "agent.md", "BRASS_AGENT.md", "scripts/context-pack.mjs"],
+    paths: ["docs", "README.md", "AGENTS.md", "agent.md", "scripts/context-pack.mjs"],
     docs: ["docs/README.md", "docs/ai/PROJECT_MAP.md", "docs/ai/VALIDATION_MATRIX.md"],
     tests: [],
     validation: ["npm run context"],
@@ -85,7 +76,7 @@ const invariantBullets = [
   "Promise is an interop boundary, not the runtime primitive.",
   "Async work should be cancelable and owned by a fiber/scope.",
   "Finalizers run exactly once and in reverse registration order.",
-  "HTTP is layered above runtime; core must not depend on HTTP or agent code.",
+  "HTTP is layered above runtime; core must not depend on HTTP or perf code.",
   "WASM mode is strict and should fail clearly when unavailable.",
 ];
 

@@ -8,9 +8,9 @@ import { validateProductPublishReport } from "./product-publish-report.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const requested = process.argv[2];
-const supported = new Set(["agent", "perf", "engine-wasm"]);
+const supported = new Set(["perf", "engine-wasm"]);
 if (requested && !supported.has(requested)) {
-  throw new Error(`Unknown product '${requested}'. Expected agent, perf, or engine-wasm.`);
+  throw new Error(`Unknown product '${requested}'. Expected perf or engine-wasm.`);
 }
 const products = requested ? [requested] : [...supported];
 const evidence = JSON.parse(readFileSync(

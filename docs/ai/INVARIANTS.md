@@ -65,20 +65,6 @@ stronger than local convenience.
 - Generated `wasm/pkg` output is build output; source changes live in `crates/`
   and TypeScript bridge files.
 
-## Agent
-
-- `src/agent` may depend on runtime primitives.
-- Core runtime must not depend on agent code.
-- Discovery and patch application go through agent services and permission
-  policies.
-- Workspace reads/writes stay workspace-relative and policy-aware.
-- Prompt/context helpers should be bounded and redaction-aware.
-- Native indexing/search is read-only and receives host-supplied content only;
-  it has no filesystem, shell, network, secrets, write, or approval capability.
-- TypeScript rechecks workspace trust before each native pilot operation and
-  retains authorization, UX, persistence, process ownership, and fallback.
-- IPC control capacity must remain available under data-plane saturation;
-  cancellation and ordered shutdown end in terminal events with no orphan work.
 
 ## When unsure
 

@@ -20,6 +20,30 @@ ownership remains single-maintainer, and registry publication of Agent, Perf,
 and Engine WASM is deferred. None of those facts invalidates the verified
 internal evidence, independent package boundaries, or operational gates.
 
+## Superseded by the 2.0 line
+
+This roadmap closed its three workstreams on 2026-09-21. Two facts have changed
+since, and the sections below are kept as the record of what was verified then,
+not as a description of the repository today:
+
+- Brass Agent moved to
+  [BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent)
+  with its git history. Every "Agent" mention below refers to the three-product
+  repository that existed when the evidence was gathered.
+- The v2 root gained `Effect.gen`, `pipe`, and dual combinators, taking its
+  value surface from 18 to 20 against a documented cap of 40.
+
+The two gates that cross-checked this roadmap's closure record against the
+repository, `check-next-level-readiness.mjs` and
+`check-product-registry-readiness.mjs`, are retired. They asserted a
+three-product repository and read `packages/agent/package.json` directly, so
+they cannot pass once the agent lives elsewhere. The dated evidence records
+under `docs/evidence/` are deliberately left untouched: they document what was
+verified on 2026-09-20 and 2026-09-21, and rewriting them to describe a
+two-product repository would falsify a dated record to keep a gate green.
+`validate:evidence` now runs five gates covering production-like results,
+stability, remote stability, v2 beta readiness, and stable release validation.
+
 ## Current baseline
 
 - Stable v1 surfaces: runtime/core, schema, HTTP, and observability.

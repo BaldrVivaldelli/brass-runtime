@@ -12,19 +12,15 @@ schema        core
     +--> http <+--> observability
           |             |
           +------> perf |
-
-core -----------------> agent -----------------> VS Code
 ```
 
 The diagram shows allowed high-level dependencies, not mandatory ones. The
 automated `npm run validate:boundaries` gate enforces the important absences:
 
-- Core cannot import HTTP, observability, performance tooling, or Agent.
+- Core cannot import HTTP, observability, or performance tooling.
 - Schema is dependency-free inside the repository.
-- Agent can use core but cannot couple to HTTP, observability, or Perf.
 - Perf can measure runtime/HTTP/observability but no shipped subsystem depends
   on Perf.
-- No runtime subsystem depends on Agent.
 
 ## Extraction sequence and current state
 
@@ -48,6 +44,14 @@ automated `npm run validate:boundaries` gate enforces the important absences:
 7. **Done:** build a separate v2 beta package shape. Its root owns the small v2
    facade, `/v1` is an explicit bridge, Agent/Perf subpaths and bins are absent,
    and WASM is an optional peer rather than embedded payload.
+8. **Done:** move Brass Agent out of this repository entirely. Steps 1-7 left
+   its source co-located to avoid duplicate implementations; that tradeoff no
+   longer paid for itself, because the agent's source, docs, CI lanes, and
+   coverage floors were shaping a repository whose product is the runtime. It
+   now lives at
+   [BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent)
+   with its git history, consuming `brass-runtime` as a peer. The v1 `/agent`
+   subpath and the `brass-agent` bin are removed in 2.0; v1.x keeps them.
 
 The v1 compatibility package no longer produces an unused second ESM build
 with `.js` extensions. All public Node imports already resolve to `.mjs`, all
@@ -81,13 +85,11 @@ Current independent validation lanes:
 
 ```bash
 npm run test:types:runtime && npm run test:runtime
-npm run test:types:agent && npm run test:agent
 npm run test:types:perf && npm run test:perf
-npm run validate:product:agent
 npm run validate:product:perf
 ```
 
-The package build configs are `tsup.agent.config.ts`, `tsup.perf.config.ts`, and
+The package build configs are `tsup.perf.config.ts` and
 `tsup.v2-beta.config.ts`. Packed-consumer validation requires exact v1 runtime
 export parity where promised, self-contained type resolution, real library
 execution, CLI startup, and all documented beta package conditions.

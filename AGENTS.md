@@ -28,10 +28,14 @@ npm run context -- --module http
 - Schema is a tiny first-party validation module: `src/schema`.
 - HTTP is a high-level module on top of effects/fibers: `src/http`.
 - Perf is a Node-focused profiling subpath: `src/perf`.
-- Brass Agent is an application/library layer: `src/agent`.
 - WASM is an optional strict engine/accelerator: `crates/brass-runtime-wasm-engine`, `wasm/pkg`.
 
-Core must not know about HTTP, agent, VS Code, or docs tooling.
+Core must not know about HTTP, perf, or docs tooling.
+
+Brass Agent now lives at
+[BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent)
+and consumes this package as a peer dependency.
+
 
 ## Schema module
 
@@ -218,7 +222,6 @@ The repo intentionally contains multiple products:
 - HTTP subpath exported at `brass-runtime/http`.
 - Schema subpath exported at `brass-runtime/schema`.
 - Perf subpath and CLI exported at `brass-runtime/perf` and `brass-perf`.
-- Agent subpath and CLI exported at `brass-runtime/agent` and `brass-agent`.
 - Rust/WASM engine sources under `crates/`.
 
 When a change touches more than one product, update docs and validation notes in

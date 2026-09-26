@@ -13,14 +13,7 @@ This is the compact map for understanding `brass-runtime` quickly.
 - `src/observability/index.ts` -> subpath export `brass-runtime/observability`.
 - `src/perf/index.ts` -> subpath export `brass-runtime/perf`.
 - `src/perf/cli.ts` -> CLI binary `brass-perf`.
-- `src/agent/index.ts` -> subpath export `brass-runtime/agent`.
-- `src/agent/cli/main.ts` -> CLI binary `brass-agent`.
-- `packages/agent` -> independently versioned `@brass/agent` candidate adapter.
 - `packages/perf` -> independently versioned `@brass/perf` candidate adapter.
-- `extensions/vscode-brass-agent` -> separately packaged VS Code candidate.
-- `src/agent/native` -> protocol-v1 client and deterministic search pilot.
-- `src/agent/node/nativeServiceProcess.ts` -> private child-process transport.
-- `crates/brass-native-service` -> promoted read-only Rust editor-search service.
 - `tsup.config.ts` -> CJS, ESM, and JS bundle entries.
 - `package.json` -> scripts, exports, package files, CLI bin.
 - `scripts/check-production-evidence.mjs` -> committed evidence integrity gate.
@@ -237,43 +230,6 @@ Docs:
 
 - `docs/performance-profiler.md`
 
-## Brass Agent
-
-Paths:
-
-- `src/agent/cli`
-- `src/agent/core`
-- `src/agent/node`
-- `src/agent/native`
-- `src/agent/vscode`
-- `src/agent/tools`
-- `src/agent/llm`
-- `crates/brass-native-service`
-- `extensions/vscode-brass-agent`
-
-Purpose:
-
-- Inspect workspaces, discover commands/context, ask an LLM for patches, apply
-  or roll back changes under policy, and expose CLI/VS Code surfaces.
-
-Read first:
-
-- `src/agent/core/agentHost.ts`
-- `src/agent/core/approvalCapability.ts`
-- `src/agent/core/runAgent.ts`
-- `src/agent/core/contextDiscovery.ts`
-- `src/agent/core/projectCommands.ts`
-- `src/agent/core/projectProfile.ts`
-- `src/agent/cli/main.ts`
-
-Docs:
-
-- `docs/agent-host.md`
-- `docs/agent-boundaries.md`
-- `docs/agent-project-intelligence.md`
-- `docs/agent-context-discovery.md`
-- `docs/agent-cli.md`
-- `docs/agent-vscode-install.md`
 
 ## WASM
 
@@ -357,6 +313,11 @@ Commands:
   `src/http/prewarm/__tests__/prewarmManager.test.ts`.
 - HTTP adaptive concurrency: start in `src/http/adaptiveLimiter/adaptiveLimiter.ts`
   and `src/http/adaptiveLimiter/__tests__/`.
-- Agent behavior: start in `src/agent/core`, then CLI/node adapters.
 - Export/package issue: start in `package.json`, `tsup.config.ts`, `src/index.ts`,
-  `src/http/index.ts`, and `src/agent/index.ts`.
+  and `src/http/index.ts`.
+
+## Moved out
+
+Brass Agent moved to its own repository
+([BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent)).
+It consumes `brass-runtime` as a peer dependency.

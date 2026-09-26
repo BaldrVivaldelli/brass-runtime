@@ -7,18 +7,30 @@
  */
 import { async as asyncEffect, type Async } from "./core/types/asyncEffect";
 import {
-  catchAll,
   fail,
-  flatMap,
   interruptible,
-  map,
-  mapError,
   succeed,
+  suspend,
   sync,
   uninterruptible,
   uninterruptibleMask,
 } from "./core/types/effect";
-import { retry, retryN, retryWithBackoff, sleep, timeout } from "./core/runtime/combinators";
+import {
+  as,
+  catchAll,
+  catchAllWith,
+  flatMap,
+  map,
+  mapError,
+  retry,
+  retryN,
+  retryWithBackoff,
+  tap,
+  timeout,
+} from "./core/types/effectDual";
+import { sleep } from "./core/runtime/combinators";
+import { gen } from "./core/types/gen";
+import { pipe } from "./core/types/pipe";
 import { fromPromiseAbortable } from "./core/runtime/runtime";
 
 /** The canonical effect type proposed for the v2 root API. */
@@ -27,15 +39,24 @@ export type Effect<R, E, A> = Async<R, E, A>;
 /**
  * Discoverable effect operations without exporting every combinator at the
  * package root. The underlying functions remain available from v1 entrypoints.
+ *
+ * Transformation combinators are dual: `Effect.map(self, f)` and the
+ * `pipe`-able `Effect.map(f)` both work. For multi-step programs prefer
+ * `Effect.gen`, which keeps sequential code flat.
  */
 export const Effect = Object.freeze({
   succeed,
   fail,
   sync,
+  suspend,
   async: asyncEffect,
+  gen,
   map,
   flatMap,
+  tap,
+  as,
   catchAll,
+  catchAllWith,
   mapError,
   interruptible,
   uninterruptible,
@@ -47,6 +68,10 @@ export const Effect = Object.freeze({
   retryWithBackoff,
   fromPromiseAbortable,
 });
+
+export { pipe };
+export type { Adapter as EffectGenAdapter } from "./core/types/gen";
+export { dual, type DualGuard } from "./core/types/pipe";
 
 export {
   Cause,

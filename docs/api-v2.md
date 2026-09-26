@@ -20,7 +20,7 @@ The command leaves a validated `2.0.0-beta.0` tarball under
 ## Contract
 
 The v2 root should expose concepts, not every implementation helper. Its runtime
-surface currently has 18 values:
+surface currently has 20 values:
 
 - `Effect`, `Cause`, and `Exit` for describing results and computations.
 - `Runtime`, `makeRuntime`, `runPromise`, and `runExit` for execution.
@@ -29,6 +29,51 @@ surface currently has 18 values:
 - `Stream` and `Pipeline` for the small stream facade.
 - `LayerContext`, `MissingLayerServiceError`, and `formatCause` for actionable
   diagnostics at application boundaries.
+- `pipe` and `dual` for composition.
+
+## Composition
+
+Effects compose two ways, and both are first-class.
+
+`Effect.gen` is the default for sequential programs. It keeps multi-step code
+flat and infers a distinct type per step:
+
+```ts
+import { Effect, runPromise } from "brass-runtime";
+
+const program = Effect.gen(function* ($) {
+  const user = yield* $(fetchUser(id));
+  const orders = yield* $(fetchOrders(user.id));
+  return { user, orders };
+});
+```
+
+Nothing runs until the effect is interpreted, each execution gets its own
+iterator, and every `yield*` becomes an ordinary `FlatMap` node, so
+interruption between steps behaves exactly as it does in a hand-written chain.
+Environments accumulate as an intersection and failures as a union, matching
+`flatMap`.
+
+`pipe` is for linear transformation chains. Every transformation combinator on
+the `Effect` namespace is dual, so it accepts both calling conventions:
+
+```ts
+import { Effect, pipe } from "brass-runtime";
+
+// data-last, inside pipe
+pipe(
+  fetchUser(id),
+  Effect.map((user) => user.name),
+  Effect.catchAllWith(() => "anonymous"),
+  Effect.timeout(1_000),
+);
+
+// data-first, unchanged from v1
+Effect.map(fetchUser(id), (user) => user.name);
+```
+
+`dual` is exported so application code can build combinators with the same
+convention. The v1 data-first functions in `core/types/effect` are untouched.
 
 The root does not expose scheduler queues, concrete fiber interpreters, engine
 bridges, WASM ABI helpers, benchmark controls, or registry implementation
@@ -41,6 +86,8 @@ v2 migration is prepared.
 | --- | --- |
 | `succeed(value)` / `asyncSucceed(value)` | `Effect.succeed(value)` |
 | `flatMap(effect, next)` / `asyncFlatMap(...)` | `Effect.flatMap(effect, next)` |
+| nested `flatMap` chains | `Effect.gen(function* ($) { ... })` |
+| manual combinator nesting | `pipe(effect, Effect.map(f))` |
 | `toPromise(effect, env)` | `runPromise(effect, env)` |
 | `sleep(ms)` | `Effect.sleep(ms)` |
 | `retry(effect, policy)` | `Effect.retry(effect, policy)` |

@@ -9,18 +9,16 @@ import * as httpTesting from "../http/testing";
 import * as observability from "../observability";
 import * as perf from "../perf";
 import * as schema from "../schema";
-import * as agent from "../agent";
 
 const EXACT_EXPORT_SNAPSHOTS = Object.freeze({
-  root: { count: 323, sha256: "4630f1eb941a5c011dbcd02b8c8f8bdd550e13f4797d75f3c67c4c5de05ff442" },
-  core: { count: 323, sha256: "4630f1eb941a5c011dbcd02b8c8f8bdd550e13f4797d75f3c67c4c5de05ff442" },
-  next: { count: 18, sha256: "0ca5ba96279f716ed9693e97842db434af788d63510bc21408e087387450e9e5" },
+  root: { count: 331, sha256: "4c29e3941ec902b0a728e47deb8c6a45b00d5c9b55353567eb25c4554ac5eaa9" },
+  core: { count: 331, sha256: "4c29e3941ec902b0a728e47deb8c6a45b00d5c9b55353567eb25c4554ac5eaa9" },
+  next: { count: 20, sha256: "3c7a6cfb5b980d7bf0eb6bd78917a41d02ec1d5add9fb64e8978d8bbc62cbda9" },
   http: { count: 156, sha256: "6413697e1da8b34120c8d6b6112ee39159870bdbad0fe1f86c27837bce43c253" },
   httpTesting: { count: 12, sha256: "096ea6dca6b1e10f96e9e3cda9f0188f54dd19040d1e7c6ee2bec4acc95f7851" },
   schema: { count: 12, sha256: "bfd3feaf9db8a8367da8ab9ced8d6a5adba4110b167ef7487ef89ffd8168b0bb" },
   observability: { count: 80, sha256: "6c5b34368837e36f244ec40d3dd0a0f8eae20fd073a71ca08987ed1240391343" },
   perf: { count: 33, sha256: "8db943c81dfc3f997007458289fb956779c707c85dce5192f64139fc4bc9c77d" },
-  agent: { count: 125, sha256: "fe35bdf4ec10d23c363a65f7f1cc6c91991b36ad302059861b3110e8305b56cf" },
 });
 
 const REQUIRED_EXPORTS = Object.freeze({
@@ -127,7 +125,7 @@ const REQUIRED_EXPORTS = Object.freeze({
 
 describe("public API release snapshot", () => {
   it("freezes the complete runtime export surface for every package entrypoint", () => {
-    const modules = { root, core, next, http, httpTesting, schema, observability, perf, agent };
+    const modules = { root, core, next, http, httpTesting, schema, observability, perf };
     const actual = Object.fromEntries(
       Object.entries(modules).map(([name, module]) => [name, exportFingerprint(module)]),
     );

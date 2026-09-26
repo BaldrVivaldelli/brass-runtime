@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/brass-engine-core",
-    "crates/brass-native-service",
     "crates/brass-runtime-wasm-engine",
 ]
 resolver = "2"

@@ -1,5 +1,7 @@
 export * from "./types/effect";
 export * from "./types/asyncEffect";
+export { pipe, dual, type DualGuard } from "./types/pipe";
+export { gen, GenEffect, type Adapter as EffectGenAdapter } from "./types/gen";
 export * from "./types/option";
 export * from "./types/cancel";
 

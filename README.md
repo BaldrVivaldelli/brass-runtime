@@ -1,13 +1,114 @@
 # brass-runtime
 
-A ZIO-inspired effect runtime for TypeScript with structured concurrency,
-runtime diagnostics, pull-based streams, and a production-grade HTTP client.
+A production HTTP stack for Node services, built on a small effect runtime with
+structured concurrency.
 
-Built without `Promise`/`async`/`await` as the primary semantic primitive. Effects are values — lazy, composable, and cancelable by default.
+The HTTP client does the work most teams end up writing by hand: adaptive
+concurrency, retry with circuit-breaker awareness, deduplication, batching,
+response cache, connection pre-warming, transparent decompression, and
+Prometheus/OTLP observability. It has no runtime dependencies.
+
+Underneath it is a ZIO-inspired effect runtime: effects are values — lazy,
+composable, and cancelable by default. You can use the HTTP client without
+adopting any of that, or go all the way down.
 
 ```bash
 npm i brass-runtime
 ```
+
+---
+
+## Start here
+
+### An HTTP client that survives production
+
+```ts
+import { makeDefaultHttpClient, s } from "brass-runtime/http";
+
+const User = s.object({
+  id: s.number({ int: true }),
+  name: s.string({ minLength: 1 }),
+});
+
+const http = makeDefaultHttpClient({
+  baseUrl: "https://api.example.com",
+  headers: { accept: "application/json" },
+});
+
+// Validated at runtime; `user.body` is typed from the schema.
+const user = await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
+
+console.log(user.body.name);
+console.log(http.stats());
+```
+
+That one call already has a timeout, deduplication of identical in-flight
+requests, priority scheduling, retry that distinguishes a `404` from a
+transient `503`, adaptive concurrency that backs off when the upstream
+degrades, a safe-method response cache, and decompression. Every layer is
+optional; `preset: "minimal"` gives you a plain wire client with the same
+helpers.
+
+Cancellation is real: interrupting the effect aborts the underlying request
+through `AbortController`, and the ref-counted cancel propagates through every
+middleware in the stack.
+
+### Composing effects
+
+Sequential programs read top to bottom:
+
+```ts
+import { Effect, runPromise } from "brass-runtime";
+
+const program = Effect.gen(function* ($) {
+  const user = yield* $(fetchUser(id));
+  const orders = yield* $(fetchOrders(user.id));
+  return { user, orders };
+});
+
+await runPromise(program);
+```
+
+Nothing runs until you run it, each step is typed independently, and the fiber
+stays interruptible between steps. For linear transformations, every combinator
+is also `pipe`-able:
+
+```ts
+import { Effect, pipe } from "brass-runtime";
+
+pipe(
+  fetchUser(id),
+  Effect.map((user) => user.name),
+  Effect.catchAllWith(() => "anonymous"),
+  Effect.timeout(1_000),
+);
+```
+
+Both calling conventions work everywhere: `Effect.map(self, f)` and
+`Effect.map(f)` are the same function.
+
+---
+
+## What else is in the box
+
+**Runtime** — algebraic effects, fibers, scopes, scheduler, interruptibility
+regions, fiber-local refs, typed layers, semaphores, circuit breakers, rich
+`Cause<E>` failures, metrics, tracing, and an opt-in flight recorder.
+
+**Streams** — pull-based streams with backpressure, bounded buffers, hubs,
+pipelines, fusion optimization, and a small fluent DX facade.
+
+**Schema** — a dependency-free validation module, exported on its own at
+`brass-runtime/schema` and wired into the HTTP helpers.
+
+**Observability** — Prometheus/OTLP exporters, structured logs, W3C trace
+propagation, sampling, redaction, bounded exporters, and explicit
+flush/shutdown.
+
+**Performance profiler** — runtime primitives, HTTP layer comparison, memory
+retention reports, observability overhead, CLI/JSON output.
+
+**Optional WASM engine** — Rust-backed state machines, installed separately.
 
 Runnable framework examples live in the
 [repository examples](https://github.com/BaldrVivaldelli/brass-runtime/tree/main/examples).
@@ -19,65 +120,17 @@ Project status, API change rules, and evidence requirements are defined in
 
 ---
 
-## What it does
-
-**Runtime** — algebraic effects, fibers, scopes, scheduler, interruptibility
-regions, fiber-local refs, typed layers, semaphores, circuit breakers, rich
-`Cause<E>` failures, metrics, tracing, and an opt-in flight recorder.
-
-**Streams** — pull-based streams with backpressure, bounded buffers, hubs,
-pipelines, fusion optimization, and a small fluent DX facade.
-
-**HTTP** — lazy/cancelable client and server primitives with typed routing,
-schema validation, health/readiness probes, adaptive concurrency, compression,
-batching, prewarm, cache, dedup, priority, retry, and observability.
-
-**Production signals** — dependency-free schemas, Prometheus/OTLP exporters,
-structured logs, W3C trace propagation, sampling, redaction, bounded exporters,
-and explicit flush/shutdown.
-
-**Performance profiler** — runtime primitives, HTTP layer comparison, memory
-retention reports, observability overhead, CLI/JSON output, and actionable
-recommendations.
-
-**Optional engine and tools** — Rust/WASM-backed state machines, the
-experimental Brass Agent CLI/VS Code workflow, and a versioned read-only Rust
-index/search pilot with TypeScript fallback.
-
----
-
 ## Philosophy
 
 - **Effects are values** — lazy, composable, referentially transparent
 - **Async is explicit** — no hidden Promise semantics
 - **Concurrency is structured** — fibers, scopes, finalizers
 - **Side effects are interpreted** — not executed eagerly
-- **Higher-level APIs are libraries** — HTTP, streams, agent are built on top of core
+- **Higher-level APIs are libraries** — HTTP, streams are built on top of core
 
 ---
 
-## Quick start
-
-### Preview the smaller v2 API
-
-The additive `brass-runtime/next` entrypoint reduces the root to 18 runtime
-values while v1 remains compatible. It is experimental until the next major
-release:
-
-```ts
-import { Effect, runPromise } from "brass-runtime/next";
-
-const program = Effect.flatMap(
-  Effect.succeed(20),
-  (left) => Effect.map(Effect.succeed(22), (right) => left + right),
-);
-
-console.log(await runPromise(program)); // 42
-```
-
-See the [v2 contract](./docs/api-v2.md) and
-[incremental migration guide](./docs/migration-v1-to-v2.md) before adopting the
-preview.
+## More runtime detail
 
 ### Run an effect
 
@@ -162,28 +215,7 @@ The flight recorder is opt-in and keeps a bounded ring buffer of runtime events:
 fiber start/end/suspend/resume, scopes, supervisor events, logs, spans, and
 trace context when available.
 
-### Recommended HTTP client
-
-```ts
-import { makeDefaultHttpClient, s } from "brass-runtime/http";
-
-const User = s.object({
-  id: s.number({ int: true }),
-  name: s.string({ minLength: 1 }),
-  role: s.enum(["admin", "user"] as const).optional(),
-});
-
-const http = makeDefaultHttpClient({
-  baseUrl: "https://api.example.com",
-  headers: { accept: "application/json" },
-});
-
-const user = await http.getJson("/users/1", { schema: User }).unsafeRunPromise();
-
-console.log(user.body.name);
-console.log(http.stats());
-console.log(http.compression?.stats());
-```
+### HTTP presets
 
 `makeDefaultHttpClient` is the batteries-included entrypoint: timeout,
 deduplication, priority scheduling, retry, adaptive concurrency, safe-method
@@ -612,14 +644,12 @@ const result = await Stream
 | `brass-runtime/schema` | Dependency-free runtime schema DSL with type inference |
 | `brass-runtime/observability` | Prometheus/OTLP exporters, logs, spans, trace propagation, request adapters |
 | `brass-runtime/perf` | Runtime, HTTP, observability, memory, and baseline performance profiler |
-| `brass-runtime/agent` | Brass Agent core (experimental) |
 | `@brass/perf` | Independently built Perf candidate with v1 export/type parity |
-| `@brass/agent` | Independently built Agent library/CLI candidate with v1 export/type parity |
 
-The `brass-runtime/perf` and `brass-runtime/agent` paths remain supported
-through v1. `@brass/perf` and `@brass/agent` are release-candidate packages,
-not an assertion that the npm namespace has already been published. Their CI
-artifacts install next to `brass-runtime`. CLI: `brass-agent` and `brass-perf`.
+The `brass-runtime/perf` path remains supported through v1. `@brass/perf` is a
+release-candidate package, not an assertion that the npm namespace has already
+been published. Its CI artifact installs next to `brass-runtime`.
+CLI: `brass-perf`.
 
 ### Platform support
 
@@ -690,26 +720,11 @@ diagnostic code when WASM cannot initialize.
 
 ---
 
-## Brass Agent (experimental)
+## Brass Agent
 
-A CLI-first coding agent built on the runtime. Inspects workspaces, discovers validation commands, gathers bounded context, asks an LLM for patches, and applies/rolls back changes under policy.
-
-```bash
-npm run agent:vscode:install   # VS Code extension
-brass-agent --doctor           # check setup
-brass-agent --init             # initialize workspace
-brass-agent --preset inspect   # run inspection
-```
-
-Docs: [Install](./docs/agent-install-and-configure.md) · [CLI](./docs/agent-cli.md) · [Project intelligence](./docs/agent-project-intelligence.md) · [VS Code](./docs/agent-vscode-install.md)
-
-The fork-oriented native search backend uses private authenticated IPC,
-rechecks workspace trust in TypeScript, and owns no filesystem/write/secret
-capability. The editor composition defaults to native-first `auto` with a
-deterministic TypeScript fallback after two final-worktree runs passed every
-promotion gate:
-[protocol](./docs/native-service-protocol.md) ·
-[adoption decision](./docs/native-search-pilot-decision.md).
+The coding agent that used to live here now has its own repository:
+[BaldrVivaldelli/brass-agent](https://github.com/BaldrVivaldelli/brass-agent).
+It depends on this package as a peer.
 
 ---
 

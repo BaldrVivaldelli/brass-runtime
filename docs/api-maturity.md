@@ -13,7 +13,6 @@ source-file imports.
 | HTTP client/server/testing | Stable | Browser condition exposes the client; Node condition also exposes server and Node transport. |
 | Observability | Stable | Use `brass-runtime/observability`. |
 | Performance profiler | Stable v1 tooling surface | Use `brass-runtime/perf`; `@brass/perf` is an alpha release candidate and benchmark thresholds can evolve independently. |
-| Agent library and CLI | Experimental | Use `brass-runtime/agent`; `@brass/agent` is an alpha release candidate and protocol changes require versioning. |
 | VS Code Agent extension | Experimental, separately packaged | Built and uploaded by its path-scoped workflow; no runtime release is implied. |
 | Rust/WASM engine internals | Experimental, versioned ABI | `wasm` is strict; `auto` is the explicit observable TS-fallback policy. |
 | Files below `src/**` not exported by a package entrypoint | Internal | No compatibility guarantee. |

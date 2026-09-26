@@ -9,32 +9,27 @@ const rules = [
   {
     owner: "core",
     from: "src/core",
-    forbidden: ["src/http", "src/observability", "src/perf", "src/agent"],
+    forbidden: ["src/http", "src/observability", "src/perf"],
   },
   {
     owner: "schema",
     from: "src/schema",
-    forbidden: ["src/core", "src/http", "src/observability", "src/perf", "src/agent"],
+    forbidden: ["src/core", "src/http", "src/observability", "src/perf"],
   },
   {
     owner: "http",
     from: "src/http",
-    forbidden: ["src/perf", "src/agent"],
+    forbidden: ["src/perf"],
   },
   {
     owner: "observability",
     from: "src/observability",
-    forbidden: ["src/perf", "src/agent"],
+    forbidden: ["src/perf"],
   },
   {
     owner: "perf",
     from: "src/perf",
-    forbidden: ["src/agent"],
-  },
-  {
-    owner: "agent",
-    from: "src/agent",
-    forbidden: ["src/http", "src/observability", "src/perf"],
+    forbidden: [],
   },
 ];
 

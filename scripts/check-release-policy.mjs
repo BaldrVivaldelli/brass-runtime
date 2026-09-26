@@ -18,9 +18,7 @@ const dependencySecurityWorkflow = await readFile(new URL("../.github/workflows/
 const examplesWorkflow = await readFile(new URL("../.github/workflows/examples.yml", import.meta.url), "utf8");
 const publishV2BetaWorkflow = await readFile(new URL("../.github/workflows/publish-v2-beta.yml", import.meta.url), "utf8");
 const publishProductWorkflow = await readFile(new URL("../.github/workflows/publish-product-alpha.yml", import.meta.url), "utf8");
-const agentWorkflow = await readFile(new URL("../.github/workflows/agent.yml", import.meta.url), "utf8");
 const perfWorkflow = await readFile(new URL("../.github/workflows/perf.yml", import.meta.url), "utf8");
-const vscodeWorkflow = await readFile(new URL("../.github/workflows/vscode.yml", import.meta.url), "utf8");
 
 if (packageJson.version !== packageLock.version || packageJson.version !== packageLock.packages?.[""]?.version) {
   fail("package.json and package-lock.json versions must match");
@@ -139,7 +137,6 @@ for (const fragment of [
   "--prefix examples/nestjs",
   "--prefix examples/nextjs",
   "--prefix examples/react",
-  "--prefix extensions/vscode-brass-agent",
 ]) {
   if (!dependencySecurityWorkflow.includes(fragment)) fail(`dependency security workflow is missing: ${fragment}`);
 }
@@ -164,9 +161,7 @@ for (const [name, workflow] of [
   ["v2 beta", v2BetaWorkflow],
   ["v2 publisher", publishV2BetaWorkflow],
   ["product publisher", publishProductWorkflow],
-  ["agent", agentWorkflow],
   ["perf", perfWorkflow],
-  ["VS Code", vscodeWorkflow],
 ]) {
   if (workflow.includes("actions/upload-artifact@v4")) {
     fail(`${name} workflow must not use the deprecated Node 20 artifact action`);
