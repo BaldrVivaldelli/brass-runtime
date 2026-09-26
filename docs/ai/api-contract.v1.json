@@ -5,43 +5,43 @@
   "entrypoints": {
     ".": {
       "file": "dist/index.d.ts",
-      "sha256": "e085a67a5ec0e2504950130fa9a184010aba8967cbdc2d6eb2694ae2c4a3d9e0",
-      "exportCount": 546
+      "sha256": "7399918b4d10a6b3d507902aadfc3fbad8917a2fffbaebce44e3c04c3ee278e2",
+      "exportCount": 38
     },
     "./core": {
       "file": "dist/core/index.d.ts",
-      "sha256": "2e641b5d20cecb1b7a73c13eda2a11a646f601829bb7e88fecbff62c3967a91a",
-      "exportCount": 546
+      "sha256": "a99a9cabb976d1664a0d8b360e87049cd64760d0ca6e744198ed6615b6d19736",
+      "exportCount": 556
     },
     "./http": {
       "file": "dist/http/index.d.ts",
-      "sha256": "87b41e68fb7ebc243638336d3f8ef57ee9a4c89c14f8e807345bfa45dd4e98ef",
+      "sha256": "763aec31ad578568008d76d8aa023b68b999e378c55d1b1453638a9ecbd0b7a8",
       "exportCount": 335
     },
     "./http/testing": {
       "file": "dist/http/testing.d.ts",
-      "sha256": "a8150c31d1a3b893fc6062f9f8040ebc8de3f773c60a96bed17343b53a457e2b",
+      "sha256": "90d68e89e166df864213314201391971a0c06c633c9e99df426e8bed371b1f12",
       "exportCount": 20
     },
     "./next": {
-      "file": "dist/next.d.ts",
-      "sha256": "312e7beeefaf242db380cbb1d0662ea549809c79e8e6fcd9cc7f248afeb4038e",
-      "exportCount": 34
+      "file": "dist/index.d.ts",
+      "sha256": "7399918b4d10a6b3d507902aadfc3fbad8917a2fffbaebce44e3c04c3ee278e2",
+      "exportCount": 38
     },
     "./observability": {
       "file": "dist/observability/index.d.ts",
-      "sha256": "f3b1ac2cba3419d34a648468acce7d1ea9780c3d61534cf4ea60f79ffb0799a9",
+      "sha256": "b704a64c5f0240b1ab2945dc3a6fd48add1a89a81263e56f200aa5e63c3c8bd8",
       "exportCount": 163
-    },
-    "./perf": {
-      "file": "dist/perf/index.d.ts",
-      "sha256": "d128814a875785467d82d5dd57f870892c0ea9d69efa14a5778fdd4f8fada49c",
-      "exportCount": 88
     },
     "./schema": {
       "file": "dist/schema/index.d.ts",
       "sha256": "9d099339434cd5ff8e7f8876f7b4c9ac39d43822f8e253680efdee4fb3641ca9",
       "exportCount": 27
+    },
+    "./v1": {
+      "file": "dist/v1/index.d.ts",
+      "sha256": "115a44f35c34cc38d6afdff137f7109161f5f7c1e3c4b60f4aafcd1c8fc7982e",
+      "exportCount": 556
     }
   }
 }
