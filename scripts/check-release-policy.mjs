@@ -105,8 +105,8 @@ if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.inc
   fail("release tooling must be pinned in the isolated release job");
 }
 if (!releaseWorkflow.includes("node-version: [20, 22, 24]")
-  || !releaseWorkflow.includes("node-version: 18")) {
-  fail("the stable release workflow must validate Node 20/22/24 and retain the Node 18 compatibility smoke");
+  || !releaseWorkflow.includes("node20-compat-smoke")) {
+  fail("the stable release workflow must validate Node 20/22/24 and retain the compatibility-only smoke");
 }
 
 const requiredV2BetaFragments = [
