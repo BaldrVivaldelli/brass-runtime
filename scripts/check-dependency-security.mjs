@@ -20,7 +20,7 @@ const surfaces = [
       "dependencies.@angular/platform-browser": "^20.3.31",
       "dependencies.rxjs": "^7.8.2",
       "dependencies.zone.js": "~0.15.1",
-      "devDependencies.@angular-devkit/build-angular": "^20.3.37",
+      "devDependencies.@angular/build": "^20.3.39",
       "devDependencies.@angular/cli": "^20.3.37",
       "devDependencies.@angular/compiler-cli": "^20.3.31",
     },
@@ -28,10 +28,9 @@ const surfaces = [
       "@angular/common": "20.3.31",
       "@angular/core": "20.3.31",
       "@angular/platform-browser": "20.3.31",
-      "@angular-devkit/build-angular": "20.3.37",
+      "@angular/build": "20.3.39",
       "@angular/cli": "20.3.37",
       "@angular/compiler-cli": "20.3.31",
-      uuid: "11.1.1",
     },
     localRuntime: true,
   },
@@ -109,8 +108,10 @@ for (const surface of surfaces) {
       failures.push(`${label} must lock brass-runtime to the repository root`);
     }
   }
-  if (surface.directory === "examples/angular" && manifest.overrides?.sockjs?.uuid !== "11.1.1") {
-    failures.push("examples/angular must override sockjs uuid to the audited 11.1.1 security line");
+  if (surface.directory === "examples/angular"
+    && (manifest.devDependencies?.["@angular-devkit/build-angular"] !== undefined
+      || lock.packages?.["node_modules/webpack-dev-server"] !== undefined)) {
+    failures.push("examples/angular must build with @angular/build instead of the webpack-dev-server chain");
   }
 }
 
