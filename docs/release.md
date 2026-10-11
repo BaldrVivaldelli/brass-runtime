@@ -70,9 +70,12 @@ npm run perf -- --profile http-memory --calls 20000 --concurrency 512 --record-h
   `.mjs`; CommonJS and bin entrypoints use `.cjs`.
 - Confirm `npm run validate:evidence` passes and rerun the relevant benchmark
   budget when a hot path or threshold changed.
-- The committed `package.json` and lockfile version must match the latest stable
-  Git tag. Semantic Release updates both files and commits the release version
-  with `[skip ci]` before tagging and publishing. Never publish a local dry-run
+- The latest stable Git tag and the npm `latest` dist-tag are the source of
+  truth for the released version. Semantic Release computes the next version
+  from tags, publishes, tags, and creates the GitHub release without pushing a
+  version commit back to `main`: the branch ruleset requires pull requests, so
+  the committed `package.json` stays at the version of the previous stable
+  release instead of tracking the latest tag. Never publish a local dry-run
   tarball as a release artifact.
 - Build and package the promoted read-only editor-search companion, then
   generate release provenance:

@@ -72,17 +72,15 @@ if (rules.get("feat") !== "minor" || rules.get("fix") !== "patch" || rules.get("
 }
 
 const npmIndex = releaseConfig.plugins?.findIndex((plugin) => plugin === "@semantic-release/npm") ?? -1;
-const gitIndex = releaseConfig.plugins?.findIndex((plugin) =>
-  Array.isArray(plugin) && plugin[0] === "@semantic-release/git") ?? -1;
 const githubIndex = releaseConfig.plugins?.findIndex((plugin) => plugin === "@semantic-release/github") ?? -1;
-if (!(npmIndex >= 0 && gitIndex > npmIndex && githubIndex > gitIndex)) {
-  fail("npm, synchronized Git commit, and GitHub publication must run in that order");
+if (!(npmIndex >= 0 && githubIndex > npmIndex)) {
+  fail("npm publication must run before GitHub publication");
 }
-const gitPlugin = releaseConfig.plugins[gitIndex];
-for (const asset of ["package.json", "package-lock.json"]) {
-  if (!gitPlugin[1]?.assets?.includes(asset)) fail(`release commit must include ${asset}`);
+const gitPluginPresent = releaseConfig.plugins?.some((plugin) =>
+  plugin === "@semantic-release/git" || (Array.isArray(plugin) && plugin[0] === "@semantic-release/git"));
+if (gitPluginPresent) {
+  fail("the release must not push a version commit to main; the branch ruleset rejects direct pushes");
 }
-if (!gitPlugin[1]?.message?.includes("[skip ci]")) fail("release commits must prevent recursive CI releases");
 
 if (!releaseWorkflow.includes('cron: "0 9 * * 1"')) fail("stable weekly release schedule is missing");
 if (releaseWorkflow.includes("branches: [next]")) fail("the stable publisher must not run on next pushes");
@@ -101,8 +99,11 @@ if (!stableReleaseJob
   || !stableReleaseJob.includes("inputs.publish")) {
   fail("manual stable publication must require publish=true while publish=false remains validation-only");
 }
-if (!releaseWorkflow.includes("semantic-release@25.0.9") || !releaseWorkflow.includes("@semantic-release/git@10.0.1")) {
+if (!releaseWorkflow.includes("semantic-release@25.0.9")) {
   fail("release tooling must be pinned in the isolated release job");
+}
+if (releaseWorkflow.includes("@semantic-release/git")) {
+  fail("the release job must not install the Git plugin that pushes version commits to main");
 }
 if (!releaseWorkflow.includes("node-version: [20, 22, 24]")
   || !releaseWorkflow.includes("node20-compat-smoke")) {
