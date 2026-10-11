@@ -224,7 +224,6 @@ jobs:
         run: >-
           npx --yes
           --package semantic-release@25.0.9
-          --package @semantic-release/git@10.0.1
           semantic-release
 
   v2-beta:
