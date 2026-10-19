@@ -1,6 +1,6 @@
 services:
   otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.161.0
+    image: otel/opentelemetry-collector-contrib:0.162.0-386
     command: ["--config=/etc/otelcol/config.yaml"]
     ports:
       - "4318:4318"
