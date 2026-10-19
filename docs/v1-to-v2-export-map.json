@@ -159,7 +159,7 @@
     "asyncInterruptible": {
       "kind": "value",
       "disposition": "v2-namespace",
-      "target": "brass-runtime/next#Effect.interruptible"
+      "target": "brass-runtime/next#Effect.async"
     },
     "asyncMap": {
       "kind": "value",

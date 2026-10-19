@@ -15,7 +15,7 @@ export const V2_NAMESPACE_MAPPINGS = new Map([
   ["mapError", "Effect.mapError"],
   ["asyncMapError", "Effect.mapError"],
   ["interruptible", "Effect.interruptible"],
-  ["asyncInterruptible", "Effect.interruptible"],
+  ["asyncInterruptible", "Effect.async"],
   ["uninterruptible", "Effect.uninterruptible"],
   ["uninterruptibleMask", "Effect.uninterruptibleMask"],
   ["sleep", "Effect.sleep"],

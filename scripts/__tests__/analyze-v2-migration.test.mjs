@@ -18,6 +18,18 @@ describe("v2 migration analyzer", () => {
     ]));
   });
 
+  it("maps asyncInterruptible to the constructor it aliases, not to the combinator", () => {
+    // v1 asyncInterruptible(register) is async(register); Effect.interruptible wraps an effect.
+    const report = analyzeSource("bridge.ts", `
+      import { asyncInterruptible, interruptible } from "brass-runtime";
+    `);
+
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ imported: "asyncInterruptible", replacement: "Effect.async", classification: "mapped" }),
+      expect.objectContaining({ imported: "interruptible", replacement: "Effect.interruptible", classification: "mapped" }),
+    ]));
+  });
+
   it("requires manual review for unknown, namespace, and default imports", () => {
     const report = analyzeSource("manual.ts", `
       import Brass, * as RuntimeApi from "brass-runtime";
