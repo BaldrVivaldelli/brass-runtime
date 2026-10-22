@@ -93,8 +93,9 @@ for (const surface of surfaces) {
     const separator = key.indexOf(".");
     const section = key.slice(0, separator);
     const dependency = key.slice(separator + 1);
-    if (manifest[section]?.[dependency] !== expected) {
-      failures.push(`${label} must declare ${dependency} as ${expected}`);
+    // Declarations are floors: Dependabot may raise them within the same line.
+    if (!declaresFloor(manifest[section]?.[dependency], expected)) {
+      failures.push(`${label} must declare ${dependency} as ${expected} or a higher ${expected[0]} range on the same line`);
     }
   }
   for (const [dependency, minimum] of Object.entries(surface.lockedMinimums)) {
@@ -157,6 +158,16 @@ function atLeast(actual, minimum) {
     if (left[index] < right[index]) return false;
   }
   return true;
+}
+
+function declaresFloor(actual, expected) {
+  const operator = expected[0];
+  if (typeof actual !== "string" || actual[0] !== operator) return false;
+  const left = numericVersion(actual.slice(1));
+  const right = numericVersion(expected.slice(1));
+  if (!left || !right || left[0] !== right[0]) return false;
+  if ((operator === "~" || right[0] === 0) && left[1] !== right[1]) return false;
+  return atLeast(actual.slice(1), expected.slice(1));
 }
 
 function numericVersion(value) {
