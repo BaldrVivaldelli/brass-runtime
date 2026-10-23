@@ -9,28 +9,29 @@ const surfaces = [
   {
     directory: ".",
     declarations: {},
-    lockedMinimums: {},
+    lockedMinimums: { vite: "8.1.6" },
   },
   {
     directory: "examples/angular",
     engine: "^20.19.0 || >=22.12.0",
     declarations: {
-      "dependencies.@angular/common": "^20.3.31",
-      "dependencies.@angular/core": "^20.3.31",
-      "dependencies.@angular/platform-browser": "^20.3.31",
+      "dependencies.@angular/common": "^20.3.34",
+      "dependencies.@angular/core": "^20.3.34",
+      "dependencies.@angular/platform-browser": "^20.3.34",
       "dependencies.rxjs": "^7.8.2",
       "dependencies.zone.js": "~0.15.1",
-      "devDependencies.@angular/build": "^20.3.39",
-      "devDependencies.@angular/cli": "^20.3.37",
-      "devDependencies.@angular/compiler-cli": "^20.3.31",
+      "devDependencies.@angular/build": "^20.3.41",
+      "devDependencies.@angular/cli": "^20.3.41",
+      "devDependencies.@angular/compiler-cli": "^20.3.34",
     },
     lockedMinimums: {
-      "@angular/common": "20.3.31",
-      "@angular/core": "20.3.31",
-      "@angular/platform-browser": "20.3.31",
-      "@angular/build": "20.3.39",
-      "@angular/cli": "20.3.37",
-      "@angular/compiler-cli": "20.3.31",
+      "@angular/common": "20.3.34",
+      "@angular/core": "20.3.34",
+      "@angular/platform-browser": "20.3.34",
+      "@angular/build": "20.3.41",
+      "@angular/cli": "20.3.41",
+      "@angular/compiler-cli": "20.3.34",
+      vite: "7.3.7",
     },
     localRuntime: true,
   },
@@ -38,25 +39,25 @@ const surfaces = [
     directory: "examples/nextjs",
     engine: ">=20.9.0",
     declarations: {
-      "dependencies.next": "^16.3.5",
-      "dependencies.react": "^19.1.1",
-      "dependencies.react-dom": "^19.1.1",
+      "dependencies.next": "^16.4.2",
+      "dependencies.react": "^19.3.1",
+      "dependencies.react-dom": "^19.3.1",
     },
-    lockedMinimums: { next: "16.3.5", react: "19.1.1", "react-dom": "19.1.1" },
+    lockedMinimums: { next: "16.4.2", react: "19.3.1", "react-dom": "19.3.1" },
     localRuntime: true,
   },
   {
     directory: "examples/nestjs",
     engine: ">=20",
     declarations: {
-      "dependencies.@nestjs/common": "^12.0.3",
-      "dependencies.@nestjs/core": "^12.0.3",
-      "dependencies.@nestjs/platform-express": "^12.0.3",
+      "dependencies.@nestjs/common": "^12.1.3",
+      "dependencies.@nestjs/core": "^12.1.3",
+      "dependencies.@nestjs/platform-express": "^12.1.3",
     },
     lockedMinimums: {
-      "@nestjs/common": "12.0.3",
-      "@nestjs/core": "12.0.3",
-      "@nestjs/platform-express": "12.0.3",
+      "@nestjs/common": "12.1.3",
+      "@nestjs/core": "12.1.3",
+      "@nestjs/platform-express": "12.1.3",
     },
     localRuntime: true,
   },
@@ -64,16 +65,16 @@ const surfaces = [
     directory: "examples/react",
     engine: "^18.0.0 || ^20.0.0 || >=22.0.0",
     declarations: {
-      "dependencies.react": "^19.1.1",
-      "dependencies.react-dom": "^19.1.1",
+      "dependencies.react": "^19.3.1",
+      "dependencies.react-dom": "^19.3.1",
       "devDependencies.@vitejs/plugin-react": "^4.7.0",
-      "devDependencies.vite": "^6.4.3",
+      "devDependencies.vite": "^6.4.4",
     },
     lockedMinimums: {
-      react: "19.1.1",
-      "react-dom": "19.1.1",
+      react: "19.3.1",
+      "react-dom": "19.3.1",
       "@vitejs/plugin-react": "4.7.0",
-      vite: "6.4.3",
+      vite: "6.4.4",
     },
     localRuntime: true,
   },
@@ -93,8 +94,9 @@ for (const surface of surfaces) {
     const separator = key.indexOf(".");
     const section = key.slice(0, separator);
     const dependency = key.slice(separator + 1);
-    if (manifest[section]?.[dependency] !== expected) {
-      failures.push(`${label} must declare ${dependency} as ${expected}`);
+    // Declarations are floors: Dependabot may raise them within the same line.
+    if (!declaresFloor(manifest[section]?.[dependency], expected)) {
+      failures.push(`${label} must declare ${dependency} as ${expected} or a higher ${expected[0]} range on the same line`);
     }
   }
   for (const [dependency, minimum] of Object.entries(surface.lockedMinimums)) {
@@ -157,6 +159,16 @@ function atLeast(actual, minimum) {
     if (left[index] < right[index]) return false;
   }
   return true;
+}
+
+function declaresFloor(actual, expected) {
+  const operator = expected[0];
+  if (typeof actual !== "string" || actual[0] !== operator) return false;
+  const left = numericVersion(actual.slice(1));
+  const right = numericVersion(expected.slice(1));
+  if (!left || !right || left[0] !== right[0]) return false;
+  if ((operator === "~" || right[0] === 0) && left[1] !== right[1]) return false;
+  return atLeast(actual.slice(1), expected.slice(1));
 }
 
 function numericVersion(value) {
